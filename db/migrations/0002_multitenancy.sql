@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS companies (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),code text UNIQUE NOT NULL,name text NOT NULL,active boolean NOT NULL DEFAULT true,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS dispatchers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),company_id uuid NOT NULL REFERENCES companies(id),name text NOT NULL,email text NOT NULL,password_hash text NOT NULL,active boolean NOT NULL DEFAULT true,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(company_id,email));
+INSERT INTO companies(code,name) VALUES ('LEGADO','Operação anterior') ON CONFLICT(code) DO NOTHING;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS company_id uuid REFERENCES companies(id);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS company_id uuid REFERENCES companies(id);
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS company_id uuid REFERENCES companies(id);
+UPDATE drivers SET company_id=(SELECT id FROM companies WHERE code='LEGADO') WHERE company_id IS NULL;
+UPDATE vehicles SET company_id=(SELECT id FROM companies WHERE code='LEGADO') WHERE company_id IS NULL;
+UPDATE routes SET company_id=(SELECT id FROM companies WHERE code='LEGADO') WHERE company_id IS NULL;
+ALTER TABLE drivers ALTER COLUMN company_id SET NOT NULL;
+ALTER TABLE vehicles ALTER COLUMN company_id SET NOT NULL;
+ALTER TABLE routes ALTER COLUMN company_id SET NOT NULL;
+ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS vehicles_plate_key;
+CREATE UNIQUE INDEX IF NOT EXISTS vehicles_company_plate_key ON vehicles(company_id,plate);
+CREATE INDEX IF NOT EXISTS drivers_company_idx ON drivers(company_id);
+CREATE INDEX IF NOT EXISTS routes_company_idx ON routes(company_id,route_date DESC);

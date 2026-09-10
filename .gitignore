@@ -1,2 +1,12 @@
 .DS_Store
 Thumbs.db
+.local-db/
+.next/
+.next-build/
+.next-verify/
+.next-corrupt-backup/
+.next-corrupt-backup-*/
+node_modules/
+tsconfig.tsbuildinfo
+.env
+.env.local

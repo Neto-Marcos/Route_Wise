@@ -1,0 +1,1 @@
+export default function Offline(){return <main className="center-page"><section className="card narrow"><div className="brand-icon">↗</div><h1>Você está offline</h1><p>Sua rota ativa e as entregas pendentes continuam disponíveis no aparelho. As atualizações serão enviadas quando a conexão voltar.</p><a className="button primary" href="/">Voltar para a rota</a></section></main>}
