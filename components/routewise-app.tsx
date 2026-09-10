@@ -468,19 +468,23 @@ function Pin({
   };
   return (
     <main className="center-page">
-      <form className="card narrow" onSubmit={submit}>
+      <form className="card narrow auth-card" onSubmit={submit}>
         <button type="button" className="back" onClick={onBack}>
           <ArrowLeft size={17} /> Voltar
         </button>
         <Logo />
         <h1>{register ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
         <p>{register ? "Crie a empresa e o primeiro gestor." : "Entre no ambiente da sua empresa."}</p>
-        {register && <><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome" required /></>}
-        <input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Código da empresa" required />
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" required />
-        <input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" required />
-        <button className="button primary">{register ? "Criar empresa" : "Entrar"}</button>
-        <button type="button" className="button" onClick={() => { setRegister(!register); setError(""); }}>{register ? "Já tenho uma empresa" : "Cadastrar nova empresa"}</button>
+        <div className="auth-fields">
+          {register && <><label><span>Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /></label><label><span>Seu nome</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como podemos chamar você?" required /></label></>}
+          <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
+          <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
+          <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={register ? "new-password" : "current-password"} required /></label>
+        </div>
+        <div className="auth-actions">
+          <button className="button primary">{register ? "Criar empresa" : "Entrar"}</button>
+          <button type="button" className="button auth-secondary" onClick={() => { setRegister(!register); setError(""); }}>{register ? "Já tenho uma empresa" : "Cadastrar nova empresa"}</button>
+        </div>
         {error && <p className="form-error">{error}</p>}
       </form>
     </main>

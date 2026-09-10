@@ -225,10 +225,82 @@ a {
 }
 .card.narrow .logo {
   justify-content: center;
-  margin: 18px;
+  margin: 8px 0 24px;
 }
 .card h1 {
   margin: 16px 0 7px;
+}
+.auth-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 34px;
+  overflow: hidden;
+}
+.auth-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--blue), #60a5fa);
+}
+.auth-card .back {
+  align-self: flex-start;
+  margin-bottom: 6px;
+}
+.auth-card h1 {
+  margin: 0 0 8px;
+  font-size: clamp(28px, 5vw, 36px);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+.auth-card > p {
+  margin: 0 0 26px;
+  line-height: 1.5;
+}
+.auth-fields {
+  display: grid;
+  gap: 15px;
+  width: 100%;
+  text-align: left;
+}
+.auth-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+}
+.auth-fields input {
+  width: 100%;
+  min-width: 0;
+  height: 50px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  font-size: 16px;
+}
+.auth-fields input::placeholder {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+.auth-actions {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  margin-top: 22px;
+}
+.auth-actions .button {
+  width: 100%;
+  min-height: 50px;
+}
+.auth-secondary {
+  border: 1px solid var(--line);
+  background: var(--card-subtle);
+  color: var(--ink);
+}
+.auth-secondary:hover {
+  background: var(--card-hover);
 }
 .back {
   display: flex;
@@ -1072,6 +1144,21 @@ textarea:focus {
   .access-icon {
     width: 50px;
     height: 50px;
+  }
+  .center-page {
+    align-items: start;
+    padding: 18px 14px;
+  }
+  .auth-card {
+    margin: auto 0;
+    padding: 26px 20px 22px;
+    border-radius: 20px;
+  }
+  .card.narrow .logo {
+    margin-bottom: 20px;
+  }
+  .auth-card > p {
+    margin-bottom: 22px;
   }
   .workspace {
     display: block;
@@ -3444,5 +3531,4 @@ textarea:focus {
   align-items: center;
   gap: 8px;
 }
-
 
