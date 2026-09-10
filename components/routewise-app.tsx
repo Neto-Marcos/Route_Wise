@@ -191,15 +191,6 @@ function TopNavBar({
       <nav className="top-nav-tabs" aria-label="Portais do sistema">
         <button
           type="button"
-          className={`top-nav-tab ${activePortal === "planner" ? "active" : ""}`}
-          onClick={() => setActivePortal("planner")}
-        >
-          <MapIcon size={16} />
-          <span>Planejador de Rotas</span>
-        </button>
-
-        <button
-          type="button"
           className={`top-nav-tab ${activePortal === "dispatcher" ? "active" : ""}`}
           onClick={() => setActivePortal("dispatcher")}
         >
