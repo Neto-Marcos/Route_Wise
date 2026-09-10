@@ -1323,14 +1323,14 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
-  background: #f8fafc;
+  background: var(--card-subtle);
 }
 .fleet-map-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: #ffffff;
+  background: var(--card);
   border-bottom: 1px solid var(--line);
 }
 .fleet-map-info {
@@ -2276,20 +2276,34 @@ textarea:focus {
   .live-fleet-panel {
     display: none !important;
   }
-  .planner-print-sheet {
-    display: block !important;
-    position: absolute !important;
-    inset: 0 auto auto 0 !important;
-    width: 100% !important;
-    color: #0f172a !important;
-    background: #fff !important;
-    font-family: Arial, sans-serif;
-  }
   .planner-fullscreen {
     display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
+    background: #ffffff !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .planner-fullscreen .planner-panel,
+  .planner-fullscreen .planner-map {
+    display: none !important;
+  }
+  .planner-print-sheet {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    color: #0f172a !important;
+    background: #ffffff !important;
+    font-family: Arial, sans-serif;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
   }
   .planner-print-header {
     display: grid;
@@ -2354,7 +2368,7 @@ textarea:focus {
   margin-bottom: 12px;
   padding: 12px;
   border-radius: 12px;
-  background: #f8fafc;
+  background: var(--card-subtle);
   border: 1px solid var(--line);
 }
 .filter-input-search {
@@ -2375,7 +2389,8 @@ textarea:focus {
   padding: 6px 30px 6px 34px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #ffffff;
+  background: var(--card);
+  color: var(--ink);
   font-size: 13px;
 }
 .filter-input-search button {
@@ -2396,7 +2411,7 @@ textarea:focus {
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #ffffff;
+  background: var(--card);
   font-size: 13px;
   color: var(--ink);
 }
@@ -2405,16 +2420,16 @@ textarea:focus {
   align-items: center;
   gap: 4px;
   padding: 7px 11px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
-  color: #64748b;
+  background: var(--card);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 .clear-filters-btn:hover {
-  background: #f1f5f9;
+  background: var(--card-hover);
   color: var(--ink);
 }
 .filter-summary-row {
@@ -2434,8 +2449,9 @@ textarea:focus {
   display: flex;
   padding: 3px;
   border-radius: 9px;
-  background: #eef2f8;
+  background: var(--card-subtle);
   gap: 3px;
+  border: 1px solid var(--line);
 }
 .registry-filter-tabs button {
   padding: 5px 12px;
@@ -2448,9 +2464,9 @@ textarea:focus {
   cursor: pointer;
 }
 .registry-filter-tabs button.active {
-  background: #ffffff;
+  background: var(--card);
   color: var(--ink);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 .registry-info {
   display: flex;
