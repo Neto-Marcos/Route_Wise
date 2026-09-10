@@ -91,6 +91,37 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         },
       });
     }
+    if (p[0] === "session" && p[1] === "me") {
+      const session = await getSession(requestedRole(req));
+      if (!session) return json({ authenticated: false }, 200);
+      let companyCode = "";
+      let companyName = "";
+      if (session.companyId) {
+        const comp = await query("SELECT code, name FROM companies WHERE id=$1", [session.companyId]);
+        if (comp.rows[0]) {
+          companyCode = comp.rows[0].code;
+          companyName = comp.rows[0].name;
+        }
+      }
+      return json({
+        authenticated: true,
+        role: session.role,
+        companyId: session.companyId,
+        companyCode,
+        companyName,
+        dispatcherId: session.dispatcherId,
+        driverId: session.driverId,
+      });
+    }
+    if (p[0] === "dispatchers" && p.length === 1) {
+      const session = await getSession(requestedRole(req));
+      if (!session || session.role !== "dispatcher") return json({ error: "Acesso restrito" }, 403);
+      const { rows } = await query(
+        "SELECT id, name, email, active, created_at FROM dispatchers WHERE company_id=$1 ORDER BY active DESC, created_at ASC",
+        [session.companyId],
+      );
+      return json(rows);
+    }
     if (p[0] === "drivers" && p.length === 1) {
       const sp = req.nextUrl.searchParams;
       const all = sp.get("all") === "true";
@@ -340,6 +371,27 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const isDispatcher = session?.role === "dispatcher";
 
     if (!session && !isDispatcher) return json({ error: "Sessão necessária" }, 401);
+    if (p[0] === "dispatchers" && isDispatcher) {
+      const name = String(data.name || "").trim();
+      const email = String(data.email || "").trim().toLowerCase();
+      const password = String(data.password || "");
+      if (!name || !email.includes("@") || password.length < 6)
+        return json({ error: "Preencha nome, e-mail válido e senha com no mínimo 6 caracteres" }, 400);
+
+      const existing = await query(
+        "SELECT 1 FROM dispatchers WHERE company_id=$1 AND lower(email)=$2",
+        [session!.companyId, email],
+      );
+      if (existing.rows[0])
+        return json({ error: "Já existe um gestor com este e-mail nesta empresa" }, 409);
+
+      const { rows } = await query(
+        "INSERT INTO dispatchers(company_id,name,email,password_hash) VALUES($1,$2,$3,$4) RETURNING id,name,email,active,created_at",
+        [session!.companyId, name, email, await hash(password, 10)],
+      );
+      await audit("dispatcher", session!.dispatcherId || null, "create", "dispatcher", rows[0].id);
+      return json(rows[0], 201);
+    }
     if (p[0] === "drivers" && isDispatcher) {
       if (!/^\d{4,8}$/.test(String(data.password || "")))
         return json({ error: "Defina uma senha numérica de 4 a 8 dígitos" }, 400);
@@ -643,6 +695,46 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return json(rows[0]);
     }
 
+    if (p[0] === "dispatchers" && p[1]) {
+      const data = await body(req);
+      const name = String(data.name || "").trim();
+      const email = String(data.email || "").trim().toLowerCase();
+      const active = data.active !== false;
+      if (!name || !email.includes("@"))
+        return json({ error: "Nome e e-mail válidos são obrigatórios" }, 400);
+
+      if (session.dispatcherId === p[1] && !active) {
+        return json({ error: "Você não pode desativar o seu próprio usuário gestor conectado." }, 400);
+      }
+
+      const checkEmail = await query(
+        "SELECT id FROM dispatchers WHERE company_id=$1 AND lower(email)=$2 AND id<>$3",
+        [session.companyId, email, p[1]],
+      );
+      if (checkEmail.rows[0]) {
+        return json({ error: "Já existe outro gestor com este e-mail nesta empresa" }, 409);
+      }
+
+      if (data.password && String(data.password).length >= 6) {
+        const passHash = await hash(String(data.password), 10);
+        const { rows } = await query(
+          "UPDATE dispatchers SET name=$1, email=$2, active=$3, password_hash=$4 WHERE id=$5 AND company_id=$6 RETURNING id,name,email,active,created_at",
+          [name, email, active, passHash, p[1], session.companyId],
+        );
+        if (!rows[0]) return json({ error: "Gestor não encontrado" }, 404);
+        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, password_changed: true });
+        return json(rows[0]);
+      } else {
+        const { rows } = await query(
+          "UPDATE dispatchers SET name=$1, email=$2, active=$3 WHERE id=$4 AND company_id=$5 RETURNING id,name,email,active,created_at",
+          [name, email, active, p[1], session.companyId],
+        );
+        if (!rows[0]) return json({ error: "Gestor não encontrado" }, 404);
+        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, password_changed: false });
+        return json(rows[0]);
+      }
+    }
+
     return json({ error: "Não encontrado" }, 404);
   } catch (e: any) {
     if (e?.code === "23505" || String(e?.message).includes("vehicles_plate_key")) {
@@ -674,6 +766,18 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       );
       if (!rows[0]) return json({ error: "Veículo não encontrado" }, 404);
       await audit("dispatcher", null, "inactivate", "vehicle", p[1]);
+      return json({ ok: true });
+    }
+    if (p[0] === "dispatchers" && p[1]) {
+      if (session.dispatcherId === p[1]) {
+        return json({ error: "Você não pode desativar o seu próprio usuário gestor conectado." }, 400);
+      }
+      const { rows } = await query(
+        "UPDATE dispatchers SET active=false WHERE id=$1 AND company_id=$2 RETURNING id",
+        [p[1], session.companyId],
+      );
+      if (!rows[0]) return json({ error: "Gestor não encontrado" }, 404);
+      await audit("dispatcher", session.dispatcherId || null, "inactivate", "dispatcher", p[1]);
       return json({ ok: true });
     }
     return json({ error: "Não encontrado" }, 404);

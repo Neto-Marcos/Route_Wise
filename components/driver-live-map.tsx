@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, Crosshair, MapPin, Navigation } from "lucide-react";
 
@@ -235,6 +235,15 @@ export function DriverLiveMap({
         </div>
       </div>
       <div ref={mapElement} className="leaflet-driver-map" />
+      {expanded && (
+        <button
+          type="button"
+          className="driver-map-floating-close"
+          onClick={() => setExpanded(false)}
+        >
+          <ChevronUp size={15} /> Recolher mapa
+        </button>
+      )}
     </div>
   );
 }

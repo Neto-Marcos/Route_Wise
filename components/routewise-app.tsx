@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Building2,
   Calendar,
   Camera,
   Check,
@@ -14,7 +15,9 @@ import {
   Eye,
   FileText,
   Filter,
+  KeyRound,
   LocateFixed,
+  Mail,
   Map as MapIcon,
   MapPin,
   Navigation,
@@ -28,7 +31,9 @@ import {
   Send,
   Settings,
   Share2,
+  ShieldCheck,
   SlidersHorizontal,
+  Moon,
   Sun,
   Trash2,
   Truck,
@@ -44,6 +49,14 @@ import { LiveFleetMap } from "./live-fleet-map";
 import { DriverLiveMap } from "./driver-live-map";
 import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
+
+type DispatcherUser = {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+  created_at: string;
+};
 
 type Driver = {
   id: string;
@@ -223,7 +236,7 @@ function TopNavBar({
           title={`Alternar para tema ${theme === "dark" ? "claro" : "escuro"}`}
           aria-label="Alternar tema"
         >
-          {theme === "dark" ? "☀️" : "🌙"}
+          {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
         </button>
 
         <div
@@ -517,17 +530,62 @@ function DriverPicker({
   onPick: (d: Driver) => void;
 }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [companyCode, setCompanyCode] = useState("");
+  const [companyCode, setCompanyCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("rw_company_code") || "";
+    }
+    return "";
+  });
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [filterSearch, setFilterSearch] = useState("");
+
+  const fetchDrivers = useCallback((code: string) => {
+    if (code.length < 3) {
+      setDrivers([]);
+      return;
+    }
+    setLoading(true);
+    api(`/api/drivers?company=${encodeURIComponent(code)}`)
+      .then((data) => {
+        setDrivers(data);
+        setError("");
+      })
+      .catch((e) => {
+        setDrivers([]);
+        setError(e.message);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
   useEffect(() => {
-    if (companyCode.length < 3) { setDrivers([]); return; }
-    const timer = window.setTimeout(() => api(`/api/drivers?company=${encodeURIComponent(companyCode)}`)
-      .then(setDrivers)
-      .catch((e) => setError(e.message)), 350);
-    return () => window.clearTimeout(timer);
-  }, [companyCode]);
+    if (companyCode.length >= 3) {
+      const timer = window.setTimeout(() => {
+        fetchDrivers(companyCode);
+      }, 300);
+      return () => window.clearTimeout(timer);
+    } else {
+      setDrivers([]);
+    }
+  }, [companyCode, fetchDrivers]);
+
+  const handleCompanyCodeChange = (val: string) => {
+    const formatted = val.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    setCompanyCode(formatted);
+    setSelectedDriver(null);
+    setError("");
+    if (typeof window !== "undefined") {
+      if (formatted) localStorage.setItem("rw_company_code", formatted);
+    }
+  };
+
+  const filteredDrivers = drivers.filter((d) => {
+    if (!filterSearch) return true;
+    return d.name.toLowerCase().includes(filterSearch.toLowerCase());
+  });
+
   const pick = async () => {
     if (!selectedDriver) return;
     try {
@@ -536,37 +594,157 @@ function DriverPicker({
         body: JSON.stringify({ companyCode, driverId: selectedDriver.id, password }),
       });
       sessionStorage.setItem("rw_role", "driver");
+      if (typeof window !== "undefined") {
+        localStorage.setItem("rw_company_code", companyCode);
+      }
       onPick(selectedDriver);
     } catch (e) {
       setError((e as Error).message);
     }
   };
+
+  const getAvatarGradient = (name: string) => {
+    const gradients = [
+      "linear-gradient(135deg, #3b82f6, #1d4ed8)",
+      "linear-gradient(135deg, #10b981, #047857)",
+      "linear-gradient(135deg, #8b5cf6, #6d28d9)",
+      "linear-gradient(135deg, #f59e0b, #d97706)",
+      "linear-gradient(135deg, #06b6d4, #0e7490)",
+      "linear-gradient(135deg, #ec4899, #be185d)",
+    ];
+    let sum = 0;
+    for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
+    return gradients[sum % gradients.length];
+  };
+
   return (
     <main className="center-page">
-      <section className="card picker">
+      <section className="card auth-card picker-card">
         <button className="back" onClick={onBack}>
           <ArrowLeft size={17} /> Voltar
         </button>
         <Logo />
         <h1>Quem está dirigindo?</h1>
-        <p>Informe a empresa e selecione seu perfil.</p>
-        <input value={companyCode} onChange={(e) => { setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "")); setSelectedDriver(null); setError(""); }} placeholder="Código da empresa" />
-        <div className="profile-list">
-          {drivers.map((d) => (
-            <button key={d.id} onClick={() => { setSelectedDriver(d); setPassword(""); setError(""); }}>
-              <span>{d.name.slice(0, 2).toUpperCase()}</span>
-              <b>{d.name}</b>
-              <ChevronRight />
-            </button>
-          ))}
+        <p>Informe o código da sua empresa e selecione seu perfil de motorista.</p>
+
+        <div className="picker-company-field">
+          <label>
+            <span>
+              <Building2 size={15} /> Código da Empresa
+            </span>
+            <div className="picker-input-wrap">
+              <input
+                autoFocus={!companyCode}
+                value={companyCode}
+                onChange={(e) => handleCompanyCodeChange(e.target.value)}
+                placeholder="Ex.: MINHA-EMPRESA"
+                autoComplete="organization"
+              />
+              {companyCode && (
+                <button
+                  type="button"
+                  className="picker-clear-btn"
+                  onClick={() => handleCompanyCodeChange("")}
+                  title="Limpar código"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </label>
         </div>
-        {!drivers.length && !error && companyCode.length >= 3 && (
-          <Empty text="Nenhum motorista encontrado nesta empresa." />
+
+        {loading && (
+          <div className="picker-loading">
+            <span className="spinner" /> Carregando equipe de motoristas...
+          </div>
         )}
+
+        {drivers.length > 2 && (
+          <div className="picker-search-wrap">
+            <Search size={15} className="picker-search-icon" />
+            <input
+              type="text"
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              placeholder="Buscar motorista por nome..."
+              className="picker-search-input"
+            />
+            {filterSearch && (
+              <button
+                type="button"
+                className="picker-search-clear"
+                onClick={() => setFilterSearch("")}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {drivers.length > 0 && (
+          <div className="profile-list">
+            {filteredDrivers.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                className="profile-item"
+                onClick={() => {
+                  setSelectedDriver(d);
+                  setPassword("");
+                  setError("");
+                }}
+              >
+                <span
+                  className="profile-avatar"
+                  style={{ background: getAvatarGradient(d.name) }}
+                >
+                  {d.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div className="profile-details">
+                  <b>{d.name}</b>
+                  <small>{d.phone || "Motorista cadastrado"}</small>
+                </div>
+                <ChevronRight size={18} className="profile-chevron" />
+              </button>
+            ))}
+            {filterSearch && filteredDrivers.length === 0 && (
+              <p className="no-filter-match">Nenhum motorista com o nome &quot;{filterSearch}&quot;.</p>
+            )}
+          </div>
+        )}
+
+        {!drivers.length && !loading && companyCode.length >= 3 && !error && (
+          <div className="picker-empty-box">
+            <Truck size={32} />
+            <p>Nenhum motorista ativo encontrado nesta empresa.</p>
+            <small>Verifique com o gestor da empresa se o seu cadastro foi realizado.</small>
+          </div>
+        )}
+
+        {companyCode.length < 3 && (
+          <div className="picker-guide-box">
+            <Building2 size={28} />
+            <p>Digite o código da sua empresa acima para visualizar a lista de motoristas disponíveis.</p>
+          </div>
+        )}
+
         {error && <p className="form-error">{error}</p>}
+
         {selectedDriver && (
           <Modal title={`Acessar como ${selectedDriver.name}`} onClose={() => setSelectedDriver(null)}>
             <form className="form-grid driver-pin-form" onSubmit={(e) => { e.preventDefault(); pick(); }}>
+              {/* Campo oculto com nome do motorista para o Gerenciador de Senhas do Google salvar */}
+              <input
+                type="text"
+                name="username"
+                value={selectedDriver.name}
+                autoComplete="username"
+                tabIndex={-1}
+                aria-hidden="true"
+                style={{ position: "absolute", opacity: 0, pointerEvents: "none", height: 0, width: 0 }}
+                readOnly
+              />
               <label>
                 Senha numérica de acesso
                 <input
@@ -579,6 +757,7 @@ function DriverPicker({
                   onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
                   placeholder="••••"
                   className="driver-pin-input"
+                  autoComplete="current-password"
                   required
                 />
               </label>
@@ -635,17 +814,353 @@ function DriverPicker({
   );
 }
 
+function DispatchersPanel({
+  dispatchers,
+  sessionInfo,
+  reload,
+}: {
+  dispatchers: DispatcherUser[];
+  sessionInfo: { companyCode?: string; companyName?: string; dispatcherId?: string } | null;
+  reload: () => Promise<void>;
+}) {
+  const [openCreate, setOpenCreate] = useState(false);
+  const [editing, setEditing] = useState<DispatcherUser | null>(null);
+  const [filter, setFilter] = useState<"all" | "active" | "inactive">("active");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const filteredItems = dispatchers
+    .filter((d) => {
+      if (filter === "active") return d.active !== false;
+      if (filter === "inactive") return d.active === false;
+      return true;
+    })
+    .filter((d) => {
+      if (!searchTerm) return true;
+      const q = searchTerm.toLowerCase();
+      return d.name.toLowerCase().includes(q) || d.email.toLowerCase().includes(q);
+    });
+
+  const copyCode = () => {
+    if (!sessionInfo?.companyCode) return;
+    navigator.clipboard.writeText(sessionInfo.companyCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const submitCreate = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api("/api/dispatchers", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.get("name"),
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      });
+      setOpenCreate(false);
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitEdit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editing) return;
+    setError("");
+    setBusy(true);
+    const form = new FormData(e.currentTarget);
+    const password = form.get("password");
+    try {
+      await api(`/api/dispatchers/${editing.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: form.get("name"),
+          email: form.get("email"),
+          password: password ? String(password) : undefined,
+          active: form.get("active") === "on",
+        }),
+      });
+      setEditing(null);
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async (d: DispatcherUser) => {
+    if (d.id === sessionInfo?.dispatcherId) {
+      alert("Você não pode desativar seu próprio usuário conectado.");
+      return;
+    }
+    const nextActive = d.active === false;
+    const confirmMsg = nextActive
+      ? `Reativar o acesso do gestor ${d.name}?`
+      : `Desativar o acesso de ${d.name}? Este gestor não poderá mais entrar na Central.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await api(`/api/dispatchers/${d.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...d,
+          active: nextActive,
+        }),
+      });
+      await reload();
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  return (
+    <section className="panel dispatchers-panel">
+      {sessionInfo?.companyCode && (
+        <div className="company-code-banner">
+          <div className="company-code-content">
+            <Building2 size={22} className="banner-icon" />
+            <div>
+              <b>Código da Empresa: <span className="highlight-code">{sessionInfo.companyCode}</span></b>
+              <p>Compartilhe este código com os novos gestores para que eles entrem na Central informando seus respectivos e-mails e senhas.</p>
+            </div>
+          </div>
+          <button type="button" className="button secondary compact" onClick={copyCode}>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? "Código copiado!" : "Copiar código"}
+          </button>
+        </div>
+      )}
+
+      <div className="panel-title">
+        <div>
+          <h2>Equipe de Gestão e Operações</h2>
+          <p>{filteredItems.length} de {dispatchers.length} gestor(es) cadastrado(s)</p>
+        </div>
+        <div className="panel-actions-group">
+          <div className="registry-filter-tabs">
+            <button
+              type="button"
+              className={filter === "active" ? "active" : ""}
+              onClick={() => setFilter("active")}
+            >
+              Ativos
+            </button>
+            <button
+              type="button"
+              className={filter === "inactive" ? "active" : ""}
+              onClick={() => setFilter("inactive")}
+            >
+              Inativos
+            </button>
+            <button
+              type="button"
+              className={filter === "all" ? "active" : ""}
+              onClick={() => setFilter("all")}
+            >
+              Todos
+            </button>
+          </div>
+          <button
+            className="button primary compact"
+            onClick={() => {
+              setError("");
+              setOpenCreate(true);
+            }}
+          >
+            <Plus size={15} /> Novo Gestor
+          </button>
+        </div>
+      </div>
+
+      {dispatchers.length > 3 && (
+        <div className="panel-search-bar">
+          <Search size={15} />
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar gestor por nome ou e-mail..."
+          />
+          {searchTerm && (
+            <button type="button" className="clear-search" onClick={() => setSearchTerm("")}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="registry-grid">
+        {filteredItems.map((d) => {
+          const isActive = d.active !== false;
+          const isSelf = d.id === sessionInfo?.dispatcherId;
+
+          return (
+            <article key={d.id} className={!isActive ? "item-inactive" : ""}>
+              <span className={`avatar dispatcher-avatar ${!isActive ? "inactive" : ""}`}>
+                {d.name.slice(0, 2).toUpperCase()}
+              </span>
+              <div className="registry-info">
+                <div className="registry-name-line">
+                  <b>{d.name}</b>
+                  {isSelf && (
+                    <span className="self-user-badge" title="Sua conta conectada no momento">
+                      Você
+                    </span>
+                  )}
+                  <span className={`registry-status-pill ${isActive ? "active" : "inactive"}`}>
+                    {isActive ? "Ativo" : "Inativo"}
+                  </span>
+                </div>
+                <small className="dispatcher-email">
+                  <Mail size={12} /> {d.email}
+                </small>
+                {d.created_at && (
+                  <small className="dispatcher-date">
+                    Cadastrado em {new Date(d.created_at).toLocaleDateString("pt-BR")}
+                  </small>
+                )}
+              </div>
+              <div className="registry-item-actions">
+                <button
+                  type="button"
+                  className="btn-action-icon"
+                  title="Editar dados e senha do gestor"
+                  onClick={() => {
+                    setError("");
+                    setEditing(d);
+                  }}
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={`btn-action-icon ${isActive ? "danger" : "success"}`}
+                  title={isSelf ? "Você não pode desativar o seu próprio usuário" : (isActive ? "Desativar acesso" : "Reativar acesso")}
+                  disabled={isSelf}
+                  onClick={() => toggleActive(d)}
+                >
+                  <Power size={15} />
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      {!filteredItems.length && (
+        <Empty
+          text={
+            searchTerm
+              ? `Nenhum gestor encontrado para "${searchTerm}".`
+              : filter === "inactive"
+                ? "Nenhum gestor inativo."
+                : "Nenhum gestor cadastrado nesta empresa."
+          }
+        />
+      )}
+
+      {/* Modal Criar Gestor */}
+      {openCreate && (
+        <Modal title="Cadastrar Novo Gestor" onClose={() => setOpenCreate(false)}>
+          <form onSubmit={submitCreate} className="form-grid">
+            <div className="modal-info-box">
+              <ShieldCheck size={20} />
+              <p>O novo gestor terá acesso à Central de Operações da sua empresa para planejar e gerenciar rotas e motoristas.</p>
+            </div>
+            <label>
+              Nome completo do gestor
+              <input name="name" required placeholder="Ex.: Mariana Rodrigues" autoFocus />
+            </label>
+            <label>
+              E-mail de acesso (login)
+              <input name="email" type="email" required placeholder="mariana@empresa.com" autoComplete="email" />
+            </label>
+            <label>
+              Senha inicial de acesso
+              <input
+                name="password"
+                type="password"
+                minLength={6}
+                required
+                placeholder="Mínimo de 6 caracteres"
+                autoComplete="new-password"
+              />
+            </label>
+            <button disabled={busy} className="button primary">
+              {busy ? "Cadastrando…" : "Cadastrar Gestor"}
+            </button>
+            {error && <p className="form-error">{error}</p>}
+          </form>
+        </Modal>
+      )}
+
+      {/* Modal Editar Gestor */}
+      {editing && (
+        <Modal title={`Editar Gestor: ${editing.name}`} onClose={() => setEditing(null)}>
+          <form onSubmit={submitEdit} className="form-grid">
+            <label>
+              Nome completo
+              <input name="name" defaultValue={editing.name} required />
+            </label>
+            <label>
+              E-mail de acesso
+              <input name="email" type="email" defaultValue={editing.email} required />
+            </label>
+            <label>
+              Nova senha de acesso (opcional)
+              <input
+                name="password"
+                type="password"
+                minLength={6}
+                placeholder="Deixe em branco para manter a senha atual"
+                autoComplete="new-password"
+              />
+            </label>
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                name="active"
+                defaultChecked={editing.active !== false}
+                disabled={editing.id === sessionInfo?.dispatcherId}
+              />
+              <span>
+                Cadastro ativo {editing.id === sessionInfo?.dispatcherId ? "(Você não pode desativar seu próprio acesso)" : ""}
+              </span>
+            </label>
+            <button disabled={busy} className="button primary">
+              {busy ? "Salvando…" : "Salvar Alterações"}
+            </button>
+            {error && <p className="form-error">{error}</p>}
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function Dispatcher({
   onExit,
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles">(
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers">(
     "overview",
   );
   const [routes, setRoutes] = useState<RouteData[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [dispatchers, setDispatchers] = useState<DispatcherUser[]>([]);
+  const [sessionInfo, setSessionInfo] = useState<{ companyCode?: string; companyName?: string; dispatcherId?: string } | null>(null);
   const [message, setMessage] = useState("");
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
@@ -657,11 +1172,15 @@ function Dispatcher({
         api("/api/routes"),
         api("/api/drivers?all=true"),
         api("/api/vehicles"),
+        api("/api/dispatchers").catch(() => []),
+        api("/api/session/me").catch(() => null),
       ])
-        .then(([r, d, v]) => {
+        .then(([r, d, v, disp, sess]) => {
           setRoutes(r);
           setDrivers(d);
           setVehicles(v);
+          if (Array.isArray(disp)) setDispatchers(disp);
+          if (sess) setSessionInfo(sess);
         })
         .catch((e) => setMessage(e.message)),
     [],
@@ -696,6 +1215,7 @@ function Dispatcher({
             ["routes", "Rotas", <Navigation key="r" />],
             ["people", "Motoristas", <Users key="p" />],
             ["vehicles", "Veículos", <Truck key="v" />],
+            ["dispatchers", "Gestores", <ShieldCheck key="g" />],
           ].map(([id, label, icon]) => (
             <button
               key={id as string}
@@ -724,7 +1244,9 @@ function Dispatcher({
                   ? "Planejamento e Histórico de Rotas"
                   : tab === "people"
                     ? "Equipe de Motoristas"
-                    : "Frota de Veículos"}
+                    : tab === "vehicles"
+                      ? "Frota de Veículos"
+                      : "Gestores e Coordenadores"}
             </h1>
           </div>
           <span className="live">
@@ -760,6 +1282,13 @@ function Dispatcher({
         )}{" "}
         {tab === "vehicles" && (
           <Registry kind="vehicle" reload={load} items={vehicles} />
+        )}{" "}
+        {tab === "dispatchers" && (
+          <DispatchersPanel
+            dispatchers={dispatchers}
+            sessionInfo={sessionInfo}
+            reload={load}
+          />
         )}
       </main>
 
@@ -2336,7 +2865,21 @@ function RoutePlannerView({
       </div>
 
       <section className="planner-map" aria-label="Mapa da rota">
-        <RouteMap stops={stops} geometry={geometry} />
+        {mobileShowMap && (
+          <div className="planner-map-mobile-bar">
+            <button
+              type="button"
+              className="planner-map-back-btn"
+              onClick={() => setMobileShowMap(false)}
+            >
+              <ArrowLeft size={16} /> Voltar para lista de paradas
+            </button>
+            <span className="planner-map-stops-badge">
+              {stops.length} {stops.length === 1 ? "parada" : "paradas"}
+            </span>
+          </div>
+        )}
+        <RouteMap stops={stops} geometry={geometry} visible={mobileShowMap} />
       </section>
 
       <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
@@ -2398,7 +2941,7 @@ function formatRouteTime(seconds: number) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
 }
 
-function RouteMap({ stops, geometry }: { stops: Stop[]; geometry: [number, number][] }) {
+function RouteMap({ stops, geometry, visible }: { stops: Stop[]; geometry: [number, number][]; visible?: boolean }) {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
@@ -2470,6 +3013,24 @@ function RouteMap({ stops, geometry }: { stops: Stop[]; geometry: [number, numbe
       }
     };
   }, []);
+
+  // When switching visibility or stops change, recalculate Leaflet viewport
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map) {
+      const timer = setTimeout(() => {
+        map.invalidateSize();
+        if (stops.length > 0 && leafletRef.current) {
+          const validStops = stops.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+          if (validStops.length > 0) {
+            const bounds = leafletRef.current.latLngBounds(validStops.map((s) => [s.lat, s.lng]));
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+          }
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, stops]);
 
   // Update layer contents whenever stops, geometry, or mapReady changes
   useEffect(() => {
