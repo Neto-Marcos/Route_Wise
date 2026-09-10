@@ -14,6 +14,10 @@ type Ctx = { params: Promise<{ path: string[] }> };
 const json = (data: unknown, status = 200) =>
   NextResponse.json(data, { status });
 async function body(req: NextRequest) {
+  const ct = req.headers.get("content-type") || "";
+  if (ct.includes("multipart/form-data") || ct.includes("application/octet-stream")) {
+    return {};
+  }
   try {
     return await req.json();
   } catch {
@@ -73,23 +77,51 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p[0] === "uploads" && p[1] === "local") {
       const rawKey = p.slice(2).join("/");
       const key = decodeURIComponent(rawKey);
-      const safeName = encodeURIComponent(key);
-      const filePath = resolve(process.cwd(), ".local-db", "uploads", safeName);
-      if (!existsSync(filePath)) {
-        return json({ error: "Arquivo não encontrado" }, 404);
+
+      // 1. Check PostgreSQL upload_objects database first (resilient against container restarts)
+      try {
+        const { rows } = await query(
+          "SELECT content_type, file_data FROM upload_objects WHERE object_key=$1",
+          [key],
+        );
+        if (rows[0]?.file_data) {
+          const buf = Buffer.isBuffer(rows[0].file_data)
+            ? rows[0].file_data
+            : Buffer.from(rows[0].file_data);
+          return new NextResponse(buf, {
+            headers: {
+              "Content-Type": rows[0].content_type || "image/jpeg",
+              "Cache-Control": "public, max-age=86400",
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn("DB upload fetch notice:", dbErr);
       }
-      const fileData = await readFile(filePath);
-      const { rows } = await query(
-        "SELECT content_type FROM upload_objects WHERE object_key=$1",
-        [key],
-      );
-      const ct = rows[0]?.content_type || "image/jpeg";
-      return new NextResponse(fileData, {
-        headers: {
-          "Content-Type": ct,
-          "Cache-Control": "public, max-age=86400",
-        },
-      });
+
+      // 2. Fallback to filesystem if present
+      const safeName = encodeURIComponent(key);
+      const candidates = [
+        resolve(process.cwd(), ".local-db", "uploads", safeName),
+        resolve("/tmp", "uploads", safeName),
+      ];
+      for (const filePath of candidates) {
+        if (existsSync(filePath)) {
+          const fileData = await readFile(filePath);
+          const { rows } = await query(
+            "SELECT content_type FROM upload_objects WHERE object_key=$1",
+            [key],
+          );
+          const ct = rows[0]?.content_type || "image/jpeg";
+          return new NextResponse(fileData, {
+            headers: {
+              "Content-Type": ct,
+              "Cache-Control": "public, max-age=86400",
+            },
+          });
+        }
+      }
+      return json({ error: "Arquivo não encontrado" }, 404);
     }
     if (p[0] === "session" && p[1] === "me") {
       const session = await getSession(requestedRole(req));
@@ -183,7 +215,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await query(
-        `SELECT r.*, to_char(r.route_date, 'YYYY-MM-DD') route_date, d.name driver_name,v.name vehicle_name,v.plate,
+        `SELECT r.*, to_char(r.route_date, 'YYYY-MM-DD') route_date, d.name driver_name,v.name vehicle_name,v.plate,v.current_odometer vehicle_odometer,
         (SELECT count(*) FROM route_stops s WHERE s.route_id=r.id AND NOT s.is_origin AND s.position > 0) deliveries,
         (SELECT count(*) FROM route_stops s WHERE s.route_id=r.id AND s.status='delivered' AND NOT s.is_origin AND s.position > 0) delivered,
         (SELECT json_build_object('lat',l.lat,'lng',l.lng,'recorded_at',l.recorded_at) FROM location_points l WHERE l.route_id=r.id ORDER BY l.recorded_at DESC LIMIT 1) last_location
@@ -204,7 +236,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     if (p[0] === "routes" && p[1]) {
       const { rows } = await query(
-        `SELECT r.*, to_char(r.route_date, 'YYYY-MM-DD') route_date, d.name driver_name,v.name vehicle_name,v.plate,
+        `SELECT r.*, to_char(r.route_date, 'YYYY-MM-DD') route_date, d.name driver_name,v.name vehicle_name,v.plate,v.current_odometer vehicle_odometer,
         (SELECT count(*) FROM route_stops s WHERE s.route_id=r.id AND NOT s.is_origin AND s.position > 0) deliveries,
         (SELECT count(*) FROM route_stops s WHERE s.route_id=r.id AND s.status='delivered' AND NOT s.is_origin AND s.position > 0) delivered
         FROM routes r LEFT JOIN drivers d ON d.id=r.driver_id LEFT JOIN vehicles v ON v.id=r.vehicle_id WHERE (r.id::text=$1 OR r.public_id::text=$1) AND r.company_id=$2`,
@@ -367,6 +399,62 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       );
       return json({ key, url: await uploadUrl(key, contentType) });
     }
+    if (p[0] === "uploads" && p[1] === "direct") {
+      const s = await getSession(requestedRole(req));
+      if (!s) return json({ error: "Sessão necessária" }, 401);
+
+      let kind = "proof";
+      let contentType = "image/jpeg";
+      let buf: Buffer | null = null;
+
+      if (req.headers.get("content-type")?.includes("multipart/form-data")) {
+        try {
+          const form = await req.formData();
+          const file = form.get("file") as File | null;
+          kind = String(form.get("kind") || "proof");
+          if (file) {
+            contentType = file.type || "image/jpeg";
+            buf = Buffer.from(await file.arrayBuffer());
+          }
+        } catch (fErr) {
+          console.warn("FormData parse failed:", fErr);
+        }
+      }
+
+      if (!buf && data.base64) {
+        kind = String(data.kind || "proof");
+        contentType = String(data.contentType || "image/jpeg");
+        const cleanB64 = String(data.base64).replace(/^data:image\/\w+;base64,/, "");
+        buf = Buffer.from(cleanB64, "base64");
+      }
+
+      if (!buf || buf.length === 0) {
+        return json({ error: "Foto não fornecida ou vazia" }, 400);
+      }
+
+      const key = `${kind}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}`;
+      await query(
+        "INSERT INTO upload_objects(object_key,kind,content_type,size_bytes,file_data) VALUES($1,$2,$3,$4,$5)",
+        [key, kind, contentType, buf.length, buf],
+      );
+
+      // Best effort disk cache
+      try {
+        const safeName = encodeURIComponent(key);
+        const uploadDir = resolve(process.cwd(), ".local-db", "uploads");
+        await mkdir(uploadDir, { recursive: true });
+        await writeFile(resolve(uploadDir, safeName), buf);
+      } catch {
+        try {
+          const safeName = encodeURIComponent(key);
+          const tmpDir = resolve("/tmp", "uploads");
+          await mkdir(tmpDir, { recursive: true });
+          await writeFile(resolve(tmpDir, safeName), buf);
+        } catch {}
+      }
+
+      return json({ key, url: `/api/uploads/local/${encodeURIComponent(key)}` });
+    }
     const session = await getSession(requestedRole(req));
     const isDispatcher = session?.role === "dispatcher";
 
@@ -491,8 +579,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           "SELECT current_odometer FROM vehicles WHERE id=$1 FOR UPDATE",
           [r.rows[0].vehicle_id],
         );
-        if (Number(data.kilometers) < Number(v.rows[0].current_odometer))
-          throw new Error("Quilometragem inferior ao último registro");
+        const prevOdo = Number(v.rows[0]?.current_odometer || 0);
+        if (Number(data.kilometers) < prevOdo)
+          throw new Error(`Quilometragem informada (${data.kilometers} km) é menor que o odômetro anterior do veículo (${prevOdo} km). Insira a quilometragem atual do painel.`);
         await client.query(
           "INSERT INTO odometer_readings(route_id,phase,kilometers,photo_key,lat,lng) VALUES($1,'start',$2,$3,$4,$5)",
           [p[1], data.kilometers, data.photoKey, data.lat, data.lng],
@@ -582,8 +671,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           [p[1], session.driverId],
         );
         if (!r.rows[0]) throw new Error("Rota não está ativa");
-        if (Number(data.kilometers) < Number(r.rows[0].start_km))
-          throw new Error("Quilometragem final menor que a inicial");
+        const startKm = Number(r.rows[0]?.start_km || 0);
+        if (Number(data.kilometers) < startKm)
+          throw new Error(`Quilometragem final (${data.kilometers} km) não pode ser menor que a inicial registrada (${startKm} km).`);
         if (Number(r.rows[0].pending) > 0 && !data.confirmIncomplete)
           throw new Error("Confirme o encerramento com entregas pendentes");
         await client.query(
@@ -631,16 +721,38 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const p = routeParts((await ctx.params).path);
   try {
     if (p[0] === "uploads" && p[1] === "local") {
-      if (process.env.AWS_S3_BUCKET_NAME) return json({ error: "Não encontrado" }, 404);
       const bytes = await req.arrayBuffer();
       if (bytes.byteLength > 25 * 1024 * 1024)
         return json({ error: "Foto maior que 25 MB" }, 413);
       const rawKey = p.slice(2).join("/");
       const key = decodeURIComponent(rawKey);
-      const safeName = encodeURIComponent(key);
-      const uploadDir = resolve(process.cwd(), ".local-db", "uploads");
-      await mkdir(uploadDir, { recursive: true });
-      await writeFile(resolve(uploadDir, safeName), Buffer.from(bytes));
+      const buf = Buffer.from(bytes);
+
+      // 1. Save directly to PostgreSQL upload_objects bytea (never fails due to Linux permissions or container redeploys)
+      try {
+        await query(
+          "UPDATE upload_objects SET file_data=$1, size_bytes=$2 WHERE object_key=$3",
+          [buf, buf.length, key],
+        );
+      } catch (dbErr) {
+        console.warn("DB upload PUT notice:", dbErr);
+      }
+
+      // 2. Best-effort local file write (wrapped in try/catch so EACCES never fails the response)
+      try {
+        const safeName = encodeURIComponent(key);
+        const uploadDir = resolve(process.cwd(), ".local-db", "uploads");
+        await mkdir(uploadDir, { recursive: true });
+        await writeFile(resolve(uploadDir, safeName), buf);
+      } catch {
+        try {
+          const safeName = encodeURIComponent(key);
+          const tmpDir = resolve("/tmp", "uploads");
+          await mkdir(tmpDir, { recursive: true });
+          await writeFile(resolve(tmpDir, safeName), buf);
+        } catch {}
+      }
+
       return new NextResponse(null, { status: 204 });
     }
 

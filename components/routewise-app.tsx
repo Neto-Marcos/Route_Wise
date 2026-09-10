@@ -15,6 +15,7 @@ import {
   Eye,
   FileText,
   Filter,
+  Gauge,
   KeyRound,
   LocateFixed,
   Mail,
@@ -37,6 +38,7 @@ import {
   Sun,
   Trash2,
   Truck,
+  Upload,
   UserRound,
   Users,
   Wifi,
@@ -129,6 +131,8 @@ type RouteData = {
   driver_name?: string;
   vehicle_name?: string;
   plate?: string;
+  vehicle_odometer?: number;
+  odometer?: Array<{ phase: "start" | "finish"; kilometers: number; photo_url?: string; recorded_at: string }>;
   deliveries: number;
   delivered: number;
   estimated_km?: number;
@@ -3582,6 +3586,62 @@ function ActiveRoute({
     </main>
   );
 }
+async function compressImage(
+  file: File,
+  maxWidth = 1600,
+  maxHeight = 1600,
+  quality = 0.82,
+): Promise<{ blob: Blob; base64: string; dataUrl: string }> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith("image/") && file.size < 60 * 1024) {
+      const url = URL.createObjectURL(file);
+      return resolve({ blob: file, base64: "", dataUrl: url });
+    }
+    const reader = new FileReader();
+    reader.onerror = () => {
+      resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
+    };
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => {
+        resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
+      };
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+        canvas.toBlob(
+          (blob) => {
+            resolve({
+              blob: blob || file,
+              base64,
+              dataUrl,
+            });
+          },
+          "image/jpeg",
+          quality,
+        );
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function ProofModal({
   phase,
   route,
@@ -3596,25 +3656,46 @@ function ProofModal({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
+  const [compressedBase64, setCompressedBase64] = useState<string>("");
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setError("");
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  const vehicleOdo = Number(route.vehicle_odometer || 0);
+  const startOdo = Number(
+    route.odometer?.find((o) => o.phase === "start")?.kilometers ??
+    route.vehicle_odometer ??
+    0,
+  );
+  const minKm = phase === "start" ? vehicleOdo : startOdo;
+
+  const handleSelectedFile = async (file: File) => {
+    setSelectedFile(file);
+    setError("");
+    setCompressing(true);
+    try {
+      const res = await compressImage(file);
+      setCompressedBlob(res.blob);
+      setCompressedBase64(res.base64);
+      setPreviewUrl(res.dataUrl);
+    } catch {
+      setCompressedBlob(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    } finally {
+      setCompressing(false);
     }
   };
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    const file = selectedFile || (f.get("photo") as File);
-    if (!file || !file.size) {
+    const blobToSend = compressedBlob || selectedFile;
+    if (!blobToSend || !blobToSend.size) {
       setError("Por favor, tire uma foto ou selecione uma imagem.");
       return;
     }
@@ -3622,7 +3703,7 @@ function ProofModal({
     setError("");
 
     try {
-      // 1. Geolocalização com fallback seguro (nunca bloqueia o upload)
+      // 1. Geolocalização rápida (máximo 1.5s para não travar a interface)
       let lat = stop?.lat ?? (route.stops?.[0]?.lat ?? -14.2);
       let lng = stop?.lng ?? (route.stops?.[0]?.lng ?? -51.9);
       try {
@@ -3630,7 +3711,7 @@ function ProofModal({
           const loc = await new Promise<GeolocationPosition>((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: false,
-              timeout: 6000,
+              timeout: 1500,
               maximumAge: 120000,
             });
           });
@@ -3641,31 +3722,78 @@ function ProofModal({
         console.warn("GPS fallback used:", geoErr);
       }
 
-      // 2. Normalizar content-type
-      let contentType = file.type || "image/jpeg";
-      if (!contentType.startsWith("image/")) contentType = "image/jpeg";
+      // 2. Upload da foto com tripla redundância à prova de falhas
+      let photoKey = "";
 
-      // 3. Obter URL pré-assinada
-      const signed = await api("/api/uploads/presign", {
-        method: "POST",
-        body: JSON.stringify({
-          kind: phase,
-          contentType,
-          size: file.size,
-        }),
-      });
+      // Tentativa 1: Presigned PUT
+      try {
+        const signed = await api("/api/uploads/presign", {
+          method: "POST",
+          body: JSON.stringify({
+            kind: phase,
+            contentType: "image/jpeg",
+            size: blobToSend.size,
+          }),
+        });
 
-      // 4. Enviar a foto via PUT
-      const upload = await fetch(signed.url, {
-        method: "PUT",
-        headers: { "Content-Type": contentType },
-        body: file,
-      });
-      if (!upload.ok) throw new Error("Não foi possível enviar a foto. Tente novamente.");
+        const uploadTarget = signed.url;
+        const uploadRes = await fetch(uploadTarget, {
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          body: blobToSend,
+        });
 
-      // 5. Finalizar etapa correspondente
+        if (uploadRes.ok) {
+          photoKey = signed.key;
+        } else {
+          throw new Error(`PUT falhou com status ${uploadRes.status}`);
+        }
+      } catch (putErr) {
+        console.warn("Upload PUT falhou, acionando rota direta:", putErr);
+
+        // Tentativa 2: Direct upload multipart POST
+        try {
+          const formData = new FormData();
+          formData.append("file", blobToSend, "photo.jpg");
+          formData.append("kind", phase);
+          const directRes = await fetch("/api/uploads/direct", {
+            method: "POST",
+            headers: { "X-RouteWise-Role": "driver" },
+            body: formData,
+          });
+          if (directRes.ok) {
+            const dData = await directRes.json();
+            photoKey = dData.key;
+          } else {
+            throw new Error(`Direct POST falhou com status ${directRes.status}`);
+          }
+        } catch (directErr) {
+          console.warn("Direct multipart falhou, acionando fallback base64 JSON:", directErr);
+
+          // Tentativa 3: Base64 JSON POST
+          if (compressedBase64) {
+            const b64Res = await api("/api/uploads/direct", {
+              method: "POST",
+              body: JSON.stringify({
+                kind: phase,
+                contentType: "image/jpeg",
+                base64: compressedBase64,
+              }),
+            });
+            photoKey = b64Res.key;
+          } else {
+            throw new Error("Não foi possível enviar a foto. Tente novamente.");
+          }
+        }
+      }
+
+      if (!photoKey) {
+        throw new Error("Erro ao salvar comprovante de foto.");
+      }
+
+      // 3. Finalizar etapa correspondente
       const common = {
-        photoKey: signed.key,
+        photoKey,
         lat,
         lng,
       };
@@ -3718,17 +3846,41 @@ function ProofModal({
     >
       <form className="form-grid" onSubmit={submit}>
         {phase !== "delivery" && (
-          <label>
-            Quilometragem do painel (KM)
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            <span style={{ fontWeight: 600 }}>Quilometragem do painel (KM)</span>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              padding: "0.45rem 0.65rem",
+              borderRadius: "0.5rem",
+              background: "var(--surface-muted, rgba(0,0,0,0.04))",
+              fontSize: "0.82rem",
+              color: "var(--text-dim)",
+            }}>
+              <Gauge size={16} style={{ color: "var(--primary)" }} />
+              {phase === "start" ? (
+                <span>
+                  Odômetro anterior do veículo: <strong>{vehicleOdo.toFixed(1)} km</strong>
+                </span>
+              ) : (
+                <span>
+                  Odômetro de saída registrado: <strong>{startOdo.toFixed(1)} km</strong>
+                </span>
+              )}
+            </div>
             <input
               name="kilometers"
               type="number"
-              min="0"
+              min={minKm}
               step="0.1"
               required
               autoFocus
-              placeholder="Ex.: 45120.5"
+              placeholder={`Ex.: ${Math.ceil(minKm + 5)}`}
             />
+            <small style={{ color: "var(--text-dim)", fontSize: "0.76rem" }}>
+              Digite o valor total atual exibido no velocímetro do veículo
+            </small>
           </label>
         )}
 
@@ -3736,33 +3888,78 @@ function ProofModal({
           <div className="photo-preview-box">
             <img src={previewUrl} alt="Pré-visualização da foto" className="photo-preview-img" />
             <div className="photo-preview-details">
-              <span className="photo-preview-badge">✓ Imagem carregada</span>
-              <small>{selectedFile?.name || "foto.jpg"} ({(Number(selectedFile?.size || 0) / 1024 / 1024).toFixed(2)} MB)</small>
-              <label className="button secondary compact photo-change-btn">
-                <Camera size={14} /> Trocar foto
-                <input
-                  type="file"
-                  accept="image/*"
-                  style={{ display: "none" }}
-                  onChange={handleFileChange}
-                />
-              </label>
+              <span className="photo-preview-badge">✓ Imagem pronta para envio</span>
+              <small>{selectedFile?.name || "foto.jpg"} ({(Number(compressedBlob?.size || selectedFile?.size || 0) / 1024).toFixed(0)} KB otimizada)</small>
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera size={14} /> Tirar outra
+                </button>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={() => galleryInputRef.current?.click()}
+                >
+                  <Upload size={14} /> Galeria
+                </button>
+              </div>
             </div>
           </div>
         ) : (
-          <label className="photo-input">
-            <Camera size={26} />
-            <span>Tirar foto ou escolher arquivo</span>
-            <small>Clique para abrir a câmera ou selecionar da galeria</small>
-            <input
-              name="photo"
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              required={!selectedFile}
-            />
-          </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", margin: "0.25rem 0" }}>
+            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Foto do comprovante</span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+              <button
+                type="button"
+                className="button primary"
+                style={{ padding: "0.9rem 0.5rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.35rem", cursor: "pointer" }}
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                <Camera size={26} />
+                <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>Tirar Foto</span>
+                <span style={{ fontSize: "0.72rem", opacity: 0.85 }}>Abrir Câmera</span>
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ padding: "0.9rem 0.5rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.35rem", cursor: "pointer" }}
+                onClick={() => galleryInputRef.current?.click()}
+              >
+                <Upload size={26} />
+                <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>Galeria</span>
+                <span style={{ fontSize: "0.72rem", opacity: 0.85 }}>Escolher Arquivo</span>
+              </button>
+            </div>
+            <small style={{ textAlign: "center", color: "var(--text-dim)", fontSize: "0.76rem" }}>
+              Tire uma foto nítida do painel do veículo ou do comprovante
+            </small>
+          </div>
         )}
+
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleSelectedFile(f);
+          }}
+        />
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleSelectedFile(f);
+          }}
+        />
 
         {phase === "delivery" && (
           <label>
@@ -3778,10 +3975,18 @@ function ProofModal({
           </label>
         )}
 
-        <button disabled={busy || (!selectedFile && !previewUrl)} className="button primary">
-          {busy ? "Enviando foto e registrando…" : "Confirmar registro"}
+        <button
+          disabled={busy || compressing || (!selectedFile && !previewUrl)}
+          className="button primary"
+          style={{ marginTop: "0.5rem" }}
+        >
+          {compressing
+            ? "Otimizando imagem…"
+            : busy
+              ? "Enviando foto e registrando…"
+              : "Confirmar registro"}
         </button>
-        {error && <p className="form-error">{error}</p>}
+        {error && <p className="form-error" style={{ margin: "0.5rem 0 0 0" }}>{error}</p>}
       </form>
     </Modal>
   );

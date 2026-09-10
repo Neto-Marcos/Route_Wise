@@ -6,7 +6,17 @@ import { resolve } from "node:path";
 type Client={query:<T extends QueryResultRow=QueryResultRow>(text:string,values?:unknown[])=>Promise<{rows:T[]}>;release:()=>void};
 const shared=globalThis as typeof globalThis&{routewisePool?:Pool;routewiseLocal?:Promise<Client>};
 async function backend():Promise<Client>{
-  if(process.env.DATABASE_URL){const pool=shared.routewisePool??new Pool({connectionString:process.env.DATABASE_URL,max:8});shared.routewisePool=pool;return {query:(text,values=[])=>pool.query(text,values) as never,release:()=>{}}}
+  if(process.env.DATABASE_URL){
+    let pool=shared.routewisePool;
+    if(!pool){
+      pool=new Pool({connectionString:process.env.DATABASE_URL,max:8});
+      shared.routewisePool=pool;
+      pool.query("ALTER TABLE upload_objects ADD COLUMN IF NOT EXISTS file_data bytea").catch((e)=>{
+        console.warn("upload_objects auto-migration notice:", e?.message);
+      });
+    }
+    return {query:(text,values=[])=>pool!.query(text,values) as never,release:()=>{}}
+  }
   if(!shared.routewiseLocal)shared.routewiseLocal=(async()=>{
     try {
       const dbDir = resolve(process.cwd(),".local-db","routewise");

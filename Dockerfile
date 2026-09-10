@@ -20,6 +20,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/db ./db
 COPY --from=builder /app/scripts ./scripts
+RUN mkdir -p /app/.local-db/uploads /tmp/uploads && chown -R nextjs:nodejs /app/.local-db /tmp/uploads
 USER nextjs
 EXPOSE 3000
 CMD ["sh", "-c", "node scripts/migrate.mjs && node server.js"]
