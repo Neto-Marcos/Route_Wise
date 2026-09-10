@@ -15,6 +15,7 @@ import {
   FileText,
   Filter,
   LocateFixed,
+  Map as MapIcon,
   MapPin,
   Navigation,
   Pencil,
@@ -90,15 +91,15 @@ function loadStations() {
   return stationsRequest;
 }
 export const STOP_PALETTE = [
-  "#0f172a", // Origin (CD)
-  "#2563eb", // 1 Blue
-  "#10b981", // 2 Emerald Green
-  "#8b5cf6", // 3 Purple
-  "#f97316", // 4 Orange
-  "#ec4899", // 5 Pink
-  "#06b6d4", // 6 Cyan
-  "#eab308", // 7 Amber
-  "#6366f1", // 8 Indigo
+  "#0f172a", // Origin (CD - Preto profundo)
+  "#3b82f6", // 1 Azul Royal
+  "#10b981", // 2 Verde Esmeralda
+  "#8b5cf6", // 3 Roxo
+  "#f97316", // 4 Laranja
+  "#f43f5e", // 5 Vermelho
+  "#06b6d4", // 6 Ciano
+  "#eab308", // 7 Âmbar
+  "#6366f1", // 8 Índigo
   "#14b8a6", // 9 Teal
 ];
 export function getStopColor(index: number): string {
@@ -165,6 +166,7 @@ function TopNavBar({
   setTheme,
   online,
   driverName,
+  isDispatcher,
 }: {
   activePortal: "planner" | "dispatcher" | "driver" | "home";
   setActivePortal: (portal: "planner" | "dispatcher" | "driver" | "home") => void;
@@ -172,6 +174,7 @@ function TopNavBar({
   setTheme: (theme: "light" | "dark") => void;
   online: boolean;
   driverName?: string;
+  isDispatcher?: boolean;
 }) {
   return (
     <header className="top-nav-bar no-print">
@@ -186,6 +189,15 @@ function TopNavBar({
       </div>
 
       <nav className="top-nav-tabs" aria-label="Portais do sistema">
+        <button
+          type="button"
+          className={`top-nav-tab ${activePortal === "planner" ? "active" : ""}`}
+          onClick={() => setActivePortal("planner")}
+        >
+          <MapIcon size={16} />
+          <span>Planejador de Rotas</span>
+        </button>
+
         <button
           type="button"
           className={`top-nav-tab ${activePortal === "dispatcher" ? "active" : ""}`}
@@ -206,6 +218,13 @@ function TopNavBar({
       </nav>
 
       <div className="top-nav-actions">
+        {(driverName || isDispatcher) && (
+          <div className="active-user-pill" title="Usuário conectado">
+            <UserRound size={13} />
+            <span>{driverName ? `Motorista: ${driverName.split(" ")[0]}` : "Gestor: Central"}</span>
+          </div>
+        )}
+
         <button
           type="button"
           className="theme-toggle-btn"
@@ -294,6 +313,7 @@ export default function RouteWiseApp() {
         setTheme={handleThemeChange}
         online={online}
         driverName={selectedDriver?.name}
+        isDispatcher={dispatcherAuthed}
       />
 
       {installPrompt && (
@@ -320,6 +340,14 @@ export default function RouteWiseApp() {
         <Home
           onDispatcher={() => setActivePortal("dispatcher")}
           onDriver={() => setActivePortal("driver")}
+        />
+      )}
+
+      {activePortal === "planner" && (
+        <RoutePlannerView
+          onClose={() => setActivePortal("home")}
+          onSwitchToDispatcher={() => setActivePortal("dispatcher")}
+          onSwitchToDriver={() => setActivePortal("driver")}
         />
       )}
 
@@ -547,9 +575,66 @@ function DriverPicker({
         {error && <p className="form-error">{error}</p>}
         {selectedDriver && (
           <Modal title={`Acessar como ${selectedDriver.name}`} onClose={() => setSelectedDriver(null)}>
-            <form className="form-grid" onSubmit={(e) => { e.preventDefault(); pick(); }}>
-              <label>Senha de acesso<input autoFocus inputMode="numeric" type="password" minLength={4} maxLength={8} value={password} onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))} required /></label>
-              <button className="button primary">Ver minhas rotas</button>
+            <form className="form-grid driver-pin-form" onSubmit={(e) => { e.preventDefault(); pick(); }}>
+              <label>
+                Senha numérica de acesso
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  type="password"
+                  minLength={4}
+                  maxLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
+                  placeholder="••••"
+                  className="driver-pin-input"
+                  required
+                />
+              </label>
+
+              <div className="numeric-keypad" aria-label="Teclado numérico">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    className="keypad-btn"
+                    onClick={() => {
+                      if (password.length < 8) setPassword((prev) => prev + num);
+                    }}
+                  >
+                    {num}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="keypad-btn keypad-clear"
+                  onClick={() => setPassword("")}
+                  title="Limpar"
+                >
+                  C
+                </button>
+                <button
+                  type="button"
+                  className="keypad-btn"
+                  onClick={() => {
+                    if (password.length < 8) setPassword((prev) => prev + "0");
+                  }}
+                >
+                  0
+                </button>
+                <button
+                  type="button"
+                  className="keypad-btn keypad-backspace"
+                  onClick={() => setPassword((prev) => prev.slice(0, -1))}
+                  title="Apagar"
+                >
+                  ⌫
+                </button>
+              </div>
+
+              <button className="button primary" disabled={password.length < 4}>
+                Ver minhas rotas
+              </button>
               {error && <p className="form-error">{error}</p>}
             </form>
           </Modal>
@@ -1642,8 +1727,19 @@ function RoutePlannerView({
   const [savingDraft, setSavingDraft] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showExtraConfig, setShowExtraConfig] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const optimizeRef = useRef<() => void>(() => {});
   const lastOptimizedCoordsRef = useRef<string>("");
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setResults([]);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const changeStops = (next: Stop[]) => {
     setStops(next);
@@ -1942,43 +2038,49 @@ function RoutePlannerView({
           </div>
         )}
 
-        <div className="search planner-search">
-          <input
-            value={queryText}
-            onChange={(e) => setQueryText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                search(queryText);
-              }
-            }}
-            placeholder="Pesquisar cidade, bairro ou endereço…"
-            autoComplete="off"
-          />
-          {searching && <span className="searching" role="status">Buscando…</span>}
-        </div>
-
-        <div className="stops-count-bar">
-          <span>{stops.length === 0 ? "Nenhuma parada adicionada" : `${stops.length} parada${stops.length > 1 ? "s" : ""} adicionada${stops.length > 1 ? "s" : ""}`}</span>
-        </div>
-
-        {results.length > 0 && (
-          <div className="search-results">
-            {results.map((r, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => addStop(r)}
-              >
-                <MapPin size={15} />
-                <div>
-                  <b>{r.name}</b>
-                  <small>{r.address}</small>
-                </div>
-              </button>
-            ))}
+        <div className="planner-search-container" ref={searchContainerRef}>
+          <div className="search planner-search">
+            <input
+              value={queryText}
+              onChange={(e) => setQueryText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  search(queryText);
+                }
+              }}
+              placeholder="Pesquisar cidade, bairro ou endereço…"
+              autoComplete="off"
+            />
+            {searching && <span className="searching" role="status">Buscando…</span>}
           </div>
-        )}
+
+          <div className="stops-count-bar">
+            <span>{stops.length === 0 ? "Nenhuma parada adicionada" : `${stops.length} parada${stops.length > 1 ? "s" : ""} adicionada${stops.length > 1 ? "s" : ""}`}</span>
+          </div>
+
+          {results.length > 0 && (
+            <div className="search-results">
+              {results.map((r, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    addStop(r);
+                    setResults([]);
+                    setQueryText("");
+                  }}
+                >
+                  <MapPin size={15} />
+                  <div>
+                    <b>{r.name}</b>
+                    <small>{r.address}</small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="builder-stops">
           {stops.length === 0 && (
@@ -2005,7 +2107,9 @@ function RoutePlannerView({
                   <div className="stop-item-name">{s.name}</div>
                   <div className="stop-item-addr">{isOrigin ? `Origem · ${s.address}` : s.address}</div>
                   {loadOrder !== null && (
-                    <span className="stop-loading-tag">📦 {loadOrder}º a carregar</span>
+                    <span className="stop-loading-tag">
+                      📦 {loadOrder}º a carregar ({loadOrder === 1 ? "porta" : "fundo"})
+                    </span>
                   )}
                 </div>
                 <div className="stop-item-actions">
@@ -2941,39 +3045,80 @@ function ProofModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setError("");
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
+  };
+
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const file = selectedFile || (f.get("photo") as File);
+    if (!file || !file.size) {
+      setError("Por favor, tire uma foto ou selecione uma imagem.");
+      return;
+    }
     setBusy(true);
+    setError("");
+
     try {
-      const f = new FormData(e.currentTarget),
-        file = f.get("photo") as File;
-      if (!file?.size) throw new Error("A foto é obrigatória.");
-      const loc = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-        }),
-      );
+      // 1. Geolocalização com fallback seguro (nunca bloqueia o upload)
+      let lat = stop?.lat ?? (route.stops?.[0]?.lat ?? -14.2);
+      let lng = stop?.lng ?? (route.stops?.[0]?.lng ?? -51.9);
+      try {
+        if (typeof navigator !== "undefined" && navigator.geolocation) {
+          const loc = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: false,
+              timeout: 6000,
+              maximumAge: 120000,
+            });
+          });
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+        }
+      } catch (geoErr) {
+        console.warn("GPS fallback used:", geoErr);
+      }
+
+      // 2. Normalizar content-type
+      let contentType = file.type || "image/jpeg";
+      if (!contentType.startsWith("image/")) contentType = "image/jpeg";
+
+      // 3. Obter URL pré-assinada
       const signed = await api("/api/uploads/presign", {
         method: "POST",
         body: JSON.stringify({
           kind: phase,
-          contentType: file.type,
+          contentType,
           size: file.size,
         }),
       });
+
+      // 4. Enviar a foto via PUT
       const upload = await fetch(signed.url, {
         method: "PUT",
-        headers: { "Content-Type": file.type },
+        headers: { "Content-Type": contentType },
         body: file,
       });
-      if (!upload.ok) throw new Error("Não foi possível enviar a foto.");
+      if (!upload.ok) throw new Error("Não foi possível enviar a foto. Tente novamente.");
+
+      // 5. Finalizar etapa correspondente
       const common = {
         photoKey: signed.key,
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
+        lat,
+        lng,
       };
-      if (phase === "start")
+
+      if (phase === "start") {
         await api(`/api/routes/${route.id}/start`, {
           method: "POST",
           body: JSON.stringify({
@@ -2981,7 +3126,7 @@ function ProofModal({
             kilometers: Number(f.get("kilometers")),
           }),
         });
-      else if (phase === "finish")
+      } else if (phase === "finish") {
         await api(`/api/routes/${route.id}/finish`, {
           method: "POST",
           body: JSON.stringify({
@@ -2990,7 +3135,7 @@ function ProofModal({
             confirmIncomplete: f.get("incomplete") === "on",
           }),
         });
-      else if (stop?.id)
+      } else if (stop?.id) {
         await api(`/api/routes/${route.id}/deliveries/${stop.id}/complete`, {
           method: "POST",
           body: JSON.stringify({
@@ -2999,24 +3144,22 @@ function ProofModal({
             note: f.get("note"),
           }),
         });
+      }
       onDone();
     } catch (e) {
-      setError(
-        typeof e === "object" && e !== null && "code" in e
-          ? "Autorize a localização para continuar."
-          : (e as Error).message,
-      );
+      setError((e as Error).message || "Erro ao registrar foto");
     } finally {
       setBusy(false);
     }
   };
+
   return (
     <Modal
       title={
         phase === "start"
-          ? "Registrar saída"
+          ? "Registrar saída (Odômetro)"
           : phase === "finish"
-            ? "Registrar retorno"
+            ? "Registrar retorno (Odômetro)"
             : "Comprovar entrega"
       }
       onClose={onClose}
@@ -3024,41 +3167,67 @@ function ProofModal({
       <form className="form-grid" onSubmit={submit}>
         {phase !== "delivery" && (
           <label>
-            Quilometragem do painel
+            Quilometragem do painel (KM)
             <input
               name="kilometers"
               type="number"
               min="0"
               step="0.1"
               required
+              autoFocus
+              placeholder="Ex.: 45120.5"
             />
           </label>
         )}
-        <label className="photo-input">
-          <Camera />
-          <span>Fotografar painel ou entrega</span>
-          <input
-            name="photo"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            required
-          />
-        </label>
-        {phase === "delivery" && (
-          <label>
-            Observação
-            <textarea name="note" rows={3} placeholder="Opcional" />
+
+        {previewUrl ? (
+          <div className="photo-preview-box">
+            <img src={previewUrl} alt="Pré-visualização da foto" className="photo-preview-img" />
+            <div className="photo-preview-details">
+              <span className="photo-preview-badge">✓ Imagem carregada</span>
+              <small>{selectedFile?.name || "foto.jpg"} ({(Number(selectedFile?.size || 0) / 1024 / 1024).toFixed(2)} MB)</small>
+              <label className="button secondary compact photo-change-btn">
+                <Camera size={14} /> Trocar foto
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={handleFileChange}
+                />
+              </label>
+            </div>
+          </div>
+        ) : (
+          <label className="photo-input">
+            <Camera size={26} />
+            <span>Tirar foto ou escolher arquivo</span>
+            <small>Clique para abrir a câmera ou selecionar da galeria</small>
+            <input
+              name="photo"
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              required={!selectedFile}
+            />
           </label>
         )}
+
+        {phase === "delivery" && (
+          <label>
+            Observação da entrega
+            <textarea name="note" rows={3} placeholder="Opcional (Ex.: Recebido por João)" />
+          </label>
+        )}
+
         {phase === "finish" && (
           <label className="check">
             <input type="checkbox" name="incomplete" /> Confirmo o encerramento
             mesmo que existam entregas pendentes
           </label>
         )}
-        <button disabled={busy} className="button primary">
-          {busy ? "Enviando…" : "Confirmar registro"}
+
+        <button disabled={busy || (!selectedFile && !previewUrl)} className="button primary">
+          {busy ? "Enviando foto e registrando…" : "Confirmar registro"}
         </button>
         {error && <p className="form-error">{error}</p>}
       </form>

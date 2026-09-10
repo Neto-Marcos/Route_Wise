@@ -143,8 +143,8 @@ export function RouteDetailModal({
 
   const deliveryStops = route.stops?.filter((s) => !s.is_origin && (s.position === undefined || s.position > 0)) || [];
   const completedStops = deliveryStops.filter((s) => s.status === "delivered");
-  const totalDeliveries = Number(route.deliveries || deliveryStops.length || 0);
-  const deliveredCount = Number(route.delivered || completedStops.length || 0);
+  const totalDeliveries = deliveryStops.length > 0 ? deliveryStops.length : Number(route.deliveries || 0);
+  const deliveredCount = deliveryStops.length > 0 ? completedStops.length : Number(route.delivered || 0);
 
   const formatTime = (ts?: string) => {
     if (!ts) return "--:--";
@@ -157,9 +157,11 @@ export function RouteDetailModal({
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return "--/--/----";
     const clean = String(dateStr).slice(0, 10);
-    const [y, m, d] = clean.split("-");
-    if (!y || !m || !d) return dateStr;
-    return `${d}/${m}/${y}`;
+    const parts = clean.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dateStr;
   };
 
   const calculateDuration = () => {

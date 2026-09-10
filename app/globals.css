@@ -681,7 +681,11 @@ textarea:focus {
 .planner-map, .leaflet-route-map { width: 100%; height: 100%; min-width: 0; }
 .route-number-marker-wrap, .fuel-map-marker-wrap { background: transparent; border: 0; }
 .route-number-marker { display: grid; place-items: center; width: 32px; height: 32px; border: 3px solid white; border-radius: 50%; background: var(--blue); color: white; box-shadow: 0 2px 8px #11182755; font-size: 12px; font-weight: 900; }
-.route-number-marker.origin { background: #0f172a !important; box-shadow: 0 0 0 2px var(--blue), 0 2px 8px #11182755; }
+.route-number-marker.origin {
+  background: #0f172a !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2.5px #3b82f6, 0 4px 10px rgba(0, 0, 0, 0.45) !important;
+}
 .fuel-map-marker { display: grid; place-items: center; width: 28px; height: 28px; border: 2px solid white; border-radius: 50%; background: #f59e0b; box-shadow: 0 2px 7px #11182744; font-size: 14px; cursor: pointer; transition: transform 0.15s ease; }
 .fuel-map-marker:hover { transform: scale(1.18); box-shadow: 0 3px 10px #11182766; }
 .modal-backdrop {
@@ -2700,7 +2704,7 @@ textarea:focus {
   justify-content: space-between;
   gap: 16px;
   padding: 0 20px;
-  height: 58px;
+  height: 56px;
   background: var(--header-bg);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--header-border);
@@ -2775,6 +2779,23 @@ textarea:focus {
   flex-shrink: 0;
 }
 
+.active-user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--card-subtle);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .theme-toggle-btn {
   display: grid;
   place-items: center;
@@ -2818,10 +2839,30 @@ textarea:focus {
 }
 
 .connection-pill .dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
+}
+
+.connection-pill.online .dot {
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
 }
 
 /* =========================================================
@@ -2830,10 +2871,122 @@ textarea:focus {
 .planner-fullscreen {
   display: grid;
   grid-template-columns: minmax(360px, 420px) 1fr;
-  height: calc(100dvh - 58px);
+  height: calc(100dvh - 56px);
   overflow: hidden;
   background: var(--paper);
   position: relative;
+}
+
+.planner-search-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.planner-search-container .search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.planner-search-container .search-results button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  transition: background 0.12s ease;
+}
+
+.planner-search-container .search-results button:last-child {
+  border-bottom: none;
+}
+
+.planner-search-container .search-results button:hover {
+  background: var(--card-subtle);
+  color: var(--blue);
+}
+
+.planner-search-container .search-results button small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Numeric Keypad for Driver PIN */
+.driver-pin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.driver-pin-input {
+  font-size: 24px !important;
+  letter-spacing: 0.35em !important;
+  text-align: center !important;
+  font-weight: 800 !important;
+  height: 48px !important;
+}
+
+.numeric-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.keypad-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s, transform 0.08s;
+}
+
+.keypad-btn:hover {
+  background: var(--card-subtle);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.keypad-btn:active {
+  transform: scale(0.96);
+}
+
+.keypad-btn.keypad-clear {
+  color: var(--red);
+  font-weight: 800;
+}
+
+.keypad-btn.keypad-backspace {
+  font-size: 16px;
+  color: var(--muted);
 }
 
 .planner-fullscreen .planner-panel {
@@ -2964,8 +3117,10 @@ textarea:focus {
 }
 
 .stop-item-badge.origin {
-  background: #0f172a;
-  border: 2px solid var(--blue);
+  background: #0f172a !important;
+  border: 1.5px solid #2563eb;
+  box-shadow: 0 0 0 1.5px #60a5fa, 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: #ffffff;
 }
 
 .stop-item-info {
@@ -3657,4 +3812,62 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.photo-preview-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--card-subtle);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  margin: 6px 0;
+}
+
+.photo-preview-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #000;
+  flex-shrink: 0;
+}
+
+.photo-preview-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.photo-preview-details small {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2px 8px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.photo-change-btn {
+  margin-top: 4px;
+  cursor: pointer;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
