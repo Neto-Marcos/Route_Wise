@@ -1639,6 +1639,7 @@ function RoutePlannerView({
   const [routeName, setRouteName] = useState("");
   const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString("en-CA"));
   const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showExtraConfig, setShowExtraConfig] = useState(false);
   const optimizeRef = useRef<() => void>(() => {});
@@ -1800,6 +1801,8 @@ function RoutePlannerView({
   const saveDraft = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (stops.length < 2) return setError("Adicione uma origem e ao menos uma entrega.");
+    if (savingDraft) return;
+    setSavingDraft(true);
     setError("");
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     try {
@@ -1820,6 +1823,8 @@ function RoutePlannerView({
       setTimeout(() => setSuccessMessage(""), 5000);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -2203,11 +2208,11 @@ function RoutePlannerView({
             <button
               type="button"
               className="btn-save-compact btn-save-draft"
-              disabled={stops.length < 2 || optimizing || !routeInfo}
+              disabled={stops.length < 2 || optimizing || !routeInfo || savingDraft}
               onClick={() => saveDraft()}
               title="Salvar rota como rascunho na Central"
             >
-              Salvar Rascunho
+              {savingDraft ? "Salvando…" : "Salvar Rascunho"}
             </button>
             <button
               type="button"
@@ -2237,6 +2242,32 @@ function RoutePlannerView({
 
       <section className="planner-map" aria-label="Mapa da rota">
         <RouteMap stops={stops} geometry={geometry} />
+      </section>
+
+      <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
+        <header className="planner-print-header">
+          <div className="report-logo"><span>↗</span><b>routewise</b></div>
+          <div>
+            <h1>ROMANEIO DE ROTA</h1>
+            <p>{routeName.trim() || `Rota ${formatDateBR(routeDate)}`}</p>
+          </div>
+          <strong>{formatDateBR(routeDate)}</strong>
+        </header>
+        <div className="planner-print-summary">
+          <span><b>{Math.max(0, stops.length - 1)}</b> entregas</span>
+          <span><b>{routeInfo ? `${routeInfo.km.toFixed(1)} km` : "—"}</b> estimados</span>
+          <span><b>{routeInfo ? formatRouteTime(routeInfo.seconds) : "—"}</b> de percurso</span>
+        </div>
+        <h2>Sequência planejada</h2>
+        <ol className="planner-print-stops">
+          {stops.map((stop, index) => (
+            <li key={`${stop.lat}-${stop.lng}-${index}`}>
+              <span>{index === 0 ? "A" : index}</span>
+              <div><b>{index === 0 ? "Origem — " : ""}{stop.name}</b><small>{stop.address}</small></div>
+            </li>
+          ))}
+        </ol>
+        <footer>Documento gerado pelo RouteWise em {new Date().toLocaleString("pt-BR")}</footer>
       </section>
 
       {assignModalOpen && (

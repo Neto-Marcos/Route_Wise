@@ -1678,7 +1678,7 @@ textarea:focus {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--card-subtle);
 }
 .detail-metric-card .metric-icon {
   color: var(--blue);
@@ -1704,7 +1704,7 @@ textarea:focus {
   align-items: center;
   gap: 7px;
   margin-bottom: 12px;
-  color: #334155;
+  color: var(--ink);
 }
 .section-title h3 {
   margin: 0;
@@ -1722,7 +1722,7 @@ textarea:focus {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 13px;
-  background: #ffffff;
+  background: var(--card-subtle);
 }
 .odo-badge {
   padding: 4px 8px;
@@ -1757,10 +1757,10 @@ textarea:focus {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 3px;
-  background: #f8fafc;
+  background: var(--card);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1791,11 +1791,11 @@ textarea:focus {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--card-subtle);
 }
 .detail-stop-row.delivered {
-  background: #fafdfb;
-  border-color: #d1fae5;
+  background: color-mix(in srgb, var(--green) 9%, var(--card));
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
 }
 .stop-indicator {
   display: grid;
@@ -1871,7 +1871,7 @@ textarea:focus {
   font-weight: 700;
 }
 .delivery-note {
-  color: #475569;
+  color: var(--muted);
   font-style: italic;
 }
 .route-detail-footer {
@@ -1881,7 +1881,41 @@ textarea:focus {
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--line);
-  background: #f8fafc;
+  background: var(--card-subtle);
+}
+
+.detail-modal-shell {
+  background: var(--card);
+  color: var(--ink);
+}
+.detail-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 26px;
+}
+.detail-modal-header h2 { margin: 7px 0 4px; color: var(--ink); }
+.detail-header-badges { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.detail-header-badges > span { display: inline-flex; align-items: center; gap: 4px; }
+.detail-subtitle { margin: 0; color: var(--muted); }
+.detail-subtitle b { color: var(--ink); }
+.detail-header-actions { display: flex; align-items: center; gap: 8px; }
+.detail-header-actions > button:last-child {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--card-subtle);
+  color: var(--ink);
+  cursor: pointer;
+}
+.detail-modal-body {
+  max-height: 68dvh;
+  padding: 20px;
+  overflow-y: auto;
 }
 
 /* Lightbox */
@@ -2192,6 +2226,7 @@ textarea:focus {
   color: #94a3b8;
   font-size: 10px;
 }
+.planner-print-sheet { display: none; }
 
 /* Print Rules */
 @media print {
@@ -2203,6 +2238,11 @@ textarea:focus {
     background: #ffffff !important;
     color: #000000 !important;
   }
+  body * { visibility: hidden !important; }
+  .printable-report-paper,
+  .printable-report-paper *,
+  .planner-print-sheet,
+  .planner-print-sheet * { visibility: visible !important; }
   .no-print,
   .sidebar,
   .dashboard > header,
@@ -2221,6 +2261,9 @@ textarea:focus {
     max-width: none !important;
   }
   .printable-report-paper {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
     box-shadow: none !important;
     padding: 0 !important;
     border-radius: 0 !important;
@@ -2228,11 +2271,79 @@ textarea:focus {
   .report-section {
     page-break-inside: avoid;
   }
-  .dashboard > *:not(.report-backdrop),
+  .dashboard > *:not(.report-backdrop):not(.planner-fullscreen),
   .modal-backdrop:not(.report-backdrop),
   .live-fleet-panel {
     display: none !important;
   }
+  .planner-print-sheet {
+    display: block !important;
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    color: #0f172a !important;
+    background: #fff !important;
+    font-family: Arial, sans-serif;
+  }
+  .planner-fullscreen {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .planner-print-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #0f172a;
+  }
+  .planner-print-header h1,
+  .planner-print-header p { margin: 0; }
+  .planner-print-header h1 { font-size: 20px; }
+  .planner-print-header p { margin-top: 3px; color: #64748b; font-size: 12px; }
+  .planner-print-header > strong { font-size: 13px; }
+  .planner-print-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 18px 0 22px;
+  }
+  .planner-print-summary span {
+    padding: 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .planner-print-sheet h2 { margin: 0 0 10px; color: #2563eb; font-size: 14px; text-transform: uppercase; }
+  .planner-print-stops { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .planner-print-stops li {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 4px;
+    border-bottom: 1px solid #e2e8f0;
+    break-inside: avoid;
+  }
+  .planner-print-stops li > span {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #2563eb;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .planner-print-stops li:first-child > span { background: #0f172a; }
+  .planner-print-stops li div { display: grid; gap: 2px; }
+  .planner-print-stops li b { font-size: 12px; }
+  .planner-print-stops li small { color: #475569; font-size: 10px; }
+  .planner-print-sheet footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #cbd5e1; color: #64748b; font-size: 9px; text-align: center; }
 }
 
 /* === Filter Toolbar & Actions === */
@@ -3531,4 +3642,3 @@ textarea:focus {
   align-items: center;
   gap: 8px;
 }
-

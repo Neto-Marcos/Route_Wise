@@ -285,9 +285,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return res;
     }
     if (p.join("/") === "session/driver") {
+      const companyCode = String(data.companyCode || "").trim().toUpperCase();
+      const driverId = String(data.driverId || "").trim();
       const { rows } = await query(
-        "SELECT d.id,d.pin_hash,d.company_id FROM drivers d JOIN companies c ON c.id=d.company_id WHERE d.id=$1 AND c.code=upper($2) AND d.active=true AND c.active=true",
-        [data.driverId, data.companyCode],
+        "SELECT d.id,d.pin_hash,d.company_id FROM drivers d JOIN companies c ON c.id=d.company_id WHERE (d.id::text=$1 OR d.public_id::text=$1) AND c.code=$2 AND d.active=true AND c.active=true",
+        [driverId, companyCode],
       );
       if (!rows[0]) return json({ error: "Motorista inválido" }, 400);
       if (!(await compare(String(data.password || ""), rows[0].pin_hash)))

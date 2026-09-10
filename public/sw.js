@@ -1,4 +1,4 @@
-const CACHE = "routewise-v3";
+const CACHE = "routewise-v4";
 const CORE = ["/", "/offline", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
