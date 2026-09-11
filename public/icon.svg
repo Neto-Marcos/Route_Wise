@@ -1,1 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0b1220"/><path d="M126 164h156v54H126zm0 92h220v54H126zm0 92h128v54H126z" fill="#fff"/><path d="m310 126 82 82-82 82" fill="none" stroke="#2f6df6" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/></svg>
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="rGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+  </defs>
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="128" fill="#14243a" />
+  
+  <!-- Modern 'R' as a Route with Arrow & Origin Dot -->
+  <g transform="translate(48, 48)">
+    <!-- Origin point dot -->
+    <circle cx="116" cy="328" r="22" fill="#ffffff" />
+    
+    <!-- Main Route Path forming 'R' and finishing in downward arrow -->
+    <!-- Vertical left stem and loop of R -->
+    <path 
+      d="M 116 270 L 116 128 C 116 98, 140 74, 170 74 L 246 74 C 298 74, 334 110, 334 162 C 334 214, 298 250, 246 250 L 170 250" 
+      fill="none" 
+      stroke="url(#rGrad)" 
+      stroke-width="46" 
+      stroke-linecap="round" 
+      stroke-linejoin="round"
+    />
+    
+    <!-- Diagonal leg turning into an active forward route arrow -->
+    <path 
+      d="M 232 246 L 290 328 L 320 328" 
+      fill="none" 
+      stroke="url(#arrowGrad)" 
+      stroke-width="46" 
+      stroke-linecap="round" 
+      stroke-linejoin="round"
+    />
+    
+    <!-- Arrowhead at the end of the leg -->
+    <path 
+      d="M 288 366 L 334 328 L 288 290" 
+      fill="none" 
+      stroke="url(#arrowGrad)" 
+      stroke-width="44" 
+      stroke-linecap="round" 
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>

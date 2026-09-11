@@ -84,6 +84,8 @@ type Stop = {
   lng: number;
   is_origin?: boolean;
   status?: "pending" | "delivered";
+  boxes?: number;
+  volume_m3?: number;
 };
 type Station = {
   id_rede: string;
@@ -410,7 +412,7 @@ function Connection({ online }: { online: boolean }) {
 function Logo() {
   return (
     <div className="logo">
-      <span>↗</span>
+      <img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} />
       <b>Rota fácil</b>
     </div>
   );
@@ -1169,6 +1171,9 @@ function Dispatcher({
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetFull, setResetFull] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
 
   const load = useCallback(
     () =>
@@ -1253,9 +1258,21 @@ function Dispatcher({
                       : "Gestores e Coordenadores"}
             </h1>
           </div>
-          <span className="live">
-            <i /> Atualização automática
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              type="button"
+              className="button-ghost"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--red)", borderColor: "rgba(239, 68, 68, 0.3)" }}
+              onClick={() => setResetModalOpen(true)}
+              title="Zerar rotas e dados de teste"
+            >
+              <Trash2 size={14} />
+              <span>Zerar Dados</span>
+            </button>
+            <span className="live">
+              <i /> Atualização automática
+            </span>
+          </div>
         </header>
         {message && <p className="form-error">{message}</p>}
         {tab === "planner" && <RoutePlannerView onDone={load} />}
@@ -1324,6 +1341,68 @@ function Dispatcher({
             load();
           }}
         />
+      )}
+
+      {resetModalOpen && (
+        <Modal title="Zerar Banco de Dados e Histórico" onClose={() => setResetModalOpen(false)}>
+          <div className="form-grid">
+            <div className="modal-info-box" style={{ borderColor: "rgba(239, 68, 68, 0.3)", background: "rgba(239, 68, 68, 0.06)" }}>
+              <Trash2 size={22} style={{ color: "var(--red)" }} />
+              <div>
+                <b>Atenção: Esta ação é irreversível!</b>
+                <p style={{ marginTop: "4px", fontSize: "12.5px" }}>
+                  Isto apagará todas as rotas (histórico, paradas, fotos e comprovantes), telemetria GPS e leituras de odômetro salvas.
+                </p>
+              </div>
+            </div>
+
+            <label className="checkbox-line" style={{ marginTop: "6px" }}>
+              <input
+                type="checkbox"
+                checked={resetFull}
+                onChange={(e) => setResetFull(e.target.checked)}
+              />
+              <span>Zerar também veículos e motoristas de teste cadastrados</span>
+            </label>
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <button
+                type="button"
+                className="button-ghost"
+                style={{ flex: 1 }}
+                onClick={() => setResetModalOpen(false)}
+                disabled={resetBusy}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                style={{ flex: 1, background: "var(--red)", borderColor: "var(--red)" }}
+                disabled={resetBusy}
+                onClick={async () => {
+                  setResetBusy(true);
+                  try {
+                    await api("/api/admin/reset-data", {
+                      method: "POST",
+                      body: JSON.stringify({ pin: "2468", fullReset: resetFull }),
+                    });
+                    setResetModalOpen(false);
+                    setMessage("Banco de dados zerado com sucesso!");
+                    load();
+                    setTimeout(() => setMessage(""), 5000);
+                  } catch (err) {
+                    alert((err as Error).message);
+                  } finally {
+                    setResetBusy(false);
+                  }
+                }}
+              >
+                {resetBusy ? "Zerando dados…" : "Sim, Zerar Tudo"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -2244,7 +2323,7 @@ function RoutePlannerView({
   const [geometry, setGeometry] = useState<[number, number][]>([]);
   const [routeInfo, setRouteInfo] = useState<{ km: number; seconds: number } | null>(null);
   const [circular, setCircular] = useState(false);
-  const [optimizeBy, setOptimizeBy] = useState<"distance" | "time">("distance");
+  const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">("distance");
   const [routeName, setRouteName] = useState("");
   const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString("en-CA"));
   const [assignModalOpen, setAssignModalOpen] = useState(false);
@@ -2269,6 +2348,14 @@ function RoutePlannerView({
     setStops(next);
     setGeometry([]);
     setRouteInfo(null);
+  };
+
+  const moveStop = (fromIdx: number, toIdx: number) => {
+    if (fromIdx < 1 || toIdx < 1 || fromIdx >= stops.length || toIdx >= stops.length) return;
+    const next = [...stops];
+    [next[fromIdx], next[toIdx]] = [next[toIdx], next[fromIdx]];
+    setOptimizeBy("manual");
+    changeStops(next);
   };
 
   const search = useCallback(async (term: string, signal?: AbortSignal) => {
@@ -2317,8 +2404,7 @@ function RoutePlannerView({
   const addStop = (item: { name: string; address: string; lat: number; lng: number }) => {
     let lat = item.lat;
     let lng = item.lng;
-    const duplicate = stops.some((s) => Math.abs(s.lat - lat) < 0.0001 && Math.abs(s.lng - lng) < 0.0001);
-    if (duplicate) {
+    if (stops.some((s) => Math.abs(s.lat - lat) < 0.0001 && Math.abs(s.lng - lng) < 0.0001)) {
       lat += 0.00025 * (stops.length + 1);
       lng += 0.00025 * (stops.length + 1);
     }
@@ -2335,16 +2421,21 @@ function RoutePlannerView({
     setQueryText("");
   };
 
-  const optimize = async () => {
+  const optimize = async (forceManual = false) => {
     if (stops.length < 2) return setError("Adicione uma origem e ao menos uma entrega.");
+    const isManual = forceManual || optimizeBy === "manual";
     setOptimizing(true);
     setError("");
     try {
-      const coords = stops.map((s, idx) => {
+      const stopsToRoute = isManual
+        ? (circular && stops.length > 1 ? [...stops, stops[0]] : [...stops])
+        : stops;
+
+      const coords = stopsToRoute.map((s, idx) => {
         let lat = s.lat;
         let lng = s.lng;
         for (let j = 0; j < idx; j++) {
-          if (Math.abs(stops[j].lat - lat) < 0.0002 && Math.abs(stops[j].lng - lng) < 0.0002) {
+          if (Math.abs(stopsToRoute[j].lat - lat) < 0.0002 && Math.abs(stopsToRoute[j].lng - lng) < 0.0002) {
             lat += 0.00025 * (idx - j);
             lng += 0.00025 * (idx - j);
             break;
@@ -2354,39 +2445,69 @@ function RoutePlannerView({
       }).join(";");
 
       let data: any;
-      const osrmProxyUrl = `/api/osrm/trip/v1/driving/${coords}?source=first&roundtrip=${circular ? "true" : "false"}&overview=full&geometries=geojson`;
-      try {
-        const res = await fetch(osrmProxyUrl);
-        if (!res.ok) throw new Error(`Proxy status ${res.status}`);
-        data = await res.json();
-      } catch (proxyErr) {
-        console.warn("OSRM proxy fallback to direct URL:", proxyErr);
-        const directUrl = `https://router.project-osrm.org/trip/v1/driving/${coords}?source=first&roundtrip=${circular ? "true" : "false"}&overview=full&geometries=geojson`;
-        data = await fetch(directUrl).then((r) => r.json());
-      }
 
-      if (data.code !== "Ok" || !data.trips?.length) {
-        throw new Error(data.message || "Não foi possível calcular trajeto pelo OSRM");
-      }
-
-      const ordered = new Array<Stop>(stops.length);
-      data.waypoints.forEach((waypoint: { waypoint_index: number }, index: number) => {
-        if (waypoint.waypoint_index >= 0 && waypoint.waypoint_index < stops.length) {
-          ordered[waypoint.waypoint_index] = stops[index];
+      if (isManual) {
+        // Traçado exato na ordem definida pelo usuário (sem reordenar paradas)
+        const osrmRouteProxy = `/api/osrm/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+        try {
+          const res = await fetch(osrmRouteProxy);
+          if (!res.ok) throw new Error(`Proxy status ${res.status}`);
+          data = await res.json();
+        } catch (proxyErr) {
+          console.warn("OSRM route proxy fallback to direct URL:", proxyErr);
+          const directUrl = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+          data = await fetch(directUrl).then((r) => r.json());
         }
-      });
-      const validOrdered = ordered.filter(Boolean).length === stops.length ? ordered : stops;
 
-      const line: [number, number][] = data.trips[0].geometry.coordinates.map(
-        ([lng, lat]: [number, number]) => [lat, lng],
-      );
-      const distance = Number(data.trips[0].distance);
-      const duration = Number(data.trips[0].duration);
+        if (data.code !== "Ok" || !data.routes?.length) {
+          throw new Error(data.message || "Não foi possível calcular trajeto pelo OSRM");
+        }
 
-      lastOptimizedCoordsRef.current = validOrdered.map(s => `${s.lat},${s.lng}`).join(";") + `:${circular}:${optimizeBy}`;
-      setStops(validOrdered);
-      setGeometry(line);
-      setRouteInfo({ km: distance / 1000, seconds: duration });
+        const line: [number, number][] = data.routes[0].geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng],
+        );
+        const distance = Number(data.routes[0].distance);
+        const duration = Number(data.routes[0].duration);
+
+        lastOptimizedCoordsRef.current = stops.map(s => `${s.lat},${s.lng}`).join(";") + `:${circular}:${optimizeBy}`;
+        setGeometry(line);
+        setRouteInfo({ km: distance / 1000, seconds: duration });
+      } else {
+        // Otimização automática por IA / OSRM Trip
+        const osrmProxyUrl = `/api/osrm/trip/v1/driving/${coords}?source=first&roundtrip=${circular ? "true" : "false"}&overview=full&geometries=geojson`;
+        try {
+          const res = await fetch(osrmProxyUrl);
+          if (!res.ok) throw new Error(`Proxy status ${res.status}`);
+          data = await res.json();
+        } catch (proxyErr) {
+          console.warn("OSRM proxy fallback to direct URL:", proxyErr);
+          const directUrl = `https://router.project-osrm.org/trip/v1/driving/${coords}?source=first&roundtrip=${circular ? "true" : "false"}&overview=full&geometries=geojson`;
+          data = await fetch(directUrl).then((r) => r.json());
+        }
+
+        if (data.code !== "Ok" || !data.trips?.length) {
+          throw new Error(data.message || "Não foi possível calcular trajeto pelo OSRM");
+        }
+
+        const ordered = new Array<Stop>(stops.length);
+        data.waypoints.forEach((waypoint: { waypoint_index: number }, index: number) => {
+          if (waypoint.waypoint_index >= 0 && waypoint.waypoint_index < stops.length) {
+            ordered[waypoint.waypoint_index] = stops[index];
+          }
+        });
+        const validOrdered = ordered.filter(Boolean).length === stops.length ? ordered : stops;
+
+        const line: [number, number][] = data.trips[0].geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng],
+        );
+        const distance = Number(data.trips[0].distance);
+        const duration = Number(data.trips[0].duration);
+
+        lastOptimizedCoordsRef.current = validOrdered.map(s => `${s.lat},${s.lng}`).join(";") + `:${circular}:${optimizeBy}`;
+        setStops(validOrdered);
+        setGeometry(line);
+        setRouteInfo({ km: distance / 1000, seconds: duration });
+      }
     } catch (e) {
       console.warn("OSRM routing fallback:", e);
       const line: [number, number][] = stops.map((s) => [s.lat, s.lng]);
@@ -2501,7 +2622,7 @@ function RoutePlannerView({
       <div className="planner-panel">
         <header className="planner-header">
           <div className="logo">
-            <RouteIcon />
+            <img src="/icon.svg" width={32} height={32} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} />
             <div className="logo-text-group">
               <b>Rota fácil</b>
               <small className="logo-sub">Roteamento & Cargas</small>
@@ -2630,23 +2751,58 @@ function RoutePlannerView({
                 <div className="stop-item-info">
                   <div className="stop-item-name">{s.name}</div>
                   <div className="stop-item-addr">{isOrigin ? `Origem · ${s.address}` : s.address}</div>
-                  {loadOrder !== null && (
-                    <span className="stop-loading-tag">
-                      📦 {loadOrder}º a carregar ({loadOrder === 1 ? "porta" : "fundo"})
-                    </span>
-                  )}
+                  <div className="stop-cubagem-row">
+                    {loadOrder !== null && (
+                      <span className="stop-loading-tag">
+                        📦 {loadOrder}º a carregar ({loadOrder === 1 ? "porta" : "fundo"})
+                      </span>
+                    )}
+                    {!isOrigin && (
+                      <div className="stop-inputs-cubagem" onClick={(e) => e.stopPropagation()}>
+                        <label title="Quantidade de caixas/volumes nesta entrega">
+                          <span>Cx:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="9999"
+                            placeholder="0"
+                            value={s.boxes ?? ""}
+                            onChange={(e) => {
+                              const val = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value) || 0);
+                              const next = [...stops];
+                              next[i] = { ...s, boxes: val };
+                              changeStops(next);
+                            }}
+                          />
+                        </label>
+                        <label title="Volume total em metros cúbicos (m³)">
+                          <span>m³:</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="999"
+                            placeholder="0.0"
+                            value={s.volume_m3 ?? ""}
+                            onChange={(e) => {
+                              const val = e.target.value === "" ? undefined : Math.max(0, parseFloat(e.target.value) || 0);
+                              const next = [...stops];
+                              next[i] = { ...s, volume_m3: val };
+                              changeStops(next);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="stop-item-actions">
                   <button
                     type="button"
                     className="stop-item-btn"
                     disabled={i <= 1}
-                    onClick={() => {
-                      const next = [...stops];
-                      [next[i - 1], next[i]] = [next[i], next[i - 1]];
-                      changeStops(next);
-                    }}
-                    title="Mover para cima"
+                    onClick={() => moveStop(i, i - 1)}
+                    title="Mover para cima (Ordem manual)"
                   >
                     ↑
                   </button>
@@ -2654,12 +2810,8 @@ function RoutePlannerView({
                     type="button"
                     className="stop-item-btn"
                     disabled={i === 0 || i === stops.length - 1}
-                    onClick={() => {
-                      const next = [...stops];
-                      [next[i], next[i + 1]] = [next[i + 1], next[i]];
-                      changeStops(next);
-                    }}
-                    title="Mover para baixo"
+                    onClick={() => moveStop(i, i + 1)}
+                    title="Mover para baixo (Ordem manual)"
                   >
                     ↓
                   </button>
@@ -2717,6 +2869,7 @@ function RoutePlannerView({
                 type="button"
                 className={`option-pill ${optimizeBy === "distance" ? "active" : ""}`}
                 onClick={() => setOptimizeBy("distance")}
+                title="Otimiza automaticamente a ordem para a menor quilometragem total"
               >
                 Menor Distância
               </button>
@@ -2724,8 +2877,17 @@ function RoutePlannerView({
                 type="button"
                 className={`option-pill ${optimizeBy === "time" ? "active" : ""}`}
                 onClick={() => setOptimizeBy("time")}
+                title="Otimiza automaticamente a ordem para o menor tempo"
               >
                 Menor Tempo
+              </button>
+              <button
+                type="button"
+                className={`option-pill ${optimizeBy === "manual" ? "active" : ""}`}
+                onClick={() => setOptimizeBy("manual")}
+                title="Mantém estritamente a ordem que você definir nas paradas"
+              >
+                Ordem Manual
               </button>
             </div>
           </div>
@@ -2750,7 +2912,9 @@ function RoutePlannerView({
 
         {routeInfo && (
           <div className="route-summary-gradient-card">
-            <div className="route-summary-card-title">RESUMO DA ROTA OTIMIZADA</div>
+            <div className="route-summary-card-title">
+              {optimizeBy === "manual" ? "RESUMO DO TRAJETO (ORDEM MANUAL)" : "RESUMO DA ROTA OTIMIZADA"}
+            </div>
             <div className="route-summary-grid-3col">
               <div className="summary-col">
                 <Navigation size={13} className="summary-col-icon" />
@@ -2768,6 +2932,19 @@ function RoutePlannerView({
                 <span className="summary-lbl">tempo est.</span>
               </div>
             </div>
+
+            {/* Total Cubagem e Carga do Baú */}
+            {(() => {
+              const totalBoxes = stops.reduce((acc, s) => acc + (s.boxes || 0), 0);
+              const totalVolume = stops.reduce((acc, s) => acc + (s.volume_m3 || 0), 0);
+              return (totalBoxes > 0 || totalVolume > 0) ? (
+                <div className="route-summary-cubagem-bar">
+                  <span>📦 <b>{totalBoxes}</b> {totalBoxes === 1 ? "volume / caixa" : "volumes / caixas"}</span>
+                  <span>📐 <b>{totalVolume > 0 ? `${totalVolume.toFixed(2)} m³` : "--"}</b> cubagem</span>
+                </div>
+              ) : null;
+            })()}
+
             <div className="route-summary-footer-note">
               <Check size={11} />
               <span>{circular ? "Inclui retorno à origem" : "Sem retorno à garagem"}</span>
@@ -2776,17 +2953,17 @@ function RoutePlannerView({
         )}
 
         <div className="planner-footer">
-          {optimizing && <div className="route-calculating" role="status">Calculando melhor percurso pelas ruas…</div>}
+          {optimizing && <div className="route-calculating" role="status">Calculando trajeto pelas ruas…</div>}
 
           <button
             type="button"
             className="btn-recalculate-primary"
             disabled={stops.length < 2 || optimizing}
             onClick={() => optimize()}
-            title="Recalcular melhor traçado e sequência (TSP)"
+            title={optimizeBy === "manual" ? "Atualizar traçado mantendo ordem manual das paradas" : "Recalcular melhor traçado e sequência (TSP)"}
           >
             <Zap size={14} className={optimizing ? "spin" : ""} />
-            <span>{optimizing ? "Calculando rota…" : "Recalcular Rota"}</span>
+            <span>{optimizing ? "Calculando rota…" : (optimizeBy === "manual" ? "Atualizar Trajeto Manual" : "Recalcular Rota")}</span>
           </button>
 
           <div className="actions-grid-2x2">
@@ -2888,7 +3065,7 @@ function RoutePlannerView({
 
       <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
         <header className="planner-print-header">
-          <div className="report-logo"><span>↗</span><b>Rota fácil</b></div>
+          <div className="report-logo"><img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} /><b>Rota fácil</b></div>
           <div>
             <h1>ROMANEIO DE ROTA</h1>
             <p>{routeName.trim() || `Rota ${formatDateBR(routeDate)}`}</p>

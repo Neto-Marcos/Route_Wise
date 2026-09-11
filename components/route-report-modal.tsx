@@ -246,6 +246,17 @@ export function RouteReportModal({
               <div className="report-meta-box">
                 <span>Veículo / Placa</span>
                 <strong>{route.plate || route.vehicle_name || "Frota"}</strong>
+                {(() => {
+                  const totalBoxes = deliveryStops.reduce((sum, s) => sum + (s.boxes || 0), 0);
+                  const totalM3 = deliveryStops.reduce((sum, s) => sum + (s.volume_m3 || 0), 0);
+                  return (totalBoxes > 0 || totalM3 > 0) ? (
+                    <small style={{ display: "block", marginTop: "4px", color: "#087f5b", fontWeight: "700" }}>
+                      {totalBoxes > 0 && `${totalBoxes} volumes`}
+                      {totalBoxes > 0 && totalM3 > 0 && " · "}
+                      {totalM3 > 0 && `${totalM3.toFixed(2)} m³`}
+                    </small>
+                  ) : null;
+                })()}
               </div>
             </header>
 
@@ -261,12 +272,14 @@ export function RouteReportModal({
               <table className="report-table-stops">
                 <thead>
                   <tr>
-                    <th style={{ width: "50px", textAlign: "center" }}>Ordem</th>
-                    <th style={{ width: "110px" }}>Posição no Baú</th>
+                    <th style={{ width: "45px", textAlign: "center" }}>Ordem</th>
+                    <th style={{ width: "100px" }}>Posição Baú</th>
                     <th>Destino / Cliente</th>
                     <th>Cidade / Endereço</th>
-                    <th style={{ width: "90px", textAlign: "center" }}>Entrega Nº</th>
-                    <th style={{ width: "80px", textAlign: "center" }}>Conferido</th>
+                    <th style={{ width: "70px", textAlign: "center" }}>Volumes</th>
+                    <th style={{ width: "70px", textAlign: "center" }}>Cubagem</th>
+                    <th style={{ width: "80px", textAlign: "center" }}>Entrega Nº</th>
+                    <th style={{ width: "65px", textAlign: "center" }}>Conferido</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -277,17 +290,19 @@ export function RouteReportModal({
 
                     return (
                       <tr key={stop.id || idx}>
-                        <td style={{ textAlign: "center", fontWeight: "800", fontSize: "15px", color: "#087f5b" }}>#{idx + 1}</td>
+                        <td style={{ textAlign: "center", fontWeight: "800", fontSize: "14px", color: "#087f5b" }}>#{idx + 1}</td>
                         <td>
-                          {isFirstLoaded && <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "2px 7px", borderRadius: "6px", fontWeight: "750", fontSize: "11px" }}>FUNDO</span>}
-                          {isLastLoaded && <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 7px", borderRadius: "6px", fontWeight: "750", fontSize: "11px" }}>PORTA</span>}
-                          {!isFirstLoaded && !isLastLoaded && <span style={{ color: "#64748b", fontSize: "11px" }}>Meio do Baú</span>}
+                          {isFirstLoaded && <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "2px 6px", borderRadius: "5px", fontWeight: "750", fontSize: "10.5px" }}>FUNDO</span>}
+                          {isLastLoaded && <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 6px", borderRadius: "5px", fontWeight: "750", fontSize: "10.5px" }}>PORTA</span>}
+                          {!isFirstLoaded && !isLastLoaded && <span style={{ color: "#64748b", fontSize: "10.5px" }}>Meio</span>}
                         </td>
                         <td><b>{stop.name}</b></td>
                         <td className="addr-cell">{stop.address}</td>
+                        <td style={{ textAlign: "center", fontWeight: "600" }}>{stop.boxes !== undefined && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}</td>
+                        <td style={{ textAlign: "center", fontWeight: "600" }}>{stop.volume_m3 !== undefined && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}</td>
                         <td style={{ textAlign: "center", fontWeight: "700" }}>{originalIndex}ª entrega</td>
                         <td style={{ textAlign: "center" }}>
-                          <div style={{ width: "20px", height: "20px", border: "2px solid #94a3b8", borderRadius: "4px", margin: "auto" }} />
+                          <div style={{ width: "18px", height: "18px", border: "2px solid #94a3b8", borderRadius: "4px", margin: "auto" }} />
                         </td>
                       </tr>
                     );

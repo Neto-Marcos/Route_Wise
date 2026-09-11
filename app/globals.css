@@ -1,8 +1,8 @@
 :root {
   --ink: #0f172a;
-  --navy: #0b1220;
-  --blue: #2563eb;
-  --blue-hover: #1d4ed8;
+  --navy: #14243a;
+  --blue: #059669;
+  --blue-hover: #047857;
   --paper: #f8fafc;
   --card: #ffffff;
   --card-subtle: #f1f5f9;
@@ -20,21 +20,21 @@
 [data-theme="dark"],
 .dark {
   --ink: #f8fafc;
-  --navy: #030712;
-  --blue: #3b82f6;
-  --blue-hover: #60a5fa;
-  --paper: #090e1a;
-  --card: #111a2e;
-  --card-subtle: #18233c;
-  --card-hover: #1e2c4a;
+  --navy: #0d1726;
+  --blue: #10b981;
+  --blue-hover: #34d399;
+  --paper: #0a111c;
+  --card: #131d2e;
+  --card-subtle: #19263c;
+  --card-hover: #1f304c;
   --muted: #94a3b8;
-  --line: #22324f;
+  --line: #20304a;
   --green: #10b981;
   --red: #ef4444;
   --amber: #f59e0b;
   --shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
-  --header-bg: rgba(17, 26, 46, 0.95);
-  --header-border: #22324f;
+  --header-bg: rgba(19, 29, 46, 0.95);
+  --header-border: #20304a;
 }
 * {
   box-sizing: border-box;
@@ -91,6 +91,12 @@ a {
   gap: 10px;
   font-size: 23px;
   letter-spacing: -1px;
+}
+.logo img {
+  display: block;
+  border-radius: 9px;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 .logo span {
   display: grid;
@@ -3150,12 +3156,81 @@ textarea:focus {
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 [data-theme="dark"] .stop-loading-tag {
   color: #fbbf24;
   background: rgba(245, 158, 11, 0.18);
   border-color: rgba(245, 158, 11, 0.4);
+}
+
+.stop-cubagem-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.stop-inputs-cubagem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stop-inputs-cubagem label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 1px 4px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.stop-inputs-cubagem input {
+  width: 38px;
+  height: 18px;
+  padding: 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.stop-inputs-cubagem input:focus {
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 3px;
+  box-shadow: none;
+}
+
+.stop-detail-cubagem-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.route-summary-cubagem-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 10.5px;
+  color: #ffffff;
+  margin-top: 2px;
 }
 
 .stop-item-actions {
@@ -3332,13 +3407,13 @@ textarea:focus {
 /* Compact Route Summary 3-Column Gradient Card */
 .route-summary-gradient-card {
   border-radius: 9px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #047857 0%, #059669 50%, #10b981 100%);
   color: #ffffff;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 3px 12px rgba(5, 150, 105, 0.25);
   flex-shrink: 0;
 }
 

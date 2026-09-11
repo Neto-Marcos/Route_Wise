@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "Rota fácil — Gestão de Rotas",
   "short_name": "Rota fácil",
   "description": "Planejamento, acompanhamento e comprovação de entregas.",
@@ -7,7 +7,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f4f7fb",
+  "background_color": "#14243A",
   "theme_color": "#14243A",
   "icons": [
     {
@@ -15,6 +15,34 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Central de Operações",
+      "short_name": "Central",
+      "description": "Acessar central do organizador",
+      "url": "/?portal=dispatcher",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Portal do Motorista",
+      "short_name": "Motorista",
+      "description": "Acessar viagens e entregas",
+      "url": "/?portal=driver",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
     }
   ]
 }

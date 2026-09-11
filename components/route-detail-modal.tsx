@@ -44,6 +44,8 @@ export type DetailedRoute = {
     is_origin: boolean;
     status: "pending" | "delivered";
     delivered_at?: string;
+    boxes?: number;
+    volume_m3?: number;
   }>;
   odometer?: Array<{
     phase: "start" | "finish";
@@ -323,6 +325,12 @@ export function RouteDetailModal({
                         </span>
                       </div>
                       <p className="stop-address">{stop.address}</p>
+                      {((stop.boxes !== undefined && stop.boxes > 0) || (stop.volume_m3 !== undefined && stop.volume_m3 > 0)) && (
+                        <div className="stop-detail-cubagem-tag">
+                          {stop.boxes !== undefined && stop.boxes > 0 && <span>📦 {stop.boxes} {stop.boxes === 1 ? "cx" : "cxs"}</span>}
+                          {stop.volume_m3 !== undefined && stop.volume_m3 > 0 && <span>📐 {stop.volume_m3} m³</span>}
+                        </div>
+                      )}
 
                       {isDelivered && (
                         <div className="delivery-proof-meta">
