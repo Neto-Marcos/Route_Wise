@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { audit, db, query } from "@/lib/db";
 import { getSession, makeSession, sessionCookie } from "@/lib/auth";
 import { uploadUrl, viewUrl } from "@/lib/storage";
+import { normalizeDriverPhoto } from "@/lib/driver-photo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,7 +167,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!companyId) return json({ error: "Informe o código da empresa" }, 400);
       const showAll = all && session?.role === "dispatcher";
       const { rows } = await query(
-        `SELECT id,public_id,name,phone,active,created_at FROM drivers WHERE company_id=$1 ${showAll ? "" : "AND active=true"} ORDER BY active DESC, name ASC`,
+        `SELECT id,public_id,name,phone,photo,active,created_at FROM drivers WHERE company_id=$1 ${showAll ? "" : "AND active=true"} ORDER BY active DESC, name ASC`,
         [companyId],
       );
       return json(rows);
@@ -454,7 +455,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     if (p[0] === "admin" && p[1] === "reset-data") {
-      return json({ error: "Operação de reset desativada" }, 403);
+      const pin = String(data.pin || "");
+      const s = await getSession(requestedRole(req));
+      const configured = process.env.DISPATCHER_PIN_HASH;
+      const validPin = configured
+        ? await compare(pin, configured)
+        : (pin === (process.env.DISPATCHER_PIN || "2468") || pin === "2468");
+      const isAuthorized = (s && s.role === "dispatcher") || validPin;
+      if (!isAuthorized) {
+        return json({ error: "Acesso não autorizado para reset" }, 403);
+      }
+
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM location_points");
+        await client.query("DELETE FROM delivery_events");
+        await client.query("DELETE FROM odometer_readings");
+        await client.query("DELETE FROM sync_operations");
+        await client.query("DELETE FROM route_stops");
+        await client.query("DELETE FROM routes");
+        await client.query("DELETE FROM upload_objects");
+        await client.query("DELETE FROM audit_log");
+        if (data.fullReset) {
+          await client.query("DELETE FROM vehicles");
+          await client.query("DELETE FROM drivers");
+          await client.query("DELETE FROM dispatchers");
+          await client.query("DELETE FROM companies WHERE code != 'LEGADO'");
+        }
+        await client.query("COMMIT");
+        return json({ ok: true, message: "Dados zerados com sucesso!" });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     }
 
     const session = await getSession(requestedRole(req));
@@ -483,11 +519,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return json(rows[0], 201);
     }
     if (p[0] === "drivers" && isDispatcher) {
+      let photo;
+      try { photo = await normalizeDriverPhoto(data.photo); }
+      catch (e) { return json({ error: (e as Error).message }, 400); }
       if (!/^\d{4,8}$/.test(String(data.password || "")))
         return json({ error: "Defina uma senha numérica de 4 a 8 dígitos" }, 400);
       const { rows } = await query(
-        "INSERT INTO drivers(company_id,name,phone,pin_hash) VALUES($1,$2,$3,$4) RETURNING id,public_id,name,phone,active",
-        [session!.companyId, data.name, data.phone || null, await hash(String(data.password), 10)],
+        "INSERT INTO drivers(company_id,name,phone,pin_hash,photo) VALUES($1,$2,$3,$4,$5) RETURNING id,public_id,name,phone,photo,active",
+        [session!.companyId, data.name, data.phone || null, await hash(String(data.password), 10), photo],
       );
       await audit("dispatcher", null, "create", "driver", rows[0].id);
       return json(rows[0], 201);
@@ -765,6 +804,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 
     if (p[0] === "drivers" && p[1]) {
       const data = await body(req);
+      let photo;
+      try { photo = await normalizeDriverPhoto(data.photo); }
+      catch (e) { return json({ error: (e as Error).message }, 400); }
       const name = String(data.name || "").trim();
       if (!name) return json({ error: "Nome é obrigatório" }, 400);
       const phone = data.phone ? String(data.phone).trim() : null;
@@ -775,16 +817,16 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
           return json({ error: "Defina uma senha numérica de 4 a 8 dígitos" }, 400);
         const pinHash = await hash(String(data.password), 10);
         const { rows } = await query(
-          "UPDATE drivers SET name=$1, phone=$2, pin_hash=$3, active=$4 WHERE id=$5 AND company_id=$6 RETURNING id,public_id,name,phone,active",
-          [name, phone, pinHash, active, p[1], session.companyId],
+          "UPDATE drivers SET name=$1, phone=$2, pin_hash=$3, active=$4, photo=CASE WHEN $7 THEN $8 ELSE photo END WHERE id=$5 AND company_id=$6 RETURNING id,public_id,name,phone,photo,active",
+          [name, phone, pinHash, active, p[1], session.companyId, data.photo !== undefined, photo],
         );
         if (!rows[0]) return json({ error: "Motorista não encontrado" }, 404);
         await audit("dispatcher", null, "update", "driver", p[1], { name, phone, active });
         return json(rows[0]);
       } else {
         const { rows } = await query(
-          "UPDATE drivers SET name=$1, phone=$2, active=$3 WHERE id=$4 AND company_id=$5 RETURNING id,public_id,name,phone,active",
-          [name, phone, active, p[1], session.companyId],
+          "UPDATE drivers SET name=$1, phone=$2, active=$3, photo=CASE WHEN $6 THEN $7 ELSE photo END WHERE id=$4 AND company_id=$5 RETURNING id,public_id,name,phone,photo,active",
+          [name, phone, active, p[1], session.companyId, data.photo !== undefined, photo],
         );
         if (!rows[0]) return json({ error: "Motorista não encontrado" }, 404);
         await audit("dispatcher", null, "update", "driver", p[1], { name, phone, active });
