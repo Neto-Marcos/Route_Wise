@@ -41,6 +41,9 @@ importers:
       react-dom:
         specifier: ^19.1.1
         version: 19.2.8(react@19.2.8)
+      sharp:
+        specifier: ^0.35.4
+        version: 0.35.4(@types/node@24.13.3)
       zod:
         specifier: ^4.1.8
         version: 4.5.4
@@ -774,8 +777,7 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@img/colour@1.1.0':
-    optional: true
+  '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.35.4':
     optionalDependencies:
@@ -978,8 +980,7 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  detect-libc@2.1.2:
-    optional: true
+  detect-libc@2.1.2: {}
 
   jose@6.2.12: {}
 
@@ -1077,8 +1078,7 @@ snapshots:
 
   scheduler@0.27.0: {}
 
-  semver@7.8.5:
-    optional: true
+  semver@7.8.5: {}
 
   sharp@0.35.4(@types/node@24.13.3):
     dependencies:
@@ -1112,7 +1112,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 24.13.3
-    optional: true
 
   source-map-js@1.2.1: {}
 

@@ -4195,7 +4195,7 @@ textarea:focus {
   padding-right: 2px;
 }
 
-.profile-item {
+.profile-list .profile-item {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -4210,13 +4210,13 @@ textarea:focus {
   transition: border-color 0.15s, background 0.15s, transform 0.08s;
 }
 
-.profile-item:hover {
+.profile-list .profile-item:hover {
   border-color: var(--blue);
   background: var(--card-subtle);
   transform: translateY(-1px);
 }
 
-.profile-avatar {
+.profile-list .profile-item > .profile-avatar {
   display: grid;
   place-items: center;
   width: 44px;
@@ -4229,6 +4229,15 @@ textarea:focus {
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
+
+.profile-avatar, .avatar { overflow: hidden; }
+.profile-avatar img, .avatar img { width: 100%; height: 100%; object-fit: cover; }
+.driver-photo-field { display: grid; gap: 10px; min-width: 0; }
+.driver-photo-field > img { border-radius: 16px; object-fit: cover; }
+.driver-photo-field small { color: var(--muted); }
+.driver-photo-field input[type="file"] { width: 100%; min-width: 0; font-size: 13px; }
+.driver-photo-field .button { justify-self: start; }
+.photo-processing-guard { position: absolute; width: 1px; height: 1px; opacity: 0; }
 
 .profile-details {
   display: flex;
@@ -4435,3 +4444,74 @@ textarea:focus {
   height: 18px;
   cursor: pointer;
 }
+
+/* === Travel Options Card & Responsive Segmented Pills === */
+.travel-options-card {
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.travel-options-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin: 10px 0;
+}
+
+.travel-opt-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.option-segmented-pills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  background: var(--surface-muted, rgba(255, 255, 255, 0.06));
+  padding: 3px;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.option-pill {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.option-pill.active {
+  background: #10b981 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 480px) {
+  .option-segmented-pills {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .option-pill {
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+}
+

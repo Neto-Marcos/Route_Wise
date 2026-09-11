@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -65,6 +66,7 @@ type Driver = {
   public_id: string;
   name: string;
   phone?: string;
+  photo?: string | null;
   active?: boolean;
 };
 
@@ -705,7 +707,7 @@ function DriverPicker({
                   className="profile-avatar"
                   style={{ background: getAvatarGradient(d.name) }}
                 >
-                  {d.name.slice(0, 2).toUpperCase()}
+                  {d.photo ? <Image src={d.photo} alt="" width={44} height={44} unoptimized /> : d.name.slice(0, 2).toUpperCase()}
                 </span>
                 <div className="profile-details">
                   <b>{d.name}</b>
@@ -1224,7 +1226,6 @@ function Dispatcher({
   return (
     <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
       <aside className="sidebar">
-        <Logo />
         <button className="sidebar-collapse" type="button" aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} aria-expanded={!sidebarCollapsed} onClick={() => {
           const next = !sidebarCollapsed;
           setSidebarCollapsed(next);
@@ -1546,6 +1547,45 @@ function Status({ value }: { value: string }) {
   };
   return <span className={`status ${value}`}>{labels[value] || value}</span>;
 }
+function DriverPhotoField({ initialPhoto }: { initialPhoto?: string | null }) {
+  const [photo, setPhoto] = useState(initialPhoto || "");
+  const [error, setError] = useState("");
+  const [processing, setProcessing] = useState(false);
+  return <div className="driver-photo-field">
+    <input type="hidden" name="photo" value={photo} />
+    {photo && <Image src={photo} alt="Prévia da foto do motorista" width={80} height={80} unoptimized />}
+    <label>Foto do motorista (opcional)
+      <input type="file" accept="image/jpeg,image/png,image/webp" disabled={processing} onChange={async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        setError("");
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+          setError("Escolha uma imagem JPG, PNG ou WebP de até 10 MB."); return;
+        }
+        setProcessing(true);
+        try {
+          const bitmap = await createImageBitmap(file);
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 256;
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error();
+            const side = Math.min(bitmap.width, bitmap.height);
+            context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 256, 256);
+            setPhoto(canvas.toDataURL("image/jpeg", 0.85));
+          } finally { bitmap.close(); }
+        } catch { setError("Não foi possível abrir a foto. Tente outra imagem."); }
+        finally { setProcessing(false); }
+      }} />
+    </label>
+    {processing && <><small>Preparando foto…</small><input className="photo-processing-guard" required value="" onChange={() => {}} aria-label="Aguarde o processamento da foto" /></>}
+    <small>A foto aparecerá na seleção de motoristas da empresa.</small>
+    {photo && <button type="button" className="button secondary compact" disabled={processing} onClick={() => setPhoto("")}>Remover foto</button>}
+    {error && <p role="alert" className="form-error">{error}</p>}
+  </div>;
+}
+
 function Registry({
   kind,
   reload,
@@ -1581,6 +1621,7 @@ function Registry({
                 name: form.get("name"),
                 phone: form.get("phone"),
                 password: form.get("password"),
+                photo: form.get("photo") || null,
               }
             : {
                 name: form.get("name"),
@@ -1614,6 +1655,7 @@ function Registry({
                 name: form.get("name"),
                 phone: form.get("phone"),
                 password: form.get("password") || undefined,
+                photo: form.get("photo") || null,
                 active: form.get("active") === "on",
               }
             : {
@@ -1706,7 +1748,7 @@ function Registry({
           return (
             <article key={i.id} className={!isActive ? "item-inactive" : ""}>
               <span className={`avatar ${!isActive ? "inactive" : ""}`}>
-                {(isVehicle ? (i as Vehicle).plate : i.name).slice(0, 2).toUpperCase()}
+                {!isVehicle && (i as Driver).photo ? <Image src={(i as Driver).photo!} alt="" width={42} height={42} unoptimized /> : (isVehicle ? (i as Vehicle).plate : i.name).slice(0, 2).toUpperCase()}
               </span>
               <div className="registry-info">
                 <div className="registry-name-line">
@@ -1766,6 +1808,7 @@ function Registry({
           onClose={() => setOpen(false)}
         >
           <form onSubmit={submitCreate} className="form-grid">
+            {kind === "driver" && <DriverPhotoField />}
             <label>
               Nome completo
               <input name="name" required placeholder="Ex.: Carlos da Silva" />
@@ -1836,6 +1879,7 @@ function Registry({
           onClose={() => setEditing(null)}
         >
           <form onSubmit={submitEdit} className="form-grid">
+            {kind === "driver" && <DriverPhotoField initialPhoto={(editing as Driver).photo} />}
             <label>
               Nome
               <input name="name" required defaultValue={editing.name} />
@@ -3727,7 +3771,7 @@ async function compressImage(
       resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
     };
     reader.onload = (e) => {
-      const img = new Image();
+  const img = new window.Image();
       img.onerror = () => {
         resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
       };

@@ -345,8 +345,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         if (!valid) {
           return json({ error: "PIN incorreto" }, 401);
         }
-        const comp = await query("SELECT id FROM companies LIMIT 1");
-        const companyId = comp.rows[0]?.id || "00000000-0000-0000-0000-000000000000";
+        let comp = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
+        if (!comp.rows[0]) {
+          comp = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
+        }
+        const companyId = comp.rows[0].id;
         const res = json({ ok: true });
         res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", companyId }), "dispatcher"));
         return res;
@@ -518,6 +521,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       await audit("dispatcher", session!.dispatcherId || null, "create", "dispatcher", rows[0].id);
       return json(rows[0], 201);
     }
+    let targetCompanyId = session?.companyId;
+    if (targetCompanyId) {
+      const chk = await query("SELECT id FROM companies WHERE id=$1 AND active=true", [targetCompanyId]);
+      if (!chk.rows[0]) {
+        let fallback = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
+        if (!fallback.rows[0]) {
+          fallback = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
+        }
+        targetCompanyId = fallback.rows[0].id;
+      }
+    }
+
     if (p[0] === "drivers" && isDispatcher) {
       let photo;
       try { photo = await normalizeDriverPhoto(data.photo); }
@@ -526,7 +541,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return json({ error: "Defina uma senha numérica de 4 a 8 dígitos" }, 400);
       const { rows } = await query(
         "INSERT INTO drivers(company_id,name,phone,pin_hash,photo) VALUES($1,$2,$3,$4,$5) RETURNING id,public_id,name,phone,photo,active",
-        [session!.companyId, data.name, data.phone || null, await hash(String(data.password), 10), photo],
+        [targetCompanyId, data.name, data.phone || null, await hash(String(data.password), 10), photo],
       );
       await audit("dispatcher", null, "create", "driver", rows[0].id);
       return json(rows[0], 201);
@@ -538,7 +553,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const ratePerKm = data.rate_per_km !== undefined && data.rate_per_km !== null && data.rate_per_km !== "" ? Number(data.rate_per_km) : null;
       const { rows } = await query(
         "INSERT INTO vehicles(company_id,name,plate,current_odometer,rate_per_km) VALUES($1,$2,$3,$4,$5) RETURNING *",
-        [session!.companyId, data.name, plate, Number(data.odometer || 0), ratePerKm],
+        [targetCompanyId, data.name, plate, Number(data.odometer || 0), ratePerKm],
       );
       await audit("dispatcher", null, "create", "vehicle", rows[0].id);
       return json(rows[0], 201);
