@@ -8,5 +8,8 @@ Thumbs.db
 .next-corrupt-backup-*/
 node_modules/
 tsconfig.tsbuildinfo
+output/
+tmp/
+.tools/
 .env
 .env.local
