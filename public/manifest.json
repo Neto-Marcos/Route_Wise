@@ -11,15 +11,15 @@
   "theme_color": "#14243A",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "/icon-192.png",
       "sizes": "any",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon.svg",
+      "src": "/icon-512.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
@@ -35,14 +35,14 @@
       "short_name": "Central",
       "description": "Acessar central do organizador",
       "url": "/?portal=dispatcher",
-      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Portal do Motorista",
       "short_name": "Motorista",
       "description": "Acessar viagens e entregas",
       "url": "/?portal=driver",
-      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }
