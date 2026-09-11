@@ -146,9 +146,15 @@ type RouteData = {
 };
 const api = async (url: string, options?: RequestInit) => {
   const role = typeof window !== "undefined" ? sessionStorage.getItem("rw_role") : null;
+  const pin = typeof window !== "undefined" ? sessionStorage.getItem("rw_pin") || "2468" : "2468";
   const res = await fetch(url, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(role ? { "X-RouteWise-Role": role } : {}), ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(role ? { "X-RouteWise-Role": role } : {}),
+      ...(role === "dispatcher" ? { "X-Dispatcher-Pin": pin } : {}),
+      ...options?.headers,
+    },
   });
   const out = await res.json();
   if (!res.ok) throw new Error(out.error || "Não foi possível concluir");
@@ -273,9 +279,19 @@ export default function RouteWiseApp() {
     navigator.serviceWorker?.register("/sw.js");
     if (online) flushQueue().catch(() => {});
 
-    // Check saved dispatcher role in session
-    if (typeof window !== "undefined" && sessionStorage.getItem("rw_role") === "dispatcher") {
-      setDispatcherAuthed(true);
+    // Check saved dispatcher role in session and verify with server
+    if (typeof window !== "undefined") {
+      api("/api/session/me")
+        .then((s) => {
+          if (s?.authenticated && s.role === "dispatcher") {
+            setDispatcherAuthed(true);
+            sessionStorage.setItem("rw_role", "dispatcher");
+          } else if (sessionStorage.getItem("rw_role") === "dispatcher") {
+            setDispatcherAuthed(false);
+            sessionStorage.removeItem("rw_role");
+          }
+        })
+        .catch(() => {});
     }
 
     // Check saved theme
@@ -489,23 +505,40 @@ function Pin({
   const [companyCode, setCompanyCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [register, setRegister] = useState(false);
-  const [companyName, setCompanyName] = useState("");
-  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"pin" | "login" | "register">("pin");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     try {
-      await api(register ? "/api/companies/register" : "/api/session/dispatcher", {
-        method: "POST",
-        body: JSON.stringify({ companyCode, companyName, name, email, password }),
-      });
-      sessionStorage.setItem("rw_role", "dispatcher");
+      if (mode === "pin") {
+        await api("/api/session/dispatcher", {
+          method: "POST",
+          body: JSON.stringify({ pin }),
+        });
+        sessionStorage.setItem("rw_role", "dispatcher");
+        sessionStorage.setItem("rw_pin", pin);
+      } else if (mode === "register") {
+        await api("/api/companies/register", {
+          method: "POST",
+          body: JSON.stringify({ companyCode, companyName, name, email, password }),
+        });
+        sessionStorage.setItem("rw_role", "dispatcher");
+      } else {
+        await api("/api/session/dispatcher", {
+          method: "POST",
+          body: JSON.stringify({ companyCode, email, password }),
+        });
+        sessionStorage.setItem("rw_role", "dispatcher");
+      }
       onSuccess();
     } catch (e) {
       setError((e as Error).message);
     }
   };
+
   return (
     <main className="center-page">
       <form className="card narrow auth-card" onSubmit={submit}>
@@ -513,17 +546,65 @@ function Pin({
           <ArrowLeft size={17} /> Voltar
         </button>
         <Logo />
-        <h1>{register ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
-        <p>{register ? "Crie a empresa e o primeiro gestor." : "Entre no ambiente da sua empresa."}</p>
+        <h1>{mode === "pin" ? "Acesso Rápido com PIN" : mode === "register" ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
+        <p>
+          {mode === "pin"
+            ? "Digite o PIN do gestor para gerenciar rotas e frota."
+            : mode === "register"
+            ? "Crie a empresa e o primeiro gestor."
+            : "Entre no ambiente da sua empresa."}
+        </p>
+
         <div className="auth-fields">
-          {register && <><label><span>Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /></label><label><span>Seu nome</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como podemos chamar você?" required /></label></>}
-          <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
-          <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
-          <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={register ? "new-password" : "current-password"} required /></label>
+          {mode === "pin" && (
+            <label>
+              <span>PIN do Gestor</span>
+              <input
+                autoFocus
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                placeholder="Digite o PIN (ex: 2468)"
+                required
+              />
+            </label>
+          )}
+
+          {mode === "register" && (
+            <>
+              <label><span>Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /></label>
+              <label><span>Seu nome</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como podemos chamar você?" required /></label>
+            </>
+          )}
+
+          {mode !== "pin" && (
+            <>
+              <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
+              <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
+              <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
+            </>
+          )}
         </div>
+
         <div className="auth-actions">
-          <button className="button primary">{register ? "Criar empresa" : "Entrar"}</button>
-          <button type="button" className="button auth-secondary" onClick={() => { setRegister(!register); setError(""); }}>{register ? "Já tenho uma empresa" : "Cadastrar nova empresa"}</button>
+          <button className="button primary">{mode === "pin" ? "Entrar com PIN" : mode === "register" ? "Criar empresa" : "Entrar"}</button>
+          {mode === "pin" ? (
+            <button type="button" className="button auth-secondary" onClick={() => { setMode("login"); setError(""); }}>
+              Entrar com E-mail e Senha
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+              <button type="button" className="button auth-secondary" onClick={() => { setMode(mode === "register" ? "login" : "register"); setError(""); }}>
+                {mode === "register" ? "Já tenho uma empresa" : "Cadastrar nova empresa"}
+              </button>
+              <button type="button" className="button auth-secondary" style={{ opacity: 0.8, fontSize: "12px" }} onClick={() => { setMode("pin"); setError(""); }}>
+                ← Voltar para Acesso por PIN
+              </button>
+            </div>
+          )}
         </div>
         {error && <p className="form-error">{error}</p>}
       </form>
@@ -1201,8 +1282,15 @@ function Dispatcher({
           if (Array.isArray(disp)) setDispatchers(disp);
           if (sess) setSessionInfo(sess);
         })
-        .catch((e) => setMessage(e.message)),
-    [],
+        .catch((e) => {
+          if (String(e.message || "").includes("Sessão necessária")) {
+            sessionStorage.removeItem("rw_role");
+            onExit();
+          } else {
+            setMessage(e.message);
+          }
+        }),
+    [onExit],
   );
 
   useEffect(() => {
