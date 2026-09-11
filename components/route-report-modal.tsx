@@ -1,6 +1,7 @@
 "use client";
 import { Printer, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
+import { printElement } from "@/lib/print-document";
 
 export function RouteReportModal({
   route,
@@ -48,9 +49,8 @@ export function RouteReportModal({
 
   const duration = calculateDuration();
 
-  const printDocument = () => {
-    window.print();
-  };
+  const printDocument = () => printElement("printable-report", `Relatório - ${route.name}`)
+    .catch((error) => window.alert(error.message));
 
   return (
     <div className="modal-backdrop report-backdrop" onClick={onClose}>
@@ -229,103 +229,8 @@ export function RouteReportModal({
 
           {/* Footer note */}
           <footer className="report-doc-footer">
-            <small>Via 1: Arquivo Administrativo & Auditoria · Criar Rota · Gerado em {new Date().toLocaleDateString("pt-BR")}</small>
+            <small>Arquivo Administrativo & Auditoria · Criar Rota · Gerado em {new Date().toLocaleDateString("pt-BR")}</small>
           </footer>
-
-          {/* Page Break for LIFO Packing Guide */}
-          <div className="report-page-break" style={{ pageBreakBefore: "always", breakBefore: "page", paddingTop: "32px" }}>
-            <header className="report-doc-header" style={{ borderBottom: "2px solid #087f5b" }}>
-              <div className="report-logo">
-                <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
-                <b>Criar Rota</b>
-              </div>
-              <div className="report-title-block">
-                <h1 style={{ color: "#087f5b" }}>GUIA DE CARREGAMENTO DO BAÚ (LIFO)</h1>
-                <p><b>VIA DA EXPEDIÇÃO & CONFERÊNCIA</b> — Pode ser descartada após carregamento</p>
-              </div>
-              <div className="report-meta-box">
-                <span>Veículo / Placa</span>
-                <strong>{route.plate || route.vehicle_name || "Frota"}</strong>
-                {(() => {
-                  const totalBoxes = deliveryStops.reduce((sum, s) => sum + (s.boxes || 0), 0);
-                  const totalM3 = deliveryStops.reduce((sum, s) => sum + (s.volume_m3 || 0), 0);
-                  return (totalBoxes > 0 || totalM3 > 0) ? (
-                    <small style={{ display: "block", marginTop: "4px", color: "#087f5b", fontWeight: "700" }}>
-                      {totalBoxes > 0 && `${totalBoxes} volumes`}
-                      {totalBoxes > 0 && totalM3 > 0 && " · "}
-                      {totalM3 > 0 && `${totalM3.toFixed(2)} m³`}
-                    </small>
-                  ) : null;
-                })()}
-              </div>
-            </header>
-
-            <section className="report-section" style={{ marginTop: "16px" }}>
-              <div style={{ background: "#f0fdf4", border: "1.5px dashed #22c58b", borderRadius: "10px", padding: "12px 16px", marginBottom: "18px" }}>
-                <b style={{ color: "#087f5b", fontSize: "14px" }}>Regra LIFO de Carregamento:</b>
-                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#1e293b" }}>
-                  A <b>última entrega</b> entra <b>primeiro</b> (fundo do baú). A <b>primeira entrega</b> entra por <b>último</b> (porta do baú).
-                </p>
-              </div>
-
-              <h2 className="report-section-title">Ordem Sequencial de Entrada no Caminhão</h2>
-              <table className="report-table-stops">
-                <thead>
-                  <tr>
-                    <th style={{ width: "45px", textAlign: "center" }}>Ordem</th>
-                    <th style={{ width: "100px" }}>Posição Baú</th>
-                    <th>Destino / Cliente</th>
-                    <th>Cidade / Endereço</th>
-                    <th style={{ width: "70px", textAlign: "center" }}>Volumes</th>
-                    <th style={{ width: "70px", textAlign: "center" }}>Cubagem</th>
-                    <th style={{ width: "80px", textAlign: "center" }}>Entrega Nº</th>
-                    <th style={{ width: "65px", textAlign: "center" }}>Conferido</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...deliveryStops].reverse().map((stop, idx) => {
-                    const originalIndex = deliveryStops.findIndex((s) => s.id === stop.id) + 1;
-                    const isFirstLoaded = idx === 0;
-                    const isLastLoaded = idx === deliveryStops.length - 1;
-
-                    return (
-                      <tr key={stop.id || idx}>
-                        <td style={{ textAlign: "center", fontWeight: "800", fontSize: "14px", color: "#087f5b" }}>#{idx + 1}</td>
-                        <td>
-                          {isFirstLoaded && <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "2px 6px", borderRadius: "5px", fontWeight: "750", fontSize: "10.5px" }}>FUNDO</span>}
-                          {isLastLoaded && <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 6px", borderRadius: "5px", fontWeight: "750", fontSize: "10.5px" }}>PORTA</span>}
-                          {!isFirstLoaded && !isLastLoaded && <span style={{ color: "#64748b", fontSize: "10.5px" }}>Meio</span>}
-                        </td>
-                        <td><b>{stop.name}</b></td>
-                        <td className="addr-cell">{stop.address}</td>
-                        <td style={{ textAlign: "center", fontWeight: "600" }}>{stop.boxes !== undefined && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}</td>
-                        <td style={{ textAlign: "center", fontWeight: "600" }}>{stop.volume_m3 !== undefined && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}</td>
-                        <td style={{ textAlign: "center", fontWeight: "700" }}>{originalIndex}ª entrega</td>
-                        <td style={{ textAlign: "center" }}>
-                          <div style={{ width: "18px", height: "18px", border: "2px solid #94a3b8", borderRadius: "4px", margin: "auto" }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "28px", padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <div>
-                  <small style={{ color: "#64748b", display: "block" }}>Conferente responsável pela expedição:</small>
-                  <div style={{ width: "240px", borderBottom: "1px solid #94a3b8", marginTop: "26px" }} />
-                </div>
-                <div>
-                  <small style={{ color: "#64748b", display: "block" }}>Motorista confirmou o carregamento:</small>
-                  <div style={{ width: "240px", borderBottom: "1px solid #94a3b8", marginTop: "26px" }} />
-                </div>
-              </div>
-            </section>
-
-            <footer className="report-doc-footer" style={{ marginTop: "20px" }}>
-              <small>Via 2: Despacho e Carregamento · Documento operacional descartável após lacre do baú.</small>
-            </footer>
-          </div>
         </div>
       </div>
     </div>

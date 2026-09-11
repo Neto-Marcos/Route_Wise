@@ -52,6 +52,7 @@ import { LiveFleetMap } from "./live-fleet-map";
 import { DriverLiveMap } from "./driver-live-map";
 import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
+import { printElement } from "@/lib/print-document";
 
 type DispatcherUser = {
   id: string;
@@ -146,13 +147,11 @@ type RouteData = {
 };
 const api = async (url: string, options?: RequestInit) => {
   const role = typeof window !== "undefined" ? sessionStorage.getItem("rw_role") : null;
-  const pin = typeof window !== "undefined" ? sessionStorage.getItem("rw_pin") || "2468" : "2468";
   const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...(role ? { "X-RouteWise-Role": role } : {}),
-      ...(role === "dispatcher" ? { "X-Dispatcher-Pin": pin } : {}),
       ...options?.headers,
     },
   });
@@ -184,85 +183,6 @@ export function formatDateBR(dateStr?: string | null): string {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
   return clean;
-}
-
-function TopNavBar({
-  activePortal,
-  setActivePortal,
-  theme,
-  setTheme,
-  online,
-  driverName,
-  isDispatcher,
-}: {
-  activePortal: "planner" | "dispatcher" | "driver" | "home";
-  setActivePortal: (portal: "planner" | "dispatcher" | "driver" | "home") => void;
-  theme: "light" | "dark";
-  setTheme: (theme: "light" | "dark") => void;
-  online: boolean;
-  driverName?: string;
-  isDispatcher?: boolean;
-}) {
-  return (
-    <header className="top-nav-bar no-print">
-      <div
-        className="top-nav-brand"
-        onClick={() => setActivePortal("home")}
-        role="button"
-        tabIndex={0}
-        title="Página inicial"
-      >
-        <Logo />
-      </div>
-
-      <nav className="top-nav-tabs" aria-label="Portais do sistema">
-        <button
-          type="button"
-          className={`top-nav-tab ${activePortal === "dispatcher" ? "active" : ""}`}
-          onClick={() => setActivePortal("dispatcher")}
-        >
-          <SlidersHorizontal size={16} />
-          <span>Central do Organizador</span>
-        </button>
-
-        <button
-          type="button"
-          className={`top-nav-tab ${activePortal === "driver" ? "active" : ""}`}
-          onClick={() => setActivePortal("driver")}
-        >
-          <Truck size={16} />
-          <span>Portal do Motorista{driverName ? ` (${driverName.split(" ")[0]})` : ""}</span>
-        </button>
-      </nav>
-
-      <div className="top-nav-actions">
-        {(driverName || isDispatcher) && (
-          <div className="active-user-pill" title="Usuário conectado">
-            <UserRound size={13} />
-            <span>{driverName ? `Motorista: ${driverName.split(" ")[0]}` : "Gestor: Central"}</span>
-          </div>
-        )}
-
-        <button
-          type="button"
-          className="theme-toggle-btn"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          title={`Alternar para tema ${theme === "dark" ? "claro" : "escuro"}`}
-          aria-label="Alternar tema"
-        >
-          {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
-
-        <div
-          className={`connection-pill ${online ? "online" : "offline"}`}
-          title={online ? "Conexão ativa e sincronizada" : "Operando offline"}
-        >
-          <span className="dot" />
-          <span>{online ? "Online" : "Offline"}</span>
-        </div>
-      </div>
-    </header>
-  );
 }
 
 export default function RouteWiseApp() {
@@ -334,15 +254,6 @@ export default function RouteWiseApp() {
 
   return (
     <div className="app">
-      <TopNavBar
-        activePortal={activePortal}
-        setActivePortal={setActivePortal}
-        theme={theme}
-        setTheme={handleThemeChange}
-        online={online}
-        driverName={selectedDriver?.name}
-        isDispatcher={dispatcherAuthed}
-      />
 
       {installPrompt && (
         <aside className="pwa-install-banner no-print">
@@ -502,25 +413,29 @@ function Pin({
   onBack: () => void;
   onSuccess: () => void;
 }) {
-  const [companyCode, setCompanyCode] = useState("");
+  const [companyCode, setCompanyCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("rw_company_code") || "";
+      if (saved === "LEGADO") {
+        localStorage.removeItem("rw_company_code");
+        return "";
+      }
+      return saved;
+    }
+    return "";
+  });
+  const [companyName, setCompanyName] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"pin" | "login" | "register">("pin");
-  const [pin, setPin] = useState("");
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     try {
-      if (mode === "pin") {
-        await api("/api/session/dispatcher", {
-          method: "POST",
-          body: JSON.stringify({ pin }),
-        });
-        sessionStorage.setItem("rw_role", "dispatcher");
-        sessionStorage.setItem("rw_pin", pin);
-      } else if (mode === "register") {
+      if (mode === "register") {
         await api("/api/companies/register", {
           method: "POST",
           body: JSON.stringify({ companyCode, companyName, name, email, password }),
@@ -546,33 +461,14 @@ function Pin({
           <ArrowLeft size={17} /> Voltar
         </button>
         <Logo />
-        <h1>{mode === "pin" ? "Acesso Rápido com PIN" : mode === "register" ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
+        <h1>{mode === "register" ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
         <p>
-          {mode === "pin"
-            ? "Digite o PIN do gestor para gerenciar rotas e frota."
-            : mode === "register"
+          {mode === "register"
             ? "Crie a empresa e o primeiro gestor."
             : "Entre no ambiente da sua empresa."}
         </p>
 
         <div className="auth-fields">
-          {mode === "pin" && (
-            <label>
-              <span>PIN do Gestor</span>
-              <input
-                autoFocus
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={8}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-                placeholder="Digite o PIN (ex: 2468)"
-                required
-              />
-            </label>
-          )}
-
           {mode === "register" && (
             <>
               <label><span>Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /></label>
@@ -580,31 +476,20 @@ function Pin({
             </>
           )}
 
-          {mode !== "pin" && (
-            <>
+          <>
               <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
               <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
               <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
-            </>
-          )}
+          </>
         </div>
 
         <div className="auth-actions">
-          <button className="button primary">{mode === "pin" ? "Entrar com PIN" : mode === "register" ? "Criar empresa" : "Entrar"}</button>
-          {mode === "pin" ? (
-            <button type="button" className="button auth-secondary" onClick={() => { setMode("login"); setError(""); }}>
-              Entrar com E-mail e Senha
-            </button>
-          ) : (
+          <button className="button primary">{mode === "register" ? "Criar empresa" : "Entrar"}</button>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
               <button type="button" className="button auth-secondary" onClick={() => { setMode(mode === "register" ? "login" : "register"); setError(""); }}>
                 {mode === "register" ? "Já tenho uma empresa" : "Cadastrar nova empresa"}
               </button>
-              <button type="button" className="button auth-secondary" style={{ opacity: 0.8, fontSize: "12px" }} onClick={() => { setMode("pin"); setError(""); }}>
-                ← Voltar para Acesso por PIN
-              </button>
             </div>
-          )}
         </div>
         {error && <p className="form-error">{error}</p>}
       </form>
@@ -621,7 +506,12 @@ function DriverPicker({
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [companyCode, setCompanyCode] = useState(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("rw_company_code") || "";
+      const saved = localStorage.getItem("rw_company_code") || "";
+      if (saved === "LEGADO") {
+        localStorage.removeItem("rw_company_code");
+        return "";
+      }
+      return saved;
     }
     return "";
   });
@@ -851,47 +741,7 @@ function DriverPicker({
                 />
               </label>
 
-              <div className="numeric-keypad" aria-label="Teclado numérico">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                  <button
-                    key={num}
-                    type="button"
-                    className="keypad-btn"
-                    onClick={() => {
-                      if (password.length < 8) setPassword((prev) => prev + num);
-                    }}
-                  >
-                    {num}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="keypad-btn keypad-clear"
-                  onClick={() => setPassword("")}
-                  title="Limpar"
-                >
-                  C
-                </button>
-                <button
-                  type="button"
-                  className="keypad-btn"
-                  onClick={() => {
-                    if (password.length < 8) setPassword((prev) => prev + "0");
-                  }}
-                >
-                  0
-                </button>
-                <button
-                  type="button"
-                  className="keypad-btn keypad-backspace"
-                  onClick={() => setPassword((prev) => prev.slice(0, -1))}
-                  title="Apagar"
-                >
-                  ⌫
-                </button>
-              </div>
-
-              <button className="button primary" disabled={password.length < 4}>
+              <button className="button primary" disabled={password.length < 4} style={{ marginTop: "16px" }}>
                 Ver minhas rotas
               </button>
               {error && <p className="form-error">{error}</p>}
@@ -1257,13 +1107,6 @@ function Dispatcher({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
     setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
-    const header = document.querySelector(".top-nav-bar");
-    if (!header) return;
-    const observer = new ResizeObserver(() => {
-      document.documentElement.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
-    });
-    observer.observe(header);
-    return () => observer.disconnect();
   }, []);
 
   const load = useCallback(
@@ -1344,9 +1187,11 @@ function Dispatcher({
             </button>
           ))}
         </nav>
-        <button className="exit" onClick={onExit}>
-          <ArrowLeft /> <span>Sair do painel</span>
-        </button>
+        <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <button className="exit" onClick={onExit}>
+            <ArrowLeft /> <span>Sair do painel</span>
+          </button>
+        </div>
       </aside>
       <main className="dashboard">
         <header>
@@ -2670,20 +2515,21 @@ function RoutePlannerView({
 
   const printRouteSheet = () => {
     if (stops.length < 2) return;
-    window.print();
+    printElement("planner-print-document", `Romaneio - ${routeName || "Nova rota"}`)
+      .catch((error) => window.alert(error.message));
   };
 
   const shareWhatsApp = () => {
     if (stops.length < 2) return;
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     const lines = [
-      `📦 *Criar Rota - ${name}*`,
-      `📅 Data: ${formatDateBR(routeDate)}`,
-      `📍 Entregas: ${stops.length - 1}`,
-      routeInfo ? `📏 Distância: ${routeInfo.km.toFixed(1)} km (~${formatRouteTime(routeInfo.seconds)})` : "",
+      `*CRIAR ROTA - ${name.toUpperCase()}*`,
+      `Data: ${formatDateBR(routeDate)}`,
+      `Entregas: ${stops.length - 1} pontos`,
+      routeInfo ? `Distancia estimada: ${routeInfo.km.toFixed(1)} km (~${formatRouteTime(routeInfo.seconds)})` : "",
       "",
-      "📋 *Itinerário:*",
-      ...stops.map((s, i) => `${i === 0 ? "🏢 Origem:" : `${i}.`} ${s.name} - ${s.address}`),
+      "*ITINERARIO:*",
+      ...stops.map((s, i) => `${i === 0 ? "Origem (CD):" : `Parada ${i}:`} ${s.name} - ${s.address}`),
     ].filter(Boolean).join("\n");
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(lines)}`, "_blank");
   };
@@ -3144,7 +2990,7 @@ function RoutePlannerView({
         <RouteMap stops={stops} geometry={geometry} visible={mobileShowMap} />
       </section>
 
-      <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
+      <section id="planner-print-document" className="planner-print-sheet" aria-label="Romaneio da rota planejada">
         <header className="planner-print-header">
           <div className="report-logo"><img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} /><b>Criar Rota</b></div>
           <div>
@@ -3158,16 +3004,100 @@ function RoutePlannerView({
           <span><b>{routeInfo ? `${routeInfo.km.toFixed(1)} km` : "—"}</b> estimados</span>
           <span><b>{routeInfo ? formatRouteTime(routeInfo.seconds) : "—"}</b> de percurso</span>
         </div>
+        {/* Tabela de paradas planejadas */}
         <h2>Sequência planejada</h2>
-        <ol className="planner-print-stops">
-          {stops.map((stop, index) => (
-            <li key={`${stop.lat}-${stop.lng}-${index}`}>
-              <span>{index === 0 ? "A" : index}</span>
-              <div><b>{index === 0 ? "Origem — " : ""}{stop.name}</b><small>{stop.address}</small></div>
-            </li>
-          ))}
-        </ol>
-        <footer>Documento gerado pelo Criar Rota em {new Date().toLocaleString("pt-BR")}</footer>
+        <table className="planner-print-table" style={{ width: "100%", borderCollapse: "collapse", marginBottom: "20px" }}>
+          <thead>
+            <tr style={{ background: "#f1f5f9", textAlign: "left", fontSize: "11px", color: "#475569" }}>
+              <th style={{ padding: "8px 10px", width: "45px" }}>Parada</th>
+              <th style={{ padding: "8px 10px" }}>Destino / Cliente</th>
+              <th style={{ padding: "8px 10px" }}>Endereço Completo</th>
+              <th style={{ padding: "8px 10px", width: "70px", textAlign: "center" }}>Volumes</th>
+              <th style={{ padding: "8px 10px", width: "70px", textAlign: "center" }}>Cubagem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stops.map((stop, index) => (
+              <tr key={`${stop.lat}-${stop.lng}-${index}`} style={{ borderBottom: "1px solid #e2e8f0", fontSize: "12px" }}>
+                <td style={{ padding: "8px 10px", fontWeight: "800", color: index === 0 ? "#0f172a" : "#2563eb" }}>
+                  {index === 0 ? "A" : index}
+                </td>
+                <td style={{ padding: "8px 10px", fontWeight: "700" }}>
+                  {index === 0 ? "Origem — " : ""}{stop.name}
+                </td>
+                <td style={{ padding: "8px 10px", color: "#475569" }}>{stop.address}</td>
+                <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                  {stop.boxes && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}
+                </td>
+                <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                  {stop.volume_m3 && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Guia LIFO de Carregamento integrado ao planejamento */}
+        {stops.length > 2 && (
+          <div className="planner-lifo-section" style={{ pageBreakBefore: "always", breakBefore: "page", marginTop: "24px", paddingTop: "20px", borderTop: "2px solid #087f5b" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+              <div>
+                <h2 style={{ color: "#087f5b", margin: 0, fontSize: "16px" }}>GUIA DE CARREGAMENTO DO BAÚ (LIFO)</h2>
+                <small style={{ color: "#64748b" }}>Ordem de carregamento no pátio antes da viagem iniciar</small>
+              </div>
+              <div style={{ padding: "4px 10px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "8px", color: "#166534", fontWeight: "750", fontSize: "11px" }}>
+                Expedição & Conferência
+              </div>
+            </div>
+
+            <div style={{ background: "#f0fdf4", border: "1.5px dashed #22c58b", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", fontSize: "11.5px", color: "#166534" }}>
+              <b>Regra LIFO:</b> A <b>última entrega</b> entra <b>primeiro</b> (fundo do baú). A <b>primeira entrega</b> entra por <b>último</b> (porta do baú).
+            </div>
+
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11.5px" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #cbd5e1", textAlign: "left", color: "#475569" }}>
+                  <th style={{ padding: "6px 8px", width: "45px", textAlign: "center" }}>Ordem</th>
+                  <th style={{ padding: "6px 8px", width: "85px" }}>Posição</th>
+                  <th style={{ padding: "6px 8px" }}>Destino</th>
+                  <th style={{ padding: "6px 8px" }}>Endereço</th>
+                  <th style={{ padding: "6px 8px", width: "65px", textAlign: "center" }}>Volumes</th>
+                  <th style={{ padding: "6px 8px", width: "65px", textAlign: "center" }}>Cubagem</th>
+                  <th style={{ padding: "6px 8px", width: "75px", textAlign: "center" }}>Entrega Nº</th>
+                  <th style={{ padding: "6px 8px", width: "55px", textAlign: "center" }}>Check</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stops.filter((_, idx) => idx > 0).reverse().map((stop, idx, arr) => {
+                  const originalIndex = stops.length - 1 - idx;
+                  const isFirstLoaded = idx === 0;
+                  const isLastLoaded = idx === arr.length - 1;
+
+                  return (
+                    <tr key={`lifo-${stop.lat}-${stop.lng}-${idx}`} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: "800", color: "#087f5b" }}>#{idx + 1}</td>
+                      <td style={{ padding: "6px 8px" }}>
+                        {isFirstLoaded && <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "1px 5px", borderRadius: "4px", fontWeight: "750", fontSize: "10px" }}>FUNDO</span>}
+                        {isLastLoaded && <span style={{ background: "#dcfce7", color: "#15803d", padding: "1px 5px", borderRadius: "4px", fontWeight: "750", fontSize: "10px" }}>PORTA</span>}
+                        {!isFirstLoaded && !isLastLoaded && <span style={{ color: "#64748b", fontSize: "10px" }}>Meio</span>}
+                      </td>
+                      <td style={{ padding: "6px 8px", fontWeight: "700" }}>{stop.name}</td>
+                      <td style={{ padding: "6px 8px", color: "#475569" }}>{stop.address}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "center" }}>{stop.boxes && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "center" }}>{stop.volume_m3 && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: "700" }}>{originalIndex}ª entrega</td>
+                      <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                        <div style={{ width: "16px", height: "16px", border: "1.5px solid #94a3b8", borderRadius: "3px", margin: "auto" }} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <footer>Documento operacional gerado pelo Criar Rota em {new Date().toLocaleString("pt-BR")}</footer>
       </section>
 
       {assignModalOpen && (

@@ -75,6 +75,73 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         return json([]);
       }
     }
+    if (p[0] === "road-places") {
+      const rawCoords = req.nextUrl.searchParams.get("coords") || "";
+      const points = rawCoords
+        .split(";")
+        .map((value) => value.split(",").map(Number))
+        .filter((value): value is [number, number] =>
+          value.length === 2 && value.every(Number.isFinite),
+        )
+        .slice(0, 24);
+      if (!points.length) return json([]);
+
+      const lats = points.map(([lat]) => lat);
+      const lngs = points.map(([, lng]) => lng);
+      const padding = 0.16;
+      const south = Math.max(-90, Math.min(...lats) - padding);
+      const west = Math.max(-180, Math.min(...lngs) - padding);
+      const north = Math.min(90, Math.max(...lats) + padding);
+      const east = Math.min(180, Math.max(...lngs) + padding);
+      const viewbox = `${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)},${south.toFixed(5)}`;
+      try {
+        const places: Array<Record<string, unknown>> = [];
+        for (const [queryText, kind] of [["restaurant", "restaurant"], ["hotel pousada", "lodging"]] as const) {
+          const search = new URLSearchParams({
+            format: "jsonv2",
+            q: queryText,
+            viewbox,
+            bounded: "1",
+            limit: "30",
+            addressdetails: "1",
+          });
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?${search}`, {
+            headers: {
+              "User-Agent": "RouteWise/1.0 (route planning)",
+              Accept: "application/json",
+              "Accept-Language": "pt-BR,pt;q=0.9",
+            },
+            signal: AbortSignal.timeout(10000),
+            next: { revalidate: 3600 },
+          });
+          if (!response.ok) throw new Error(`Busca de locais respondeu ${response.status}`);
+          const data = await response.json();
+          for (const element of Array.isArray(data) ? data : []) {
+            const lat = Number(element.lat);
+            const lng = Number(element.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            const label = String(element.display_name || "");
+            const name = String(element.name || label.split(",")[0] || (kind === "restaurant" ? "Restaurante" : "Hospedagem"));
+            places.push({
+              id: `osm-${element.osm_type}-${element.osm_id}-${kind}`,
+              name,
+              kind,
+              lat,
+              lng,
+              address: label.split(",").slice(1, 4).join(",").trim(),
+              openingHours: "",
+              parking: false,
+            });
+          }
+          // Respeita o limite público de uma requisição por segundo do Nominatim.
+          if (kind === "restaurant") await new Promise((resolveDelay) => setTimeout(resolveDelay, 1050));
+        }
+        return json(places);
+      } catch (err) {
+        console.warn("Road places fetch failed:", err);
+        return json([]);
+      }
+    }
     if (p[0] === "uploads" && p[1] === "local") {
       const rawKey = p.slice(2).join("/");
       const key = decodeURIComponent(rawKey);
@@ -172,17 +239,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       );
       return json(rows);
     }
-    let session = await getSession(requestedRole(req));
-    const headerPin = req.headers.get("x-dispatcher-pin");
-    const configuredPin = process.env.DISPATCHER_PIN_HASH;
-    const isPinValid = headerPin && (configuredPin ? await compare(headerPin, configuredPin) : (headerPin === (process.env.DISPATCHER_PIN || "2468") || headerPin === "2468"));
-    if (!session && isPinValid) {
-      let comp = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
-      if (!comp.rows[0]) {
-        comp = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
-      }
-      session = { role: "dispatcher", companyId: comp.rows[0].id };
-    }
+    const session = await getSession(requestedRole(req));
 
     if (p[0] === "vehicles" && p.length === 1) {
       if (!session) return json({ error: "Sessão necessária" }, 401);
@@ -340,32 +397,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
     }
     if (p.join("/") === "session/dispatcher") {
-      const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "local";
-      const key = `pin:${ip}`;
-      const now = Date.now();
-      const limiter = ((
-        globalThis as typeof globalThis & {
-          rwPin?: Map<string, { n: number; until: number }>;
-        }
-      ).rwPin ??= new Map());
-      if (data.pin) {
-        const configured = process.env.DISPATCHER_PIN_HASH;
-        const valid = configured
-          ? await compare(String(data.pin || ""), configured)
-          : String(data.pin) === (process.env.DISPATCHER_PIN || "2468");
-        if (!valid) {
-          return json({ error: "PIN incorreto" }, 401);
-        }
-        let comp = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
-        if (!comp.rows[0]) {
-          comp = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
-        }
-        const companyId = comp.rows[0].id;
-        const res = json({ ok: true });
-        res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", companyId }), "dispatcher"));
-        return res;
-      }
-
       const companyCode = String(data.companyCode || "").trim().toUpperCase();
       const email = String(data.email || "").trim().toLowerCase();
       const { rows } = await query("SELECT u.id,u.company_id,u.password_hash,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE c.code=$1 AND lower(u.email)=$2 AND u.active=true AND c.active=true", [companyCode, email]);
@@ -468,57 +499,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return json({ key, url: `/api/uploads/local/${encodeURIComponent(key)}` });
     }
 
-    if (p[0] === "admin" && p[1] === "reset-data") {
-      const pin = String(data.pin || "");
-      const s = await getSession(requestedRole(req));
-      const configured = process.env.DISPATCHER_PIN_HASH;
-      const validPin = configured
-        ? await compare(pin, configured)
-        : (pin === (process.env.DISPATCHER_PIN || "2468") || pin === "2468");
-      const isAuthorized = (s && s.role === "dispatcher") || validPin;
-      if (!isAuthorized) {
-        return json({ error: "Acesso não autorizado para reset" }, 403);
-      }
+    if (p[0] === "admin" && p[1] === "reset-data")
+      return json({ error: "Operação de reset desativada" }, 403);
 
-      const client = await db.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query("DELETE FROM location_points");
-        await client.query("DELETE FROM delivery_events");
-        await client.query("DELETE FROM odometer_readings");
-        await client.query("DELETE FROM sync_operations");
-        await client.query("DELETE FROM route_stops");
-        await client.query("DELETE FROM routes");
-        await client.query("DELETE FROM upload_objects");
-        await client.query("DELETE FROM audit_log");
-        if (data.fullReset) {
-          await client.query("DELETE FROM vehicles");
-          await client.query("DELETE FROM drivers");
-          await client.query("DELETE FROM dispatchers");
-          await client.query("DELETE FROM companies WHERE code != 'LEGADO'");
-        }
-        await client.query("COMMIT");
-        return json({ ok: true, message: "Dados zerados com sucesso!" });
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-      } finally {
-        client.release();
-      }
-    }
-
-    let session = await getSession(requestedRole(req));
-    const headerPin = req.headers.get("x-dispatcher-pin") || (data && data.pin ? String(data.pin) : "");
-    const configuredPin = process.env.DISPATCHER_PIN_HASH;
-    const isPinValid = headerPin && (configuredPin ? await compare(headerPin, configuredPin) : (headerPin === (process.env.DISPATCHER_PIN || "2468") || headerPin === "2468"));
-
-    if (!session && isPinValid) {
-      let comp = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
-      if (!comp.rows[0]) {
-        comp = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
-      }
-      session = { role: "dispatcher", companyId: comp.rows[0].id };
-    }
+    const session = await getSession(requestedRole(req));
 
     const isDispatcher = session?.role === "dispatcher";
 
@@ -549,9 +533,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const chk = await query("SELECT id FROM companies WHERE id=$1 AND active=true", [targetCompanyId]);
       if (!chk.rows[0]) {
         let fallback = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
-        if (!fallback.rows[0]) {
-          fallback = await query("INSERT INTO companies(code,name) VALUES('LEGADO','Operação Principal') ON CONFLICT (code) DO UPDATE SET active=true RETURNING id");
-        }
+        if (!fallback.rows[0]) return json({ error: "Empresa da sessão não encontrada" }, 401);
         targetCompanyId = fallback.rows[0].id;
       }
     }
@@ -789,6 +771,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         client.release();
       }
     }
+
+    if (p[0] === "admin" && p[1] === "reset-data")
+      return json({ error: "Operação de reset desativada" }, 403);
 
     return json({ error: "Não encontrado" }, 404);
   } catch (e) {

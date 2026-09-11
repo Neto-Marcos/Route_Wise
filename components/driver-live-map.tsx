@@ -148,6 +148,26 @@ function calcDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) 
   return 6371 * c;
 }
 
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+type RoadPlace = {
+  id: string;
+  name: string;
+  kind: "restaurant" | "lodging" | "rest_area";
+  lat: number;
+  lng: number;
+  address?: string;
+  openingHours?: string;
+  parking?: boolean;
+};
+
 export function DriverLiveMap({
   stops,
   currentLocation,
@@ -164,6 +184,21 @@ export function DriverLiveMap({
   const driverMarker = useRef<import("leaflet").Marker | null>(null);
   const accuracyCircle = useRef<import("leaflet").Circle | null>(null);
   const [expanded, setExpanded] = useState(false);
+
+  // Filtros rápidos no app do motorista
+  const [filterStations, setFilterStations] = useState(true);
+  const [filterRestaurants, setFilterRestaurants] = useState(true);
+  const [filterLodging, setFilterLodging] = useState(true);
+  const [roadPlaces, setRoadPlaces] = useState<RoadPlace[]>([]);
+
+  // Alerta Lei 13.103 (Lei do Motorista)
+  const [routeDurationHours, setRouteDurationHours] = useState<number | null>(null);
+  const [dismissRestAlert, setDismissRestAlert] = useState(false);
+
+  // Grupos de camadas para controle de exibição dinâmica
+  const stationsLayerGroup = useRef<import("leaflet").LayerGroup | null>(null);
+  const restLayerGroup = useRef<import("leaflet").LayerGroup | null>(null);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +224,11 @@ export function DriverLiveMap({
         14,
       );
       mapInstance.current = map;
+
+      // Cria os LayerGroups para permitir alternar os filtros de 1 toque sem recriar o mapa
+      stationsLayerGroup.current = L.layerGroup().addTo(map);
+      restLayerGroup.current = L.layerGroup().addTo(map);
+      setMapReady(true);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "&copy; OpenStreetMap",
@@ -226,7 +266,7 @@ export function DriverLiveMap({
           .addTo(map!);
       });
 
-      // Draw real route geometry from OSRM
+      // Draw real route geometry from OSRM & compute duration for Lei 13.103
       if (stops.length > 1) {
         const polyline = L.polyline(stops.map((s) => [s.lat, s.lng]), {
           color: "#2563eb",
@@ -234,90 +274,48 @@ export function DriverLiveMap({
           opacity: 0.88,
         }).addTo(map);
 
-        const coordsParam = stops.map((s) => `${s.lng},${s.lat}`).join(";");
-        fetch(`/api/osrm/trip/v1/driving/${coordsParam}?source=first&roundtrip=false&overview=full&geometries=geojson`)
-          .then((r) => r.json())
-          .then((data) => {
+        const stopsToRoute = [...stops];
+        const coordsParam = stopsToRoute.map((s, idx) => {
+          let lat = s.lat;
+          let lng = s.lng;
+          for (let j = 0; j < idx; j++) {
+            if (Math.abs(stopsToRoute[j].lat - lat) < 0.0002 && Math.abs(stopsToRoute[j].lng - lng) < 0.0002) {
+              lat += 0.00025 * (idx - j);
+              lng += 0.00025 * (idx - j);
+              break;
+            }
+          }
+          return `${lng.toFixed(6)},${lat.toFixed(6)}`;
+        }).join(";");
+
+        const fetchRoute = async () => {
+          try {
+            const res = await fetch(`/api/osrm/route/v1/driving/${coordsParam}?overview=full&geometries=geojson`);
+            const data = await res.json();
+            if (!cancelled && data?.routes?.[0]?.geometry?.coordinates) {
+              const pts = data.routes[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
+              polyline.setLatLngs(pts);
+              if (data.routes[0].duration) {
+                setRouteDurationHours(data.routes[0].duration / 3600);
+              }
+              return;
+            }
+          } catch {}
+
+          try {
+            const res = await fetch(`/api/osrm/trip/v1/driving/${coordsParam}?source=first&roundtrip=false&overview=full&geometries=geojson`);
+            const data = await res.json();
             if (!cancelled && data?.trips?.[0]?.geometry?.coordinates) {
               const pts = data.trips[0].geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
               polyline.setLatLngs(pts);
+              if (data.trips[0].duration) {
+                setRouteDurationHours(data.trips[0].duration / 3600);
+              }
             }
-          })
-          .catch(() => {});
-      }
+          } catch {}
+        };
 
-      // Add fuel stations near route
-      try {
-        fetch("/api/stations")
-          .then((r) => r.json())
-          .then((stations: any[]) => {
-            if (cancelled || !Array.isArray(stations) || !map) return;
-            stations
-              .map((st) => {
-                const sLat = parseFloat(String(st.latitude).replace(",", "."));
-                const sLng = parseFloat(String(st.longitude).replace(",", "."));
-                if (isNaN(sLat) || isNaN(sLng)) return null;
-                const minD = Math.min(...stops.map((sp) => calcDistanceKm(sp.lat, sp.lng, sLat, sLng)));
-                return { ...st, distance: minD, sLat, sLng };
-              })
-              .filter((st): st is NonNullable<typeof st> => st !== null && st.distance <= 30)
-              .sort((a, b) => a.distance - b.distance)
-              .slice(0, 15)
-              .forEach((st) => {
-                const fuelIcon = L.divIcon({
-                  className: "fuel-map-marker-wrap",
-                  html: `<span class="fuel-map-marker" style="background:#0284c7;color:#fff;border-radius:50%;padding:3px 5px;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;display:grid;place-items:center;" title="Posto: ${st.nome}">⛽</span>`,
-                  iconSize: [24, 24],
-                  iconAnchor: [12, 12],
-                });
-
-                const popupHtml = `
-                  <div style="font-size:12px;line-height:1.4">
-                    <b>⛽ ${st.nome}</b><br/>
-                    <span style="color:#64748b">${st.cidade}/${st.estado}</span><br/>
-                    <span>${st.distance.toFixed(1)} km da rota</span>
-                    ${st.diesels10 ? `<br/><b style="color:#16a34a">S10: R$ ${st.diesels10}</b>` : ""}
-                  </div>
-                `;
-
-                L.marker([st.sLat, st.sLng], { icon: fuelIcon })
-                  .bindPopup(popupHtml)
-                  .addTo(map!);
-              });
-          })
-          .catch(() => {});
-      } catch (err) {}
-
-      // Add rest stops / safe parking
-      if (stops.length > 0) {
-        REST_STOPS.map((rs) => {
-          const minD = Math.min(...stops.map((sp) => calcDistanceKm(sp.lat, sp.lng, rs.lat, rs.lng)));
-          return { ...rs, distance: minD };
-        })
-          .filter((rs) => rs.distance <= 70)
-          .slice(0, 8)
-          .forEach((rs) => {
-            const iconEmoji = rs.category === "pousada" ? "🛌" : rs.category === "restaurante" ? "🍽️" : "🅿️";
-            const restIcon = L.divIcon({
-              className: "rest-map-marker-wrap",
-              html: `<span class="rest-map-marker" style="background:#059669;color:#fff;border-radius:50%;padding:3px 5px;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;display:grid;place-items:center;" title="${rs.name}">${iconEmoji}</span>`,
-              iconSize: [24, 24],
-              iconAnchor: [12, 12],
-            });
-
-            const popupHtml = `
-              <div style="font-size:12px;line-height:1.4">
-                <b>${iconEmoji} ${rs.name}</b><br/>
-                <span style="color:#64748b">${rs.highway} · ${rs.city}/${rs.state}</span><br/>
-                <span style="color:#059669;font-weight:700;">${rs.distance.toFixed(1)} km da rota</span><br/>
-                <small>${rs.features.slice(0, 2).join(", ")}</small>
-              </div>
-            `;
-
-            L.marker([rs.lat, rs.lng], { icon: restIcon })
-              .bindPopup(popupHtml)
-              .addTo(map!);
-          });
+        fetchRoute();
       }
 
       // Add driver current location marker
@@ -359,10 +357,135 @@ export function DriverLiveMap({
       cancelled = true;
       if (mapInstance.current) {
         mapInstance.current.remove();
-        mapInstance.current = null;
+      mapInstance.current = null;
+      stationsLayerGroup.current = null;
+      restLayerGroup.current = null;
+      setMapReady(false);
       }
     };
   }, [stops, nextStop?.id]);
+
+  // Atualiza marcadores de Postos conforme filtro de 1 toque
+  useEffect(() => {
+    if (!mapReady || !stationsLayerGroup.current) return;
+    stationsLayerGroup.current.clearLayers();
+    if (!filterStations) return;
+
+    import("leaflet").then((L) => {
+      fetch("/api/stations")
+        .then((r) => r.json())
+        .then((stations: any[]) => {
+          if (!Array.isArray(stations) || !stationsLayerGroup.current) return;
+          stations
+            .map((st) => {
+              const sLat = parseFloat(String(st.latitude).replace(",", "."));
+              const sLng = parseFloat(String(st.longitude).replace(",", "."));
+              if (isNaN(sLat) || isNaN(sLng)) return null;
+              const minD = Math.min(...stops.map((sp) => calcDistanceKm(sp.lat, sp.lng, sLat, sLng)));
+              return { ...st, distance: minD, sLat, sLng };
+            })
+            .filter((st): st is NonNullable<typeof st> => st !== null && st.distance <= 35)
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 15)
+            .forEach((st) => {
+              const fuelIcon = L.divIcon({
+                className: "fuel-map-marker-wrap",
+                html: `<span class="fuel-map-marker" style="background:#0284c7;color:#fff;border-radius:50%;padding:3px 5px;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;display:grid;place-items:center;" title="Posto: ${st.nome}">⛽</span>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
+              });
+
+              const popupHtml = `
+                <div style="font-size:12px;line-height:1.4">
+                  <b>⛽ ${st.nome}</b><br/>
+                  <span style="color:#64748b">${st.cidade}/${st.estado}</span><br/>
+                  <span>${st.distance.toFixed(1)} km da rota</span>
+                  ${st.diesels10 ? `<br/><b style="color:#16a34a">S10: R$ ${st.diesels10}</b>` : ""}
+                </div>
+              `;
+
+              const m = L.marker([st.sLat, st.sLng], { icon: fuelIcon }).bindPopup(popupHtml);
+              stationsLayerGroup.current?.addLayer(m);
+            });
+        })
+        .catch(() => {});
+    });
+  }, [filterStations, stops, mapReady]);
+
+  useEffect(() => {
+    if (!stops.length) {
+      setRoadPlaces([]);
+      return;
+    }
+    const controller = new AbortController();
+    const coords = stops.map((stop) => `${stop.lat},${stop.lng}`).join(";");
+    fetch(`/api/road-places?coords=${encodeURIComponent(coords)}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : [])
+      .then((places) => setRoadPlaces(Array.isArray(places) ? places : []))
+      .catch((error) => {
+        if (error?.name !== "AbortError") setRoadPlaces([]);
+      });
+    return () => controller.abort();
+  }, [stops]);
+
+  // Atualiza marcadores de Restaurantes e Pousadas/Pátios conforme filtros de 1 toque
+  useEffect(() => {
+    if (!mapReady || !restLayerGroup.current) return;
+    restLayerGroup.current.clearLayers();
+    if (!filterRestaurants && !filterLodging) return;
+
+    import("leaflet").then((L) => {
+      const balancedPlaces = [
+        ...roadPlaces.filter((place) => place.kind === "restaurant").slice(0, 10),
+        ...roadPlaces.filter((place) => place.kind !== "restaurant").slice(0, 10),
+      ];
+      const dynamicPlaces = balancedPlaces.map((place) => ({
+        ...place,
+        category: place.kind === "restaurant" ? "restaurante" : place.kind === "lodging" ? "pousada" : "patio_seguro",
+        highway: place.address || "Próximo ao trajeto",
+        city: "",
+        state: "",
+        features: [place.openingHours ? `Horário: ${place.openingHours}` : "Consulte o funcionamento", place.parking ? "Estacionamento informado" : ""].filter(Boolean),
+        notes: place.kind === "rest_area" ? "Área de descanso mapeada no OpenStreetMap." : "Local mapeado próximo ao corredor da rota.",
+      }));
+      [...dynamicPlaces, ...REST_STOPS].map((rs) => {
+        const minD = Math.min(...stops.map((sp) => calcDistanceKm(sp.lat, sp.lng, rs.lat, rs.lng)));
+        return { ...rs, distance: minD };
+      })
+        .filter((rs) => {
+          if (rs.distance > 80) return false;
+          if (rs.category === "restaurante" && !filterRestaurants) return false;
+          if ((rs.category === "pousada" || rs.category === "patio_seguro") && !filterLodging) return false;
+          return true;
+        })
+        .slice(0, 20)
+        .forEach((rs) => {
+          const isLodging = rs.category === "pousada" || rs.category === "patio_seguro";
+          const iconEmoji = rs.category === "pousada" ? "🛏️" : rs.category === "restaurante" ? "🍽️" : "🅿️";
+          const bgColor = isLodging ? "#7c3aed" : "#ea580c";
+
+          const restIcon = L.divIcon({
+            className: "rest-map-marker-wrap",
+            html: `<span class="rest-map-marker" style="background:${bgColor};color:#fff;border-radius:50%;padding:3px 5px;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer;display:grid;place-items:center;" title="${rs.name}">${iconEmoji}</span>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+
+          const popupHtml = `
+            <div style="font-size:12px;line-height:1.4">
+              <b>${iconEmoji} ${escapeHtml(rs.name)}</b><br/>
+              <span style="color:#64748b">${escapeHtml([rs.highway, rs.city, rs.state].filter(Boolean).join(" · "))}</span><br/>
+              <span style="color:${bgColor};font-weight:700;">${rs.distance.toFixed(1)} km da rota</span><br/>
+              <small>${escapeHtml(rs.features.join(", "))}</small><br/>
+              <em style="font-size:11px;color:#10b981;">${escapeHtml(rs.notes)}</em>
+            </div>
+          `;
+
+          const m = L.marker([rs.lat, rs.lng], { icon: restIcon }).bindPopup(popupHtml);
+          restLayerGroup.current?.addLayer(m);
+        });
+    });
+  }, [filterRestaurants, filterLodging, stops, mapReady, roadPlaces]);
 
   // Update driver position dynamically without destroying the map
   useEffect(() => {
@@ -421,6 +544,8 @@ export function DriverLiveMap({
     });
   };
 
+  const isLongTrip = (routeDurationHours !== null && routeDurationHours >= 4) || stops.length >= 8;
+
   return (
     <div className={`driver-map-wrapper ${expanded ? "expanded" : ""}`}>
       <div className="driver-map-bar">
@@ -435,7 +560,7 @@ export function DriverLiveMap({
             onClick={fitFullRoute}
             title="Ver trajeto completo planejado"
           >
-            🗺️ Ver rota
+            🗺️ Rota
           </button>
           {currentLocation && (
             <button
@@ -468,6 +593,56 @@ export function DriverLiveMap({
           </button>
         </div>
       </div>
+
+      {/* Barra de filtros rápidos de postos, restaurantes e hospedagens próximas */}
+      <div className="driver-map-filters-row">
+        <button
+          type="button"
+          className={`quick-filter-chip ${filterStations ? "active" : ""}`}
+          onClick={() => setFilterStations(!filterStations)}
+          title="Exibir ou ocultar postos eFleet com preço de diesel"
+        >
+          <span>⛽</span> Postos
+        </button>
+        <button
+          type="button"
+          className={`quick-filter-chip ${filterRestaurants ? "active" : ""}`}
+          onClick={() => setFilterRestaurants(!filterRestaurants)}
+          title="Exibir ou ocultar restaurantes e churrascarias de rodovia"
+        >
+          <span>🍽️</span> Restaurantes
+        </button>
+        <button
+          type="button"
+          className={`quick-filter-chip ${filterLodging ? "active" : ""}`}
+          onClick={() => setFilterLodging(!filterLodging)}
+          title="Exibir ou ocultar hospedagens e áreas de descanso próximas"
+        >
+          <span>🛏️</span> Pernoite
+        </button>
+      </div>
+
+      {/* Alerta Parada Obrigatória da Lei do Motorista (Lei 13.103) */}
+      {isLongTrip && !dismissRestAlert && (
+        <div className="driver-rest-law-banner">
+          <div className="rest-law-content">
+            <b>⚠️ Lei 13.103 (Descanso Obrigatório)</b>
+            <p>
+              Viagem estimada em {routeDurationHours ? `${routeDurationHours.toFixed(1)}h` : "longo percurso"}.
+              Recomendada parada de 30 minutos a cada 4h/5h30 de direção contínua. Consulte opções de parada no mapa e confirme a estrutura do local.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rest-law-dismiss"
+            onClick={() => setDismissRestAlert(true)}
+            title="Fechar aviso"
+          >
+            Entendido
+          </button>
+        </div>
+      )}
+
       <div ref={mapElement} className="leaflet-driver-map" />
       {expanded && (
         <button

@@ -1,0 +1,2 @@
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS boxes integer DEFAULT 0;
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS volume_m3 numeric(10,2) DEFAULT 0;
