@@ -1171,6 +1171,17 @@ function Dispatcher({
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
+    const header = document.querySelector(".top-nav-bar");
+    if (!header) return;
+    const observer = new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
 
   const load = useCallback(
     () =>
@@ -1211,9 +1222,18 @@ function Dispatcher({
   };
 
   return (
-    <div className="workspace">
+    <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
       <aside className="sidebar">
         <Logo />
+        <button className="sidebar-collapse" type="button" aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} aria-expanded={!sidebarCollapsed} onClick={() => {
+          const next = !sidebarCollapsed;
+          setSidebarCollapsed(next);
+          localStorage.setItem("rw_sidebar_collapsed", String(next));
+          window.setTimeout(() => window.dispatchEvent(new Event("resize")), 0);
+        }}>
+          <ChevronRight size={18} style={{ transform: sidebarCollapsed ? undefined : "rotate(180deg)" }} />
+          <span>Recolher menu</span>
+        </button>
         <nav>
           {[
             ["overview", "Visão geral", <RouteIcon key="o" />],
@@ -1225,16 +1245,18 @@ function Dispatcher({
           ].map(([id, label, icon]) => (
             <button
               key={id as string}
+              title={label as string}
+              aria-label={label as string}
               className={tab === id ? "active" : ""}
               onClick={() => setTab(id as typeof tab)}
             >
               {icon}
-              {label}
+              <span>{label}</span>
             </button>
           ))}
         </nav>
         <button className="exit" onClick={onExit}>
-          <ArrowLeft /> Sair do painel
+          <ArrowLeft /> <span>Sair do painel</span>
         </button>
       </aside>
       <main className="dashboard">
