@@ -1,6 +1,6 @@
 {
-  "name": "RouteWise — Gestão de Rotas",
-  "short_name": "RouteWise",
+  "name": "Rota fácil — Gestão de Rotas",
+  "short_name": "Rota fácil",
   "description": "Planejamento, acompanhamento e comprovação de entregas.",
   "start_url": "/",
   "id": "/",
@@ -8,7 +8,7 @@
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f4f7fb",
-  "theme_color": "#0b1220",
+  "theme_color": "#14243A",
   "icons": [
     {
       "src": "/icon.svg",

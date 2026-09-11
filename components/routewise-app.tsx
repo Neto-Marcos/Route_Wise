@@ -329,7 +329,7 @@ export default function RouteWiseApp() {
           <div className="pwa-banner-content">
             <span className="pwa-icon">📱</span>
             <div>
-              <b>Instalar RouteWise no Celular</b>
+              <b>Instalar Rota fácil no Celular</b>
               <small>Acesso rápido direto da tela inicial, funciona offline</small>
             </div>
           </div>
@@ -411,7 +411,7 @@ function Logo() {
   return (
     <div className="logo">
       <span>↗</span>
-      <b>routewise</b>
+      <b>Rota fácil</b>
     </div>
   );
 }
@@ -2476,7 +2476,7 @@ function RoutePlannerView({
     if (stops.length < 2) return;
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     const lines = [
-      `📦 *RouteWise - ${name}*`,
+      `📦 *Rota fácil - ${name}*`,
       `📅 Data: ${formatDateBR(routeDate)}`,
       `📍 Entregas: ${stops.length - 1}`,
       routeInfo ? `📏 Distância: ${routeInfo.km.toFixed(1)} km (~${formatRouteTime(routeInfo.seconds)})` : "",
@@ -2503,7 +2503,7 @@ function RoutePlannerView({
           <div className="logo">
             <RouteIcon />
             <div className="logo-text-group">
-              <b>RouteWise</b>
+              <b>Rota fácil</b>
               <small className="logo-sub">Roteamento & Cargas</small>
             </div>
           </div>
@@ -2888,7 +2888,7 @@ function RoutePlannerView({
 
       <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
         <header className="planner-print-header">
-          <div className="report-logo"><span>↗</span><b>routewise</b></div>
+          <div className="report-logo"><span>↗</span><b>Rota fácil</b></div>
           <div>
             <h1>ROMANEIO DE ROTA</h1>
             <p>{routeName.trim() || `Rota ${formatDateBR(routeDate)}`}</p>
@@ -2909,7 +2909,7 @@ function RoutePlannerView({
             </li>
           ))}
         </ol>
-        <footer>Documento gerado pelo RouteWise em {new Date().toLocaleString("pt-BR")}</footer>
+        <footer>Documento gerado pelo Rota fácil em {new Date().toLocaleString("pt-BR")}</footer>
       </section>
 
       {assignModalOpen && (

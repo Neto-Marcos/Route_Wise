@@ -76,8 +76,8 @@ export function RouteReportModal({
           {/* Header */}
           <header className="report-doc-header">
             <div className="report-logo">
-              <span>↗</span>
-              <b>routewise</b>
+              <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
+              <b>Rota fácil</b>
             </div>
             <div className="report-title-block">
               <h1>ROMANEIO DE ENTREGA & PRESTAÇÃO DE CONTAS</h1>
@@ -168,7 +168,7 @@ export function RouteReportModal({
             </div>
           </section>
 
-          {/* Stops details table */}
+          {/* Stops List */}
           <section className="report-section">
             <h2 className="report-section-title">3. Paradas e Rastreamento de Entregas</h2>
             <table className="report-table-stops">
@@ -229,8 +229,88 @@ export function RouteReportModal({
 
           {/* Footer note */}
           <footer className="report-doc-footer">
-            <small>RouteWise — Sistema de Gestão de Frotas e Entregas · Documento gerado eletronicamente com registros criptográficos e GPS auditáveis.</small>
+            <small>Via 1: Arquivo Administrativo & Auditoria · Rota fácil · Gerado em {new Date().toLocaleDateString("pt-BR")}</small>
           </footer>
+
+          {/* Page Break for LIFO Packing Guide */}
+          <div className="report-page-break" style={{ pageBreakBefore: "always", breakBefore: "page", paddingTop: "32px" }}>
+            <header className="report-doc-header" style={{ borderBottom: "2px solid #087f5b" }}>
+              <div className="report-logo">
+                <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
+                <b>Rota fácil</b>
+              </div>
+              <div className="report-title-block">
+                <h1 style={{ color: "#087f5b" }}>GUIA DE CARREGAMENTO DO BAÚ (LIFO)</h1>
+                <p><b>VIA DA EXPEDIÇÃO & CONFERÊNCIA</b> — Pode ser descartada após carregamento</p>
+              </div>
+              <div className="report-meta-box">
+                <span>Veículo / Placa</span>
+                <strong>{route.plate || route.vehicle_name || "Frota"}</strong>
+              </div>
+            </header>
+
+            <section className="report-section" style={{ marginTop: "16px" }}>
+              <div style={{ background: "#f0fdf4", border: "1.5px dashed #22c58b", borderRadius: "10px", padding: "12px 16px", marginBottom: "18px" }}>
+                <b style={{ color: "#087f5b", fontSize: "14px" }}>Regra LIFO de Carregamento:</b>
+                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#1e293b" }}>
+                  A <b>última entrega</b> entra <b>primeiro</b> (fundo do baú). A <b>primeira entrega</b> entra por <b>último</b> (porta do baú).
+                </p>
+              </div>
+
+              <h2 className="report-section-title">Ordem Sequencial de Entrada no Caminhão</h2>
+              <table className="report-table-stops">
+                <thead>
+                  <tr>
+                    <th style={{ width: "50px", textAlign: "center" }}>Ordem</th>
+                    <th style={{ width: "110px" }}>Posição no Baú</th>
+                    <th>Destino / Cliente</th>
+                    <th>Cidade / Endereço</th>
+                    <th style={{ width: "90px", textAlign: "center" }}>Entrega Nº</th>
+                    <th style={{ width: "80px", textAlign: "center" }}>Conferido</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...deliveryStops].reverse().map((stop, idx) => {
+                    const originalIndex = deliveryStops.findIndex((s) => s.id === stop.id) + 1;
+                    const isFirstLoaded = idx === 0;
+                    const isLastLoaded = idx === deliveryStops.length - 1;
+
+                    return (
+                      <tr key={stop.id || idx}>
+                        <td style={{ textAlign: "center", fontWeight: "800", fontSize: "15px", color: "#087f5b" }}>#{idx + 1}</td>
+                        <td>
+                          {isFirstLoaded && <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "2px 7px", borderRadius: "6px", fontWeight: "750", fontSize: "11px" }}>FUNDO</span>}
+                          {isLastLoaded && <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 7px", borderRadius: "6px", fontWeight: "750", fontSize: "11px" }}>PORTA</span>}
+                          {!isFirstLoaded && !isLastLoaded && <span style={{ color: "#64748b", fontSize: "11px" }}>Meio do Baú</span>}
+                        </td>
+                        <td><b>{stop.name}</b></td>
+                        <td className="addr-cell">{stop.address}</td>
+                        <td style={{ textAlign: "center", fontWeight: "700" }}>{originalIndex}ª entrega</td>
+                        <td style={{ textAlign: "center" }}>
+                          <div style={{ width: "20px", height: "20px", border: "2px solid #94a3b8", borderRadius: "4px", margin: "auto" }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "28px", padding: "16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <div>
+                  <small style={{ color: "#64748b", display: "block" }}>Conferente responsável pela expedição:</small>
+                  <div style={{ width: "240px", borderBottom: "1px solid #94a3b8", marginTop: "26px" }} />
+                </div>
+                <div>
+                  <small style={{ color: "#64748b", display: "block" }}>Motorista confirmou o carregamento:</small>
+                  <div style={{ width: "240px", borderBottom: "1px solid #94a3b8", marginTop: "26px" }} />
+                </div>
+              </div>
+            </section>
+
+            <footer className="report-doc-footer" style={{ marginTop: "20px" }}>
+              <small>Via 2: Despacho e Carregamento · Documento operacional descartável após lacre do baú.</small>
+            </footer>
+          </div>
         </div>
       </div>
     </div>
