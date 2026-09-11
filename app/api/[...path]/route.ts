@@ -312,6 +312,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const password = String(data.password || "");
       if (code.length < 3 || !email.includes("@") || password.length < 6 || !String(data.companyName || "").trim())
         return json({ error: "Preencha empresa, código, e-mail e senha de ao menos 6 caracteres" }, 400);
+      const existing = await query("SELECT id FROM companies WHERE code=$1", [code]);
+      if (existing.rows.length > 0) {
+        return json({ error: `Já existe uma empresa cadastrada com o código "${code}". Utilize a opção "Já tenho uma empresa" para entrar ou escolha outro código.` }, 409);
+      }
       const client = await db.connect();
       try {
         await client.query("BEGIN");
@@ -474,7 +478,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         await client.query("DELETE FROM audit_log");
         if (data.fullReset) {
           await client.query("DELETE FROM vehicles");
-          await client.query("DELETE FROM drivers WHERE public_id NOT IN (SELECT public_id FROM drivers ORDER BY created_at ASC LIMIT 1)");
+          await client.query("DELETE FROM drivers");
+          await client.query("DELETE FROM dispatchers");
+          await client.query("DELETE FROM companies WHERE code != 'LEGADO'");
         }
         await client.query("COMMIT");
         return json({ ok: true, message: "Dados zerados com sucesso!" });
