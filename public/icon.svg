@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Criar Rota">
   <rect width="512" height="512" rx="112" fill="#14243A"/>
-  <path d="M144 368V144h112c55 0 88 25 88 64s-33 64-88 64H144"
+  <path d="M144 316V144h112c55 0 88 25 88 64s-33 64-88 64H144"
         fill="none" stroke="#10B981" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M244 272 344 368" fill="none" stroke="#10B981" stroke-width="48" stroke-linecap="butt"/>
   <path d="M376 400 368 306 282 392Z" fill="#10B981" stroke="#10B981" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="144" cy="384" r="28" fill="#FFFFFF"/>
 </svg>

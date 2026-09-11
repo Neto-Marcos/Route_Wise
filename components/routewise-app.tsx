@@ -1171,9 +1171,6 @@ function Dispatcher({
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
-  const [resetModalOpen, setResetModalOpen] = useState(false);
-  const [resetFull, setResetFull] = useState(false);
-  const [resetBusy, setResetBusy] = useState(false);
 
   const load = useCallback(
     () =>
@@ -1259,16 +1256,6 @@ function Dispatcher({
             </h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <button
-              type="button"
-              className="button-ghost"
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--red)", borderColor: "rgba(239, 68, 68, 0.3)" }}
-              onClick={() => setResetModalOpen(true)}
-              title="Zerar rotas e dados de teste"
-            >
-              <Trash2 size={14} />
-              <span>Zerar Dados</span>
-            </button>
             <span className="live">
               <i /> Atualização automática
             </span>
@@ -1343,67 +1330,6 @@ function Dispatcher({
         />
       )}
 
-      {resetModalOpen && (
-        <Modal title="Zerar Banco de Dados e Histórico" onClose={() => setResetModalOpen(false)}>
-          <div className="form-grid">
-            <div className="modal-info-box" style={{ borderColor: "rgba(239, 68, 68, 0.3)", background: "rgba(239, 68, 68, 0.06)" }}>
-              <Trash2 size={22} style={{ color: "var(--red)" }} />
-              <div>
-                <b>Atenção: Esta ação é irreversível!</b>
-                <p style={{ marginTop: "4px", fontSize: "12.5px" }}>
-                  Isto apagará todas as rotas (histórico, paradas, fotos e comprovantes), telemetria GPS e leituras de odômetro salvas.
-                </p>
-              </div>
-            </div>
-
-            <label className="checkbox-line" style={{ marginTop: "6px" }}>
-              <input
-                type="checkbox"
-                checked={resetFull}
-                onChange={(e) => setResetFull(e.target.checked)}
-              />
-              <span>Zerar também veículos e motoristas de teste cadastrados</span>
-            </label>
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
-              <button
-                type="button"
-                className="button-ghost"
-                style={{ flex: 1 }}
-                onClick={() => setResetModalOpen(false)}
-                disabled={resetBusy}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="button primary"
-                style={{ flex: 1, background: "var(--red)", borderColor: "var(--red)" }}
-                disabled={resetBusy}
-                onClick={async () => {
-                  setResetBusy(true);
-                  try {
-                    await api("/api/admin/reset-data", {
-                      method: "POST",
-                      body: JSON.stringify({ pin: "2468", fullReset: resetFull }),
-                    });
-                    setResetModalOpen(false);
-                    setMessage("Banco de dados zerado com sucesso!");
-                    load();
-                    setTimeout(() => setMessage(""), 5000);
-                  } catch (err) {
-                    alert((err as Error).message);
-                  } finally {
-                    setResetBusy(false);
-                  }
-                }}
-              >
-                {resetBusy ? "Zerando dados…" : "Sim, Zerar Tudo"}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
