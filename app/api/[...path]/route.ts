@@ -566,7 +566,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         const rr = await client.query(
           "INSERT INTO routes(company_id,name,route_date,optimize_by,circular,estimated_km,driver_id,vehicle_id,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
           [
-            session!.companyId,
+            targetCompanyId,
             data.name,
             data.routeDate,
             data.optimizeBy || "distance",
@@ -579,9 +579,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         );
         for (let i = 0; i < data.stops.length; i++) {
           const s = data.stops[i];
+          const boxes = s.boxes ? Number(s.boxes) : null;
+          const volume = s.volume_m3 ? Number(s.volume_m3) : null;
           await client.query(
-            "INSERT INTO route_stops(route_id,position,name,address,lat,lng,is_origin) VALUES($1,$2,$3,$4,$5,$6,$7)",
-            [rr.rows[0].id, i, s.name, s.address, s.lat, s.lng, i === 0],
+            "INSERT INTO route_stops(route_id,position,name,address,lat,lng,is_origin,boxes,volume_m3) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            [rr.rows[0].id, i, s.name, s.address, s.lat, s.lng, i === 0, boxes, volume],
           );
         }
         await client.query("COMMIT");

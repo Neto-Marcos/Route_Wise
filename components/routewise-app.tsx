@@ -3034,6 +3034,7 @@ function RoutePlannerView({
           )}
 
           {error && <p className="form-error">{error}</p>}
+          {successMessage && <p className="form-success" style={{ color: "#10b981", fontSize: "13px", fontWeight: "600", margin: "6px 0 0" }}>✓ {successMessage}</p>}
         </div>
       </div>
 

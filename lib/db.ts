@@ -9,10 +9,13 @@ async function backend():Promise<Client>{
   if(process.env.DATABASE_URL){
     let pool=shared.routewisePool;
     if(!pool){
-      pool=new Pool({connectionString:process.env.DATABASE_URL,max:8});
-      shared.routewisePool=pool;
+      pool = new Pool({connectionString:process.env.DATABASE_URL,max:8});
+      shared.routewisePool = pool;
       pool.query("ALTER TABLE upload_objects ADD COLUMN IF NOT EXISTS file_data bytea").catch((e)=>{
         console.warn("upload_objects auto-migration notice:", e?.message);
+      });
+      pool.query("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS boxes integer DEFAULT 0, ADD COLUMN IF NOT EXISTS volume_m3 numeric(10,2) DEFAULT 0").catch((e)=>{
+        console.warn("route_stops auto-migration notice:", e?.message);
       });
     }
     return {query:(text,values=[])=>pool!.query(text,values) as never,release:()=>{}}
