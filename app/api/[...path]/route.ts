@@ -448,6 +448,40 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
       return json({ key, url: `/api/uploads/local/${encodeURIComponent(key)}` });
     }
+
+    if (p[0] === "admin" && p[1] === "reset-data") {
+      const pin = String(data.pin || "");
+      const s = await getSession(requestedRole(req));
+      const isAuthorized = (s && s.role === "dispatcher") || pin === "2468" || pin === (process.env.DISPATCHER_PIN || "2468");
+      if (!isAuthorized) {
+        return json({ error: "Acesso não autorizado para reset" }, 403);
+      }
+
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM location_points");
+        await client.query("DELETE FROM delivery_events");
+        await client.query("DELETE FROM odometer_readings");
+        await client.query("DELETE FROM sync_operations");
+        await client.query("DELETE FROM route_stops");
+        await client.query("DELETE FROM routes");
+        await client.query("DELETE FROM upload_objects");
+        await client.query("DELETE FROM audit_log");
+        if (data.fullReset) {
+          await client.query("DELETE FROM vehicles");
+          await client.query("DELETE FROM drivers WHERE public_id NOT IN (SELECT public_id FROM drivers ORDER BY created_at ASC LIMIT 1)");
+        }
+        await client.query("COMMIT");
+        return json({ ok: true, message: "Dados zerados com sucesso!" });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
     const session = await getSession(requestedRole(req));
     const isDispatcher = session?.role === "dispatcher";
 
@@ -697,38 +731,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       } catch (e) {
         await client.query("ROLLBACK");
         throw e;
-      } finally {
-        client.release();
-      }
-    }
-
-    if (p[0] === "admin" && p[1] === "reset-data") {
-      const pin = String(data.pin || "");
-      const isAuthorized = (session && session.role === "dispatcher") || pin === "2468" || pin === (process.env.DISPATCHER_PIN || "2468");
-      if (!isAuthorized) {
-        return json({ error: "Acesso não autorizado para reset" }, 403);
-      }
-
-      const client = await db.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query("DELETE FROM location_points");
-        await client.query("DELETE FROM delivery_events");
-        await client.query("DELETE FROM odometer_readings");
-        await client.query("DELETE FROM sync_operations");
-        await client.query("DELETE FROM route_stops");
-        await client.query("DELETE FROM routes");
-        await client.query("DELETE FROM upload_objects");
-        await client.query("DELETE FROM audit_log");
-        if (data.fullReset) {
-          await client.query("DELETE FROM vehicles");
-          await client.query("DELETE FROM drivers WHERE public_id NOT IN (SELECT public_id FROM drivers ORDER BY created_at ASC LIMIT 1)");
-        }
-        await client.query("COMMIT");
-        return json({ ok: true, message: "Dados zerados com sucesso!" });
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
       } finally {
         client.release();
       }
