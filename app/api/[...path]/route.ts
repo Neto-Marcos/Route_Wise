@@ -452,7 +452,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (p[0] === "admin" && p[1] === "reset-data") {
       const pin = String(data.pin || "");
       const s = await getSession(requestedRole(req));
-      const isAuthorized = (s && s.role === "dispatcher") || pin === "2468" || pin === (process.env.DISPATCHER_PIN || "2468");
+      const configured = process.env.DISPATCHER_PIN_HASH;
+      const validPin = configured
+        ? await compare(pin, configured)
+        : (pin === (process.env.DISPATCHER_PIN || "2468") || pin === "2468");
+      const isAuthorized = (s && s.role === "dispatcher") || validPin;
       if (!isAuthorized) {
         return json({ error: "Acesso não autorizado para reset" }, 403);
       }
