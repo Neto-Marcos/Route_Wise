@@ -331,7 +331,7 @@ export default function RouteWiseApp() {
           <div className="pwa-banner-content">
             <span className="pwa-icon">📱</span>
             <div>
-              <b>Instalar Rota fácil no Celular</b>
+              <b>Instalar Criar Rota no Celular</b>
               <small>Acesso rápido direto da tela inicial, funciona offline</small>
             </div>
           </div>
@@ -413,7 +413,7 @@ function Logo() {
   return (
     <div className="logo">
       <img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} />
-      <b>Rota fácil</b>
+      <b>Criar Rota</b>
     </div>
   );
 }
@@ -2597,7 +2597,7 @@ function RoutePlannerView({
     if (stops.length < 2) return;
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     const lines = [
-      `📦 *Rota fácil - ${name}*`,
+      `📦 *Criar Rota - ${name}*`,
       `📅 Data: ${formatDateBR(routeDate)}`,
       `📍 Entregas: ${stops.length - 1}`,
       routeInfo ? `📏 Distância: ${routeInfo.km.toFixed(1)} km (~${formatRouteTime(routeInfo.seconds)})` : "",
@@ -2624,7 +2624,7 @@ function RoutePlannerView({
           <div className="logo">
             <img src="/icon.svg" width={32} height={32} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} />
             <div className="logo-text-group">
-              <b>Rota fácil</b>
+              <b>Criar Rota</b>
               <small className="logo-sub">Roteamento & Cargas</small>
             </div>
           </div>
@@ -3065,7 +3065,7 @@ function RoutePlannerView({
 
       <section className="planner-print-sheet" aria-label="Romaneio da rota planejada">
         <header className="planner-print-header">
-          <div className="report-logo"><img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} /><b>Rota fácil</b></div>
+          <div className="report-logo"><img src="/icon.svg" width={34} height={34} alt="" aria-hidden="true" style={{ borderRadius: "8px" }} /><b>Criar Rota</b></div>
           <div>
             <h1>ROMANEIO DE ROTA</h1>
             <p>{routeName.trim() || `Rota ${formatDateBR(routeDate)}`}</p>
@@ -3086,7 +3086,7 @@ function RoutePlannerView({
             </li>
           ))}
         </ol>
-        <footer>Documento gerado pelo Rota fácil em {new Date().toLocaleString("pt-BR")}</footer>
+        <footer>Documento gerado pelo Criar Rota em {new Date().toLocaleString("pt-BR")}</footer>
       </section>
 
       {assignModalOpen && (

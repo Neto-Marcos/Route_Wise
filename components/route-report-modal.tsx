@@ -77,7 +77,7 @@ export function RouteReportModal({
           <header className="report-doc-header">
             <div className="report-logo">
               <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
-              <b>Rota fácil</b>
+              <b>Criar Rota</b>
             </div>
             <div className="report-title-block">
               <h1>ROMANEIO DE ENTREGA & PRESTAÇÃO DE CONTAS</h1>
@@ -229,7 +229,7 @@ export function RouteReportModal({
 
           {/* Footer note */}
           <footer className="report-doc-footer">
-            <small>Via 1: Arquivo Administrativo & Auditoria · Rota fácil · Gerado em {new Date().toLocaleDateString("pt-BR")}</small>
+            <small>Via 1: Arquivo Administrativo & Auditoria · Criar Rota · Gerado em {new Date().toLocaleDateString("pt-BR")}</small>
           </footer>
 
           {/* Page Break for LIFO Packing Guide */}
@@ -237,7 +237,7 @@ export function RouteReportModal({
             <header className="report-doc-header" style={{ borderBottom: "2px solid #087f5b" }}>
               <div className="report-logo">
                 <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
-                <b>Rota fácil</b>
+                <b>Criar Rota</b>
               </div>
               <div className="report-title-block">
                 <h1 style={{ color: "#087f5b" }}>GUIA DE CARREGAMENTO DO BAÚ (LIFO)</h1>

@@ -3,25 +3,25 @@ import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Rota fácil — Gestão de Rotas",
+  title: "Criar Rota — Gestão de Rotas",
   description: "Planejamento, acompanhamento e comprovação de entregas.",
-  applicationName: "Rota fácil",
+  applicationName: "Criar Rota",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    title: "Rota fácil",
+    title: "Criar Rota",
     statusBarStyle: "default",
   },
   openGraph: {
-    title: "Rota fácil",
+    title: "Criar Rota",
     description: "Rotas claras. Entregas sob controle.",
-    images: ["https://criarrota.up.railway.app/brand/social.png"],
+    images: ["https://criarrota.com.br/brand/social.png"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Rota fácil",
+    title: "Criar Rota",
     description: "Rotas claras. Entregas sob controle.",
-    images: ["https://criarrota.up.railway.app/brand/social.png"],
+    images: ["https://criarrota.com.br/brand/social.png"],
   },
   icons: {
     icon: [
