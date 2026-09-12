@@ -55,6 +55,7 @@ import { DriverLiveMap } from "./driver-live-map";
 import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
 import { printElement } from "@/lib/print-document";
+import RoteirizadorPage from "./roteirizador-page";
 
 type DispatcherUser = {
   id: string;
@@ -1094,7 +1095,7 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers">(
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador">(
     "overview",
   );
   const [routes, setRoutes] = useState<RouteData[]>([]);
@@ -1176,6 +1177,7 @@ function Dispatcher({
             ["people", "Motoristas", <Users key="p" />],
             ["vehicles", "Veículos", <Truck key="v" />],
             ["dispatchers", "Gestores", <ShieldCheck key="g" />],
+            ["roteirizador", "Roteirizador", <FileText key="rot" />],
           ].map(([id, label, icon]) => (
             <button
               key={id as string}
@@ -1210,7 +1212,9 @@ function Dispatcher({
                     ? "Equipe de Motoristas"
                     : tab === "vehicles"
                       ? "Frota de Veículos"
-                      : "Gestores e Coordenadores"}
+                      : tab === "roteirizador"
+                        ? "Roteirizador Automático"
+                        : "Gestores e Coordenadores"}
             </h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -1255,6 +1259,9 @@ function Dispatcher({
             sessionInfo={sessionInfo}
             reload={load}
           />
+        )}
+        {tab === "roteirizador" && (
+          <RoteirizadorPage onBack={() => setTab("overview")} />
         )}
       </main>
 

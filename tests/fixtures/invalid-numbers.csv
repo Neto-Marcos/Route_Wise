@@ -1,0 +1,3 @@
+Pedido,Cliente,Endereço,Cidade,UF,Cubagem m3,Peso kg,Volumes,Produtos
+PED-301,Cliente Alfa,Rua das Flores 10,Campinas,SP,N/A,-,grátis,Brindes
+PED-302,Cliente Beta,Rua dos Lírios 20,Campinas,SP,-2.5,-50,0,Insumos

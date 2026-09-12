@@ -1,13 +1,13 @@
-# BRIEFING — 2026-09-12T17:56:41Z
+# BRIEFING — 2026-09-12T19:10:35Z
 
 ## Mission
-Supervise execution of client-side photo compression and idempotent offline queue via SWE Light path.
+Supervise end-to-end delivery of Automated Routing Engine for Criar Rota TMS (Excel/CSV spreadsheet upload, geographic clustering and bin packing, dispatch UI with driver assignment and DB persistence) via General Orchestrator.
 
 ## 🔒 My Identity
 - Archetype: sentinel
 - Working directory: C:\Users\Dmeno\Documents\Codex\2026-09-10\canva-plugin-canva-openai-curated-remote\work\Route_Wise\.agents\sentinel
-- Orchestrator: d62a2ebe-6841-4f74-b7da-af90f87ebbd2
-- Victory Auditor: 7ea96b52-1330-4490-9340-0518c9ac14f4
+- Orchestrator: bc371001-804a-438a-b833-4116b5d6c4d0
+- Victory Auditor: [to be spawned on victory claim]
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -15,24 +15,22 @@ Supervise execution of client-side photo compression and idempotent offline queu
 - Keep context ultra-light; do not write code or analyze problems
 
 ## User Context
-- **Last user request**: Implement Client-Side Photo Compression and Idempotent Offline Queue in Route_Wise (small and focused).
+- **Last user request**: Implement Automated Routing Engine for Criar Rota TMS based on Excel/CSV spreadsheets (clustering, bin-packing, dispatch UI, driver assignment, Drizzle DB insertion, driver app availability).
 - **Pending clarifications**: none
 - **Delivered results**: none
 
 ## Routing Decision
-- **Route**: SWE Light (`teamwork_preview_swe`)
-- **Rationale**: User explicitly specified "This is a single self-contained feature enhancement; keep it small and focused." and task is a single self-contained enhancement.
+- **Route**: General (`teamwork_preview_orchestrator`)
+- **Rationale**: Multi-part full-stack feature (spreadsheet upload/parser, algorithmic clustering/bin-packing, manager UI, Drizzle database integration, driver offline-ready integration) without explicit light/minimal request.
 
 ## Project Status
-- **Phase**: complete
+- **Phase**: in progress
 
 ## Victory Audit Status
-- **Triggered**: yes
-- **Verdict**: VICTORY CONFIRMED
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
-- C:\Users\Dmeno\Documents\Codex\2026-09-10\canva-plugin-canva-openai-curated-remote\work\Route_Wise\.agents\ORIGINAL_REQUEST.md — Verbatim user request record
-- C:\Users\Dmeno\Documents\Codex\2026-09-10\canva-plugin-canva-openai-curated-remote\work\Route_Wise\.agents\sentinel_victory_auditor\handoff.md — Independent Victory Audit Report
-- C:\Users\Dmeno\Documents\Codex\2026-09-10\canva-plugin-canva-openai-curated-remote\work\Route_Wise\.agents\swe_1\handoff.md — SWE Light Orchestrator Handoff
+- C:\Users\Dmeno\Documents\Codex\2026-09-10\canva-plugin-canva-openai-curated-remote\work\Route_Wise\.agents\ORIGINAL_REQUEST.md — Authoritative user requests
 

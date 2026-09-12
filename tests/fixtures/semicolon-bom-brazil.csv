@@ -1,0 +1,4 @@
+﻿Pedido;Cliente;Endereço;Cidade;UF;Cubagem m3;Peso kg;Volumes;Produtos
+PED-201;Supermercado Central;Av. Paulista, 1000;São Paulo;SP;3,50;520,50;20;Alimentos
+PED-202;Drogaria São Paulo;Rua Augusta, 450;São Paulo;SP;1,20;145,00;8;Medicamentos
+PED-203;Distribuidora Guarulhos;Av. Monteiro Lobato, 200;Guarulhos;SP;4,80;850,75;32;Bebidas

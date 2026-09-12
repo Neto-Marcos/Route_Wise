@@ -1,0 +1,13 @@
+Pedido,Cliente,Endereço,Cidade,UF,Cubagem m3,Peso kg,Volumes,Produtos
+PED-101,Mercado Sol Nascente,Av. Brasil 1500,Campinas,SP,2.50,320.0,15,Bebidas e Alimentos
+PED-102,Farmácia Central,Rua Barão de Jaguara 820,Campinas,SP,0.80,65.0,4,Medicamentos
+PED-103,Padaria São José,Av. Andrade Neves 450,Campinas,SP,1.40,180.0,8,Farinhas e Insumos
+PED-104,Auto Peças Sumaré,Av. Rebouças 900,Sumaré,SP,3.20,540.0,22,Peças Automotivas
+PED-105,Materiais Anhanguera,Rua José Ferreira 100,Hortolândia,SP,4.10,750.0,30,Ferragens
+PED-106,Supermercado Paulínia,Av. José Paulino 300,Paulínia,SP,5.00,900.0,35,Secos e Molhados
+PED-107,Lojas Americana,Rua Rui Barbosa 55,Americana,SP,3.80,610.0,18,Utilidades Domésticas
+PED-108,Atacado Santa Bárbara,Rod. SP-304 km 135,Santa Bárbara d'Oeste,SP,6.20,1100.0,45,Alimentos em Fardo
+PED-109,Restaurante Valinhos,Rua Doze de Outubro 45,Valinhos,SP,1.10,120.0,6,Hortifruti
+PED-110,Empório Vinhedo,Estrada da Boiada 1200,Vinhedo,SP,2.20,290.0,12,Bebidas Finas
+PED-111,Boutique Indaiatuba,Av. Presidente Vargas 700,Indaiatuba,SP,1.90,210.0,9,Vestuário
+PED-112,Centro Logístico Jundiaí,Av. dos Imigrantes 2500,Jundiaí,SP,7.50,1450.0,55,Cargas Diversas

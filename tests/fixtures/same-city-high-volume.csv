@@ -1,0 +1,11 @@
+Pedido,Cliente,Endereço,Cidade,UF,Cubagem m3,Peso kg,Volumes,Produtos
+PED-501,Cliente C1,Rua 1,Campinas,SP,5.0,1000.0,20,Carga 1
+PED-502,Cliente C2,Rua 2,Campinas,SP,6.0,1200.0,25,Carga 2
+PED-503,Cliente C3,Rua 3,Campinas,SP,7.0,1400.0,30,Carga 3
+PED-504,Cliente C4,Rua 4,Campinas,SP,8.0,1600.0,35,Carga 4
+PED-505,Cliente C5,Rua 5,Campinas,SP,5.5,1100.0,22,Carga 5
+PED-506,Cliente C6,Rua 6,Campinas,SP,6.5,1300.0,26,Carga 6
+PED-507,Cliente C7,Rua 7,Campinas,SP,4.0,800.0,16,Carga 7
+PED-508,Cliente C8,Rua 8,Campinas,SP,4.5,900.0,18,Carga 8
+PED-509,Cliente C9,Rua 9,Campinas,SP,5.0,1000.0,20,Carga 9
+PED-510,Cliente C10,Rua 10,Campinas,SP,3.5,700.0,14,Carga 10
