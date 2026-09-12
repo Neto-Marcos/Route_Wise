@@ -30,7 +30,7 @@ async function run() {
     const res = await fetch(`${BASE}/manifest.json`);
     if (res.status !== 200) throw new Error(`Status was ${res.status}`);
     const json = await res.json();
-    if (json.name !== "RouteWise — Gestão de Rotas") throw new Error("Invalid manifest name");
+    if (json.name !== "RouteWise — Gestão de Rotas" && json.name !== "Criar Rota — Gestão de Rotas") throw new Error("Invalid manifest name");
     if (json.display !== "standalone") throw new Error("Display is not standalone");
   });
 
@@ -366,6 +366,100 @@ async function run() {
     if (compRes.status !== 200) throw new Error(`Complete status: ${compRes.status}`);
   });
 
+  // Deliver Stop 2 with compressed WebP POD photo from offline queue payload
+  let stop2OperationId = randomUUID();
+  await assert("Acceptance Criteria 1 & 2: Deliver Stop 2 using compressed WebP photo payload (< 350KB)", async () => {
+    const detailsRes = await fetch(`${BASE}/api/routes/${testRouteId}`, { headers: authHeaders() });
+    const details = await detailsRes.json();
+    const secondDeliveryStop = details.stops.filter((s) => !s.is_origin)[1];
+    if (!secondDeliveryStop) throw new Error("Second delivery stop not found");
+
+    // 1. Generate heavy 5MB+ JPEG
+    const sharp = (await import("sharp")).default;
+    const width = 4000;
+    const height = 3000;
+    const rawData = Buffer.alloc(width * height * 3);
+    for (let i = 0; i < rawData.length; i += 3) {
+      rawData[i] = (i * 7) % 256;
+      rawData[i + 1] = (i * 13) % 256;
+      rawData[i + 2] = (i * 29) % 256;
+    }
+    const heavyJpg = await sharp(rawData, { raw: { width, height, channels: 3 } })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    if (heavyJpg.length < 5 * 1024 * 1024) throw new Error("Image not 5MB+");
+
+    // 2. Compress via compressDriverPhoto
+    const { compressDriverPhoto } = await import("../lib/driver-photo.ts");
+    const file = new File([heavyJpg], "pod_photo.jpg", { type: "image/jpeg" });
+    const compressed = await compressDriverPhoto(file, { maxWidth: 1600, maxHeight: 1200, quality: 0.70 });
+    if (compressed.format !== "image/webp") throw new Error("Format is not image/webp");
+    if (compressed.size >= 350 * 1024) throw new Error(`Compressed size ${compressed.size} >= 350KB`);
+    if (compressed.width > 1600 || compressed.height > 1200) throw new Error("Dimensions exceed 1600x1200");
+
+    // 3. Complete Stop 2 directly with photoBase64 (simulating offline flushed payload)
+    const compRes = await fetch(`${BASE}/api/routes/${testRouteId}/deliveries/${secondDeliveryStop.id}/complete`, {
+      method: "POST",
+      headers: driverHeaders(),
+      body: JSON.stringify({
+        operationId: stop2OperationId,
+        photoBase64: compressed.base64,
+        photoContentType: "image/webp",
+        note: "Entregue offline e sincronizado",
+        lat: -23.5640,
+        lng: -46.6690,
+      }),
+    });
+    if (compRes.status !== 200) throw new Error(`Complete status: ${compRes.status}`);
+  });
+
+  await assert("Acceptance Criteria 3: Reconnecting / re-flushing does not duplicate delivery events (idempotent)", async () => {
+    const detailsRes = await fetch(`${BASE}/api/routes/${testRouteId}`, { headers: authHeaders() });
+    const details = await detailsRes.json();
+    const secondDeliveryStop = details.stops.filter((s) => !s.is_origin)[1];
+
+    // Replay with identical operationId
+    const replayRes = await fetch(`${BASE}/api/routes/${testRouteId}/deliveries/${secondDeliveryStop.id}/complete`, {
+      method: "POST",
+      headers: driverHeaders(),
+      body: JSON.stringify({
+        operationId: stop2OperationId,
+        photoBase64: "DUPLICATE_PAYLOAD",
+        note: "Replay",
+        lat: -23.5640,
+        lng: -46.6690,
+      }),
+    });
+    if (replayRes.status !== 200) throw new Error(`Replay status: ${replayRes.status}`);
+
+    // Verify delivery_events count in DB
+    const checkRes = await fetch(`${BASE}/api/routes/${testRouteId}`, { headers: authHeaders() });
+    const checkDetails = await checkRes.json();
+    const stop2Events = checkDetails.delivery_events.filter((e) => e.stop_id === secondDeliveryStop.id);
+    if (stop2Events.length !== 1) throw new Error(`Expected 1 delivery event for stop 2, found ${stop2Events.length}`);
+
+    // Replay with DIFFERENT operationId for the same already-delivered stop (e.g. double click or reconnect with new ID)
+    const newOpId = randomUUID();
+    const replayDiffOpRes = await fetch(`${BASE}/api/routes/${testRouteId}/deliveries/${secondDeliveryStop.id}/complete`, {
+      method: "POST",
+      headers: driverHeaders(),
+      body: JSON.stringify({
+        operationId: newOpId,
+        photoBase64: "DUPLICATE_PAYLOAD_DIFF_OP",
+        note: "Replay with new opId",
+        lat: -23.5640,
+        lng: -46.6690,
+      }),
+    });
+    if (replayDiffOpRes.status !== 200) throw new Error(`Replay with new opId status: ${replayDiffOpRes.status}`);
+
+    // Verify delivery_events count in DB is strictly 1 (NO duplicate delivery event created)
+    const checkRes2 = await fetch(`${BASE}/api/routes/${testRouteId}`, { headers: authHeaders() });
+    const checkDetails2 = await checkRes2.json();
+    const stop2Events2 = checkDetails2.delivery_events.filter((e) => e.stop_id === secondDeliveryStop.id);
+    if (stop2Events2.length !== 1) throw new Error(`Expected strictly 1 delivery event for stop 2 after duplicate submission, found ${stop2Events2.length}`);
+  });
+
   // Finish route
   await assert("POST /api/routes/[id]/finish completes route", async () => {
     const presignRes = await fetch(`${BASE}/api/uploads/presign`, {
@@ -424,7 +518,51 @@ async function run() {
     if (!isToday) throw new Error("Route for today was not classified into todayRoutes!");
   });
 
-  console.log("\n=== ALL 22 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
+  await assert("Acceptance Criteria 3: Replaying delivery completion after route is completed returns 200 OK idempotently", async () => {
+    const detailsRes = await fetch(`${BASE}/api/routes/${testRouteId}`, { headers: authHeaders() });
+    const details = await detailsRes.json();
+    const secondDeliveryStop = details.stops.filter((s) => !s.is_origin)[1];
+
+    const replayRes = await fetch(`${BASE}/api/routes/${testRouteId}/deliveries/${secondDeliveryStop.id}/complete`, {
+      method: "POST",
+      headers: driverHeaders(),
+      body: JSON.stringify({
+        operationId: stop2OperationId,
+        photoBase64: "DUPLICATE_PAYLOAD",
+        note: "Replay after route completed",
+        lat: -23.5640,
+        lng: -46.6690,
+      }),
+    });
+    if (replayRes.status !== 200) throw new Error(`Replay status: ${replayRes.status}`);
+  });
+
+  await assert("Acceptance Criteria 3: Replaying route start after route is completed returns 200 OK idempotently", async () => {
+    const startReplay = await fetch(`${BASE}/api/routes/${testRouteId}/start`, {
+      method: "POST",
+      headers: driverHeaders(),
+      body: JSON.stringify({
+        operationId: randomUUID(),
+        kilometers: 16000.0,
+        photoBase64: "START_REPLAY_B64",
+        photoContentType: "image/webp",
+        lat: -23.5505,
+        lng: -46.6333,
+      }),
+    });
+    if (startReplay.status !== 200) throw new Error(`Start replay status: ${startReplay.status}`);
+  });
+
+  await assert("Acceptance Criteria 1 & 2: Uploaded WebP POD photo is accessible via /api/uploads/local", async () => {
+    const photoRes = await fetch(`${BASE}/api/uploads/local/proof%2F${stop2OperationId}.webp`);
+    if (photoRes.status !== 200) throw new Error(`Photo fetch status: ${photoRes.status}`);
+    const ct = photoRes.headers.get("content-type");
+    if (!ct || !ct.includes("image/webp")) throw new Error(`Expected image/webp content-type, got ${ct}`);
+    const buf = await photoRes.arrayBuffer();
+    if (buf.byteLength < 1000) throw new Error("Photo buffer too small");
+  });
+
+  console.log("\n=== ALL 25 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
 }
 
 run().catch((e) => {

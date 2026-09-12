@@ -27,6 +27,7 @@ import {
   Plus,
   Power,
   Printer,
+  RefreshCw,
   RotateCcw,
   Route as RouteIcon,
   Search,
@@ -48,6 +49,7 @@ import {
   Zap,
 } from "lucide-react";
 import { enqueue, flushQueue } from "@/lib/offline";
+import { compressDriverPhoto, arrayBufferToBase64 } from "@/lib/driver-photo";
 import { LiveFleetMap } from "./live-fleet-map";
 import { DriverLiveMap } from "./driver-live-map";
 import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
@@ -3590,7 +3592,23 @@ function ActiveRoute({
     );
   }, [data]);
 
-  const reload = async () => setData(await api(`/api/routes/${data.id}`));
+  const reload = useCallback(
+    async () => setData(await api(`/api/routes/${data.id}`)),
+    [data.id],
+  );
+
+  useEffect(() => {
+    if (online) {
+      flushQueue()
+        .then((count) => {
+          if (count > 0) reload();
+        })
+        .catch(() => {});
+    }
+    const handleFlushed = () => reload();
+    window.addEventListener("routewise:queue-flushed", handleFlushed);
+    return () => window.removeEventListener("routewise:queue-flushed", handleFlushed);
+  }, [online, reload]);
 
   useEffect(() => {
     if (data.status !== "active") return;
@@ -3758,9 +3776,24 @@ function ActiveRoute({
           route={data}
           stop={next}
           onClose={() => setModal(null)}
-          onDone={async () => {
+          onDone={async (completedPhase, completedStop) => {
+            const currentPhase = completedPhase || modal;
+            const currentStop = completedStop !== undefined ? completedStop : next;
             setModal(null);
-            await reload();
+            if (currentPhase === "start") {
+              setData((prev) => ({ ...prev, status: "active" }));
+            } else if (currentPhase === "delivery" && currentStop?.id) {
+              setData((prev) => ({
+                ...prev,
+                delivered: (prev.delivered || 0) + 1,
+                stops: prev.stops?.map((s) =>
+                  s.id === currentStop.id ? { ...s, status: "delivered" } : s,
+                ),
+              }));
+            } else if (currentPhase === "finish") {
+              setData((prev) => ({ ...prev, status: "completed" }));
+            }
+            await reload().catch(() => {});
           }}
         />
       )}
@@ -3774,62 +3807,6 @@ function ActiveRoute({
     </main>
   );
 }
-async function compressImage(
-  file: File,
-  maxWidth = 1600,
-  maxHeight = 1600,
-  quality = 0.82,
-): Promise<{ blob: Blob; base64: string; dataUrl: string }> {
-  return new Promise((resolve) => {
-    if (!file.type.startsWith("image/") && file.size < 60 * 1024) {
-      const url = URL.createObjectURL(file);
-      return resolve({ blob: file, base64: "", dataUrl: url });
-    }
-    const reader = new FileReader();
-    reader.onerror = () => {
-      resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
-    };
-    reader.onload = (e) => {
-  const img = new window.Image();
-      img.onerror = () => {
-        resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
-      };
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth || height > maxHeight) {
-          const ratio = Math.min(maxWidth / width, maxHeight / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          return resolve({ blob: file, base64: "", dataUrl: URL.createObjectURL(file) });
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
-        canvas.toBlob(
-          (blob) => {
-            resolve({
-              blob: blob || file,
-              base64,
-              dataUrl,
-            });
-          },
-          "image/jpeg",
-          quality,
-        );
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 function ProofModal({
   phase,
   route,
@@ -3841,16 +3818,19 @@ function ProofModal({
   route: RouteData;
   stop: Stop | null;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (completedPhase?: "start" | "delivery" | "finish", completedStop?: Stop | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [compressing, setCompressing] = useState(false);
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [offlineSaved, setOfflineSaved] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
   const [compressedBase64, setCompressedBase64] = useState<string>("");
 
+  const isSubmittingRef = useRef(false);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -3863,17 +3843,34 @@ function ProofModal({
   const minKm = phase === "start" ? vehicleOdo : startOdo;
 
   const handleSelectedFile = async (file: File) => {
+    if (previewUrl && previewUrl.startsWith("blob:")) {
+      try { URL.revokeObjectURL(previewUrl); } catch {}
+    }
     setSelectedFile(file);
     setError("");
+    setOfflineSaved(false);
+    setStatusMessage("Otimizando imagem...");
     setCompressing(true);
     try {
-      const res = await compressImage(file);
+      // R1: Client-Side WebP Compression (max 1600x1200, 0.70 quality)
+      const res = await compressDriverPhoto(file, {
+        maxWidth: 1600,
+        maxHeight: 1200,
+        quality: 0.70,
+      });
       setCompressedBlob(res.blob);
       setCompressedBase64(res.base64);
       setPreviewUrl(res.dataUrl);
-    } catch {
+      setStatusMessage(null);
+    } catch (err) {
+      console.warn("Compressão de foto falhou:", err);
       setCompressedBlob(file);
+      try {
+        const buf = await file.arrayBuffer();
+        setCompressedBase64(arrayBufferToBase64(buf));
+      } catch {}
       setPreviewUrl(URL.createObjectURL(file));
+      setStatusMessage(null);
     } finally {
       setCompressing(false);
     }
@@ -3881,37 +3878,110 @@ function ProofModal({
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (compressing) return;
+    if (busy || offlineSaved || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     const f = new FormData(e.currentTarget);
     const blobToSend = compressedBlob || selectedFile;
     if (!blobToSend || !blobToSend.size) {
+      isSubmittingRef.current = false;
       setError("Por favor, tire uma foto ou selecione uma imagem.");
       return;
     }
     setBusy(true);
     setError("");
+    setStatusMessage(null);
 
+    const operationId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // 1. Geolocalização rápida (máximo 1.5s para não travar a interface)
+    let lat = stop?.lat ?? (route.stops?.[0]?.lat ?? -14.2);
+    let lng = stop?.lng ?? (route.stops?.[0]?.lng ?? -51.9);
     try {
-      // 1. Geolocalização rápida (máximo 1.5s para não travar a interface)
-      let lat = stop?.lat ?? (route.stops?.[0]?.lat ?? -14.2);
-      let lng = stop?.lng ?? (route.stops?.[0]?.lng ?? -51.9);
-      try {
-        if (typeof navigator !== "undefined" && navigator.geolocation) {
-          const loc = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: false,
-              timeout: 1500,
-              maximumAge: 120000,
-            });
+      if (typeof navigator !== "undefined" && navigator.geolocation) {
+        const loc = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 1500,
+            maximumAge: 120000,
           });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-        }
-      } catch (geoErr) {
-        console.warn("GPS fallback used:", geoErr);
+        });
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+      }
+    } catch (geoErr) {
+      console.warn("GPS fallback used:", geoErr);
+    }
+
+    let photoKey = "";
+
+    // Helper: Safely queue payload into IndexedDB routewise-offline
+    const queueOfflinePayload = async () => {
+      let b64 = compressedBase64;
+      if (!b64 && blobToSend) {
+        try {
+          const buf = await blobToSend.arrayBuffer();
+          b64 = arrayBufferToBase64(buf);
+        } catch {}
+      }
+      const payload: any = {
+        operationId,
+        lat,
+        lng,
+        photoBase64: b64,
+        photoContentType: "image/webp",
+      };
+      if (photoKey) {
+        payload.photoKey = photoKey;
       }
 
-      // 2. Upload da foto com tripla redundância à prova de falhas
-      let photoKey = "";
+      let targetUrl = "";
+      if (phase === "start") {
+        targetUrl = `/api/routes/${route.id}/start`;
+        payload.kilometers = Number(f.get("kilometers"));
+      } else if (phase === "finish") {
+        targetUrl = `/api/routes/${route.id}/finish`;
+        payload.kilometers = Number(f.get("kilometers"));
+        payload.confirmIncomplete = f.get("incomplete") === "on";
+      } else if (stop?.id) {
+        targetUrl = `/api/routes/${route.id}/deliveries/${stop.id}/complete`;
+        payload.note = f.get("note");
+      }
+
+      await enqueue({
+        id: operationId,
+        idempotencyKey: operationId,
+        url: targetUrl,
+        method: "POST",
+        headers: { "X-RouteWise-Role": "driver" },
+        body: payload,
+      });
+
+      setOfflineSaved(true);
+      setStatusMessage("Salvo offline. Aguardando rede...");
+      setTimeout(() => {
+        onDone(phase, stop);
+      }, 1200);
+    };
+
+    // If device is offline, immediately save to IndexedDB queue
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      try {
+        await queueOfflinePayload();
+      } catch (qErr) {
+        isSubmittingRef.current = false;
+        setError("Erro ao armazenar comprovante offline no aparelho.");
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Attempt online submission with fallback to offline queue
+    try {
+      photoKey = "";
 
       // Tentativa 1: Presigned PUT
       try {
@@ -3919,7 +3989,7 @@ function ProofModal({
           method: "POST",
           body: JSON.stringify({
             kind: phase,
-            contentType: "image/jpeg",
+            contentType: "image/webp",
             size: blobToSend.size,
           }),
         });
@@ -3927,7 +3997,7 @@ function ProofModal({
         const uploadTarget = signed.url;
         const uploadRes = await fetch(uploadTarget, {
           method: "PUT",
-          headers: { "Content-Type": "image/jpeg" },
+          headers: { "Content-Type": "image/webp" },
           body: blobToSend,
         });
 
@@ -3937,46 +4007,46 @@ function ProofModal({
           throw new Error(`PUT falhou com status ${uploadRes.status}`);
         }
       } catch (putErr) {
-        console.warn("Upload PUT falhou, acionando rota direta:", putErr);
+        console.warn("Upload PUT falhou, tentando envio direto:", putErr);
 
-        // Tentativa 2: Direct upload multipart POST
+        // Tentativa 2: Direct upload
         try {
-          const formData = new FormData();
-          formData.append("file", blobToSend, "photo.jpg");
-          formData.append("kind", phase);
-          const directRes = await fetch("/api/uploads/direct", {
-            method: "POST",
-            headers: { "X-RouteWise-Role": "driver" },
-            body: formData,
-          });
-          if (directRes.ok) {
-            const dData = await directRes.json();
-            photoKey = dData.key;
-          } else {
-            throw new Error(`Direct POST falhou com status ${directRes.status}`);
-          }
-        } catch (directErr) {
-          console.warn("Direct multipart falhou, acionando fallback base64 JSON:", directErr);
-
-          // Tentativa 3: Base64 JSON POST
           if (compressedBase64) {
             const b64Res = await api("/api/uploads/direct", {
               method: "POST",
               body: JSON.stringify({
                 kind: phase,
-                contentType: "image/jpeg",
+                contentType: "image/webp",
                 base64: compressedBase64,
               }),
             });
             photoKey = b64Res.key;
           } else {
-            throw new Error("Não foi possível enviar a foto. Tente novamente.");
+            const formData = new FormData();
+            formData.append("file", blobToSend, "photo.webp");
+            formData.append("kind", phase);
+            const directRes = await fetch("/api/uploads/direct", {
+              method: "POST",
+              headers: { "X-RouteWise-Role": "driver" },
+              body: formData,
+            });
+            if (directRes.ok) {
+              const dData = await directRes.json();
+              photoKey = dData.key;
+            } else {
+              throw new Error(`Direct POST falhou com status ${directRes.status}`);
+            }
           }
+        } catch (directErr) {
+          console.warn("Direct upload falhou, armazenando na fila offline:", directErr);
+          await queueOfflinePayload();
+          return;
         }
       }
 
       if (!photoKey) {
-        throw new Error("Erro ao salvar comprovante de foto.");
+        await queueOfflinePayload();
+        return;
       }
 
       // 3. Finalizar etapa correspondente
@@ -3984,6 +4054,7 @@ function ProofModal({
         photoKey,
         lat,
         lng,
+        operationId,
       };
 
       if (phase === "start") {
@@ -4008,16 +4079,20 @@ function ProofModal({
           method: "POST",
           body: JSON.stringify({
             ...common,
-            operationId: crypto.randomUUID(),
             note: f.get("note"),
           }),
         });
       }
-      onDone();
+      onDone(phase, stop);
     } catch (e) {
-      setError((e as Error).message || "Erro ao registrar foto");
-    } finally {
-      setBusy(false);
+      console.warn("Envio online falhou, armazenando na fila offline:", e);
+      try {
+        await queueOfflinePayload();
+      } catch (queueErr) {
+        isSubmittingRef.current = false;
+        setError((e as Error).message || "Erro ao registrar foto");
+        setBusy(false);
+      }
     }
   };
 
@@ -4072,12 +4147,54 @@ function ProofModal({
           </label>
         )}
 
+        {/* Lightweight Compression Status Indicator */}
+        {compressing && (
+          <div
+            className="status-indicator compression-status"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 12px",
+              borderRadius: "8px",
+              background: "#e0f2fe",
+              color: "#0369a1",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+            }}
+          >
+            <RefreshCw className="spin" size={16} />
+            <span>Otimizando imagem...</span>
+          </div>
+        )}
+
+        {/* Lightweight Offline Saved Indicator */}
+        {offlineSaved && (
+          <div
+            className="status-indicator offline-status"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "10px 14px",
+              borderRadius: "8px",
+              background: "#fff3d8",
+              color: "#8a5a00",
+              fontSize: "0.88rem",
+              fontWeight: 600,
+            }}
+          >
+            <WifiOff size={18} />
+            <span>Salvo offline. Aguardando rede...</span>
+          </div>
+        )}
+
         {previewUrl ? (
           <div className="photo-preview-box">
             <img src={previewUrl} alt="Pré-visualização da foto" className="photo-preview-img" />
             <div className="photo-preview-details">
-              <span className="photo-preview-badge">✓ Imagem pronta para envio</span>
-              <small>{selectedFile?.name || "foto.jpg"} ({(Number(compressedBlob?.size || selectedFile?.size || 0) / 1024).toFixed(0)} KB otimizada)</small>
+              <span className="photo-preview-badge">✓ Imagem otimizada (WebP)</span>
+              <small>{selectedFile?.name || "foto.webp"} ({(Number(compressedBlob?.size || selectedFile?.size || 0) / 1024).toFixed(0)} KB otimizada)</small>
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
                 <button
                   type="button"
@@ -4164,15 +4281,17 @@ function ProofModal({
         )}
 
         <button
-          disabled={busy || compressing || (!selectedFile && !previewUrl)}
+          disabled={busy || compressing || offlineSaved || (!selectedFile && !previewUrl)}
           className="button primary"
           style={{ marginTop: "0.5rem" }}
         >
           {compressing
-            ? "Otimizando imagem…"
-            : busy
-              ? "Enviando foto e registrando…"
-              : "Confirmar registro"}
+            ? "Otimizando imagem..."
+            : offlineSaved
+              ? "Salvo offline. Aguardando rede..."
+              : busy
+                ? "Enviando foto e registrando…"
+                : "Confirmar registro"}
         </button>
         {error && <p className="form-error" style={{ margin: "0.5rem 0 0 0" }}>{error}</p>}
       </form>
