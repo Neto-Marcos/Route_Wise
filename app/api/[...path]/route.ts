@@ -1225,7 +1225,12 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
         await client.query("BEGIN");
         // Deletar dependências da empresa
         await client.query("DELETE FROM audit_log WHERE company_id=$1", [p[1]]).catch(() => {});
-        await client.query("DELETE FROM stops WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]);
+        // Apaga eventos e registros das rotas da empresa
+        await client.query("DELETE FROM delivery_events WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]).catch(() => {});
+        await client.query("DELETE FROM odometer_readings WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]).catch(() => {});
+        await client.query("DELETE FROM location_points WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]).catch(() => {});
+        await client.query("DELETE FROM sync_operations WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]).catch(() => {});
+        await client.query("DELETE FROM route_stops WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]).catch(() => {});
         await client.query("DELETE FROM routes WHERE company_id=$1", [p[1]]);
         await client.query("DELETE FROM vehicles WHERE company_id=$1", [p[1]]);
         await client.query("DELETE FROM drivers WHERE company_id=$1", [p[1]]);

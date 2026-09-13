@@ -1378,30 +1378,28 @@ function CompaniesManagementModal({
     }
   };
 
-  const deleteCompany = async (c: { id: string; code: string; name: string }) => {
-    if (c.code === "EU") {
+  const [deletingCompany, setDeletingCompany] = useState<{ id: string; code: string; name: string } | null>(null);
+  const [confirmCodeInput, setConfirmCodeInput] = useState("");
+
+  const executeDeleteCompany = async () => {
+    if (!deletingCompany) return;
+    if (deletingCompany.code === "EU") {
       alert("A empresa principal do Administrador Supremo não pode ser excluída.");
       return;
     }
-    const confirm1 = window.confirm(
-      `ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE a empresa "${c.name}" (${c.code})?\n\nTodas as rotas, motoristas, veículos e usuários vinculados a esta empresa serão permanentemente removidos.`,
-    );
-    if (!confirm1) return;
-
-    const confirmText = window.prompt(
-      `Para confirmar a exclusão, digite o código da empresa "${c.code}" em maiúsculas:`,
-    );
-    if (confirmText !== c.code) {
-      alert("Código digitado incorreto. Operação cancelada por segurança.");
+    if (confirmCodeInput.trim().toUpperCase() !== deletingCompany.code.toUpperCase()) {
+      setError(`Código incorreto. Digite exatamente "${deletingCompany.code}" para confirmar.`);
       return;
     }
 
     setError("");
-    setBusyId(c.id);
+    setBusyId(deletingCompany.id);
     try {
-      await api(`/api/companies/${c.id}`, {
+      await api(`/api/companies/${deletingCompany.id}`, {
         method: "DELETE",
       });
+      setDeletingCompany(null);
+      setConfirmCodeInput("");
       await onReload();
     } catch (e) {
       setError((e as Error).message);
@@ -1525,7 +1523,12 @@ function CompaniesManagementModal({
                     <button
                       type="button"
                       disabled={busyId === c.id}
-                      onClick={() => deleteCompany(c)}
+                      onClick={() => {
+                        setEditingCompany(null);
+                        setDeletingCompany(c);
+                        setConfirmCodeInput("");
+                        setError("");
+                      }}
                       className="button secondary compact"
                       title="Excluir empresa definitivamente"
                       style={{ padding: "6px 8px", height: "32px", color: "#dc2626", borderColor: "rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)" }}
@@ -1538,6 +1541,46 @@ function CompaniesManagementModal({
             );
           })}
         </div>
+
+        {deletingCompany && (
+          <div style={{ padding: "16px", borderRadius: "10px", border: "1px solid rgba(220, 38, 38, 0.3)", background: "rgba(220, 38, 38, 0.05)", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#dc2626" }}>
+              <Trash2 size={18} />
+              <b style={{ fontSize: "14px" }}>Confirmar Exclusão de Empresa</b>
+            </div>
+            <p style={{ margin: 0, fontSize: "13px", color: "var(--ink)" }}>
+              Tem certeza que deseja excluir a empresa <b>{deletingCompany.name}</b> ({deletingCompany.code})? Todas as rotas, motoristas, veículos e usuários associados serão permanentemente apagados.
+            </p>
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
+              <span>Para confirmar, digite <b>{deletingCompany.code}</b> no campo abaixo:</span>
+              <input
+                autoFocus
+                value={confirmCodeInput}
+                onChange={(e) => setConfirmCodeInput(e.target.value.toUpperCase())}
+                placeholder={deletingCompany.code}
+                style={{ height: "40px", borderRadius: "8px", border: "1px solid var(--line)", padding: "0 12px", background: "var(--card)", color: "var(--ink)", fontWeight: 700 }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="button secondary compact"
+                onClick={() => { setDeletingCompany(null); setConfirmCodeInput(""); setError(""); }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={busyId === deletingCompany.id || confirmCodeInput.trim().toUpperCase() !== deletingCompany.code.toUpperCase()}
+                onClick={executeDeleteCompany}
+                className="button primary compact"
+                style={{ background: "#dc2626", borderColor: "#dc2626" }}
+              >
+                {busyId === deletingCompany.id ? "Excluindo…" : "Excluir Definitivamente"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
           <button type="button" className="button secondary compact" onClick={onClose}>
