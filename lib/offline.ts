@@ -147,6 +147,15 @@ export async function enqueue<T = any>(operation: {
     memoryStore.set(key, record);
   }
 
+  // Registra Background Sync para sincronizar assim que a rede voltar
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    navigator.serviceWorker.ready.then((reg) => {
+      if ("sync" in reg) {
+        (reg as any).sync.register("rw-background-sync").catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
   return record;
 }
 

@@ -1,4 +1,4 @@
-const CACHE = "routewise-v5";
+const CACHE = "routewise-v6";
 const CORE = ["/", "/offline", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -37,4 +37,17 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request).then((r) => r || caches.match("/offline"))),
   );
+});
+
+// ─── Background Sync ────────────────────────────────────────────────────────
+self.addEventListener("sync", (event) => {
+  if (event.tag === "rw-background-sync" || event.tag === "routewise-offline-sync") {
+    event.waitUntil(
+      self.clients.matchAll({ type: "window" }).then((clientList) => {
+        for (const client of clientList) {
+          client.postMessage({ type: "SYNC_OFFLINE_QUEUE", tag: event.tag });
+        }
+      })
+    );
+  }
 });

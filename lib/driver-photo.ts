@@ -445,3 +445,44 @@ export async function normalizeDriverPhoto(value: unknown): Promise<string | nul
     throw new Error("Não foi possível ler a foto. Selecione outra imagem.");
   }
 }
+
+/**
+ * Envia uma foto comprimida para o S3 via URL pré-assinada.
+ * Se o S3 não estiver configurado, retorna a chave local com fallback automático.
+ */
+export async function uploadPhotoToStorage(
+  photo: CompressedPhotoResult,
+  kind: "pod_photo" | "odometer" | "report" = "pod_photo"
+): Promise<{ objectKey: string; directS3: boolean }> {
+  const presignRes = await fetch("/api/upload/presign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: photo.file.name || "proof.webp",
+      contentType: photo.format,
+      kind,
+    }),
+  });
+
+  if (!presignRes.ok) {
+    throw new Error("Erro ao obter autorização de upload");
+  }
+
+  const { directS3, uploadUrl, objectKey } = await presignRes.json();
+
+  if (directS3 && uploadUrl) {
+    // Upload direto para o S3 (bypassing o servidor Node)
+    const uploadRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": photo.format },
+      body: photo.blob,
+    });
+
+    if (!uploadRes.ok) {
+      throw new Error(`Falha no upload direto para o S3 (${uploadRes.status})`);
+    }
+  }
+
+  return { objectKey, directS3 };
+}
+
