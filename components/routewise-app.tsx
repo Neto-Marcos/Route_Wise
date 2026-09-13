@@ -19,6 +19,8 @@ import {
   Filter,
   Gauge,
   KeyRound,
+  Lock,
+  LogOut,
   LocateFixed,
   Mail,
   Map as MapIcon,
@@ -63,6 +65,7 @@ type DispatcherUser = {
   id: string;
   name: string;
   email: string;
+  role?: "admin" | "route_creator" | "office";
   active: boolean;
   created_at: string;
 };
@@ -194,6 +197,7 @@ export default function RouteWiseApp() {
   const [activePortal, setActivePortal] = useState<
     "planner" | "dispatcher" | "driver" | "home"
   >("home");
+  const [targetRole, setTargetRole] = useState<"admin" | "route_creator" | "office">("admin");
   const [dispatcherAuthed, setDispatcherAuthed] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -211,9 +215,11 @@ export default function RouteWiseApp() {
           if (s?.authenticated && s.role === "dispatcher") {
             setDispatcherAuthed(true);
             sessionStorage.setItem("rw_role", "dispatcher");
+            if (s.userRole) sessionStorage.setItem("rw_user_role", s.userRole);
           } else if (sessionStorage.getItem("rw_role") === "dispatcher") {
             setDispatcherAuthed(false);
             sessionStorage.removeItem("rw_role");
+            sessionStorage.removeItem("rw_user_role");
           }
         })
         .catch(() => {});
@@ -282,8 +288,14 @@ export default function RouteWiseApp() {
 
       {activePortal === "home" && (
         <Home
-          onDispatcher={() => setActivePortal("dispatcher")}
-          onDriver={() => setActivePortal("driver")}
+          onSelectRole={(role) => {
+            if (role === "driver") {
+              setActivePortal("driver");
+            } else {
+              setTargetRole(role);
+              setActivePortal("dispatcher");
+            }
+          }}
         />
       )}
 
@@ -298,6 +310,7 @@ export default function RouteWiseApp() {
       {activePortal === "dispatcher" && (
         !dispatcherAuthed ? (
           <Pin
+            targetRole={targetRole}
             onBack={() => setActivePortal("home")}
             onSuccess={() => setDispatcherAuthed(true)}
           />
@@ -305,6 +318,7 @@ export default function RouteWiseApp() {
           <Dispatcher
             onExit={() => {
               sessionStorage.removeItem("rw_role");
+              sessionStorage.removeItem("rw_user_role");
               setDispatcherAuthed(false);
               setActivePortal("home");
             }}
@@ -324,6 +338,7 @@ export default function RouteWiseApp() {
             onExit={() => {
               setSelectedDriver(null);
               sessionStorage.removeItem("rw_role");
+              sessionStorage.removeItem("rw_user_role");
               setActivePortal("home");
             }}
             online={online}
@@ -352,27 +367,113 @@ function Logo() {
   );
 }
 
-function Home({
-  onDispatcher,
-  onDriver,
+function ChangePasswordModal({
+  onClose,
+  onLogout,
 }: {
-  onDispatcher: () => void;
-  onDriver: () => void;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError("A nova senha e a confirmação não conferem.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const res = await api("/api/session/change-password", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      alert(res.message || "Senha alterada com sucesso! Você foi desconectado por segurança.");
+      onLogout();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title="Alterar minha senha" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="form-grid">
+        <div className="modal-info-box">
+          <KeyRound size={20} />
+          <p>
+            Por motivos de segurança, ao confirmar a alteração da sua senha você será desconectado imediatamente de todos os dispositivos.
+          </p>
+        </div>
+        <label>
+          Senha atual
+          <input
+            type="password"
+            autoFocus
+            required
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="Digite a senha atual"
+            autoComplete="current-password"
+          />
+        </label>
+        <label>
+          Nova senha
+          <input
+            type="password"
+            required
+            minLength={4}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Mínimo 6 caracteres (ou 4 para motorista)"
+            autoComplete="new-password"
+          />
+        </label>
+        <label>
+          Confirmar nova senha
+          <input
+            type="password"
+            required
+            minLength={4}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Repita a nova senha"
+            autoComplete="new-password"
+          />
+        </label>
+        <button disabled={loading} className="button primary">
+          {loading ? "Atualizando…" : "Salvar nova senha e sair"}
+        </button>
+        {error && <p className="form-error">{error}</p>}
+      </form>
+    </Modal>
+  );
+}
+
+function Home({
+  onSelectRole,
+}: {
+  onSelectRole: (role: "admin" | "route_creator" | "office" | "driver") => void;
 }) {
   return (
     <main className="home">
       <section className="home-copy">
         <Logo />
         <div>
-          <span className="eyebrow">OPERAÇÃO EM MOVIMENTO</span>
+          <span className="eyebrow">SISTEMA INTELIGENTE DE ROTAS</span>
           <h1>
             Rotas claras.
             <br />
             Entregas sob controle.
           </h1>
           <p>
-            Planeje percursos otimizados no mapa, despache para motoristas e acompanhe
-            em tempo real cada entrega com comprovantes e fotos.
+            Planeje percursos otimizados, roteirize por planilhas, despache para motoristas e rastreie notas fiscais com comprovantes em tempo real.
           </p>
         </div>
         <small>
@@ -381,29 +482,58 @@ function Home({
       </section>
       <section className="access-panel">
         <div className="access-head">
-          <h2>Como você quer acessar?</h2>
-          <p>Entre no ambiente da sua empresa.</p>
+          <h2>Selecione seu perfil</h2>
+          <p>Escolha o ambiente da sua operação para entrar.</p>
         </div>
-        <button className="access-card" onClick={onDispatcher}>
-          <span className="access-icon green" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#059669" }}>
-            <SlidersHorizontal />
+
+        {/* 1. ADMIN */}
+        <button className="access-card" onClick={() => onSelectRole("admin")}>
+          <span className="access-icon" style={{ background: "rgba(99, 102, 241, 0.15)", color: "#4f46e5" }}>
+            <ShieldCheck size={26} />
           </span>
           <span>
-            <b>Sou gestor</b>
-            <small>Planejar rotas, cadastrar equipe e acompanhar a operação</small>
+            <b>Administrador</b>
+            <small>Acesso total ao sistema, frota, relatórios e novas empresas</small>
           </span>
           <ChevronRight />
         </button>
-        <button className="access-card" onClick={onDriver}>
-          <span className="access-icon amber">
-            <Truck />
+
+        {/* 2. CRIADOR DE ROTAS */}
+        <button className="access-card" onClick={() => onSelectRole("route_creator")}>
+          <span className="access-icon green" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#059669" }}>
+            <SlidersHorizontal size={26} />
           </span>
           <span>
-            <b>Sou motorista</b>
+            <b>Criador de rotas</b>
+            <small>Roteirizador automático, mapa, rotas, veículos e motoristas</small>
+          </span>
+          <ChevronRight />
+        </button>
+
+        {/* 3. ESCRITÓRIO */}
+        <button className="access-card" onClick={() => onSelectRole("office")}>
+          <span className="access-icon blue" style={{ background: "rgba(59, 130, 246, 0.15)", color: "#2563eb" }}>
+            <ExternalLink size={26} />
+          </span>
+          <span>
+            <b>Escritório</b>
+            <small>Central de Rastreamento SSW e Correios para acompanhamento</small>
+          </span>
+          <ChevronRight />
+        </button>
+
+        {/* 4. MOTORISTA */}
+        <button className="access-card" onClick={() => onSelectRole("driver")}>
+          <span className="access-icon amber" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#d97706" }}>
+            <Truck size={26} />
+          </span>
+          <span>
+            <b>Motorista</b>
             <small>Acessar viagens, GPS e registrar comprovantes de entrega</small>
           </span>
           <ChevronRight />
         </button>
+
         <p className="privacy-note">
           Operação integrada em tempo real e com suporte a funcionamento offline.
         </p>
@@ -411,10 +541,13 @@ function Home({
     </main>
   );
 }
+
 function Pin({
+  targetRole,
   onBack,
   onSuccess,
 }: {
+  targetRole: "admin" | "route_creator" | "office";
   onBack: () => void;
   onSuccess: () => void;
 }) {
@@ -436,6 +569,14 @@ function Pin({
   const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState("");
 
+  const roleTitles: Record<string, { title: string; desc: string }> = {
+    admin: { title: "Acesso de Administrador", desc: "Acesso completo a todas as funcionalidades e configurações." },
+    route_creator: { title: "Criador de rotas", desc: "Acesso ao roteirizador, planejamento, veículos e motoristas." },
+    office: { title: "Acesso de Escritório", desc: "Acesso à Central de Rastreamento SSW e Correios." },
+  };
+
+  const currentRoleInfo = roleTitles[targetRole] || roleTitles.admin;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -446,12 +587,20 @@ function Pin({
           body: JSON.stringify({ companyCode, companyName, name, email, password }),
         });
         sessionStorage.setItem("rw_role", "dispatcher");
+        sessionStorage.setItem("rw_user_role", "admin");
+        if (typeof window !== "undefined") {
+          localStorage.setItem("rw_company_code", companyCode);
+        }
       } else {
-        await api("/api/session/dispatcher", {
+        const res = await api("/api/session/dispatcher", {
           method: "POST",
-          body: JSON.stringify({ companyCode, email, password }),
+          body: JSON.stringify({ companyCode, email, password, expectedRole: targetRole }),
         });
         sessionStorage.setItem("rw_role", "dispatcher");
+        sessionStorage.setItem("rw_user_role", res.userRole || targetRole);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("rw_company_code", companyCode);
+        }
       }
       onSuccess();
     } catch (e) {
@@ -466,41 +615,44 @@ function Pin({
           <ArrowLeft size={17} /> Voltar
         </button>
         <Logo />
-        <h1>{mode === "register" ? "Cadastrar empresa" : "Acesso do gestor"}</h1>
+        <h1>{mode === "register" ? "Cadastrar nova empresa" : currentRoleInfo.title}</h1>
         <p>
           {mode === "register"
-            ? "Crie a empresa e o primeiro gestor."
-            : "Entre no ambiente da sua empresa."}
+            ? "Crie a empresa e o primeiro login administrador."
+            : currentRoleInfo.desc}
         </p>
 
         <div className="auth-fields">
           {mode === "register" && (
             <>
-              <label><span>Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nome da empresa" required /></label>
-              <label><span>Seu nome</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como podemos chamar você?" required /></label>
+              <label><span>Nome da Empresa</span><input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ex.: Transportes Estrela" required /></label>
+              <label><span>Seu nome completo</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Como podemos chamar você?" required /></label>
             </>
           )}
 
           <>
-              <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
-              <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
-              <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
+            <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
+            <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
+            <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
           </>
         </div>
 
         <div className="auth-actions">
-          <button className="button primary">{mode === "register" ? "Criar empresa" : "Entrar"}</button>
+          <button className="button primary">{mode === "register" ? "Criar empresa e entrar" : "Entrar no sistema"}</button>
+          {targetRole === "admin" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
               <button type="button" className="button auth-secondary" onClick={() => { setMode(mode === "register" ? "login" : "register"); setError(""); }}>
-                {mode === "register" ? "Já tenho uma empresa" : "Cadastrar nova empresa"}
+                {mode === "register" ? "Já possuo uma empresa" : "Cadastrar nova empresa"}
               </button>
             </div>
+          )}
         </div>
         {error && <p className="form-error">{error}</p>}
       </form>
     </main>
   );
 }
+
 function DriverPicker({
   onBack,
   onPick,
@@ -806,6 +958,7 @@ function DispatchersPanel({
           name: form.get("name"),
           email: form.get("email"),
           password: form.get("password"),
+          role: form.get("role"),
         }),
       });
       setOpenCreate(false);
@@ -830,6 +983,7 @@ function DispatchersPanel({
         body: JSON.stringify({
           name: form.get("name"),
           email: form.get("email"),
+          role: form.get("role"),
           password: password ? String(password) : undefined,
           active: form.get("active") === "on",
         }),
@@ -850,8 +1004,8 @@ function DispatchersPanel({
     }
     const nextActive = d.active === false;
     const confirmMsg = nextActive
-      ? `Reativar o acesso do gestor ${d.name}?`
-      : `Desativar o acesso de ${d.name}? Este gestor não poderá mais entrar na Central.`;
+      ? `Reativar o acesso de ${d.name}?`
+      : `Desativar o acesso de ${d.name}? Este usuário não poderá mais entrar no sistema.`;
     if (!window.confirm(confirmMsg)) return;
 
     try {
@@ -868,6 +1022,12 @@ function DispatchersPanel({
     }
   };
 
+  const roleLabels: Record<string, { label: string; color: string }> = {
+    admin: { label: "Administrador (Total)", color: "#4f46e5" },
+    route_creator: { label: "Criador de rotas", color: "#059669" },
+    office: { label: "Escritório", color: "#2563eb" },
+  };
+
   return (
     <section className="panel dispatchers-panel">
       {sessionInfo?.companyCode && (
@@ -876,7 +1036,7 @@ function DispatchersPanel({
             <Building2 size={22} className="banner-icon" />
             <div>
               <b>Código da Empresa: <span className="highlight-code">{sessionInfo.companyCode}</span></b>
-              <p>Compartilhe este código com os novos gestores para que eles entrem na Central informando seus respectivos e-mails e senhas.</p>
+              <p>Compartilhe este código com os colaboradores para que eles entrem com seus respectivos perfis.</p>
             </div>
           </div>
           <button type="button" className="button secondary compact" onClick={copyCode}>
@@ -888,8 +1048,8 @@ function DispatchersPanel({
 
       <div className="panel-title">
         <div>
-          <h2>Equipe de Gestão e Operações</h2>
-          <p>{filteredItems.length} de {dispatchers.length} gestor(es) cadastrado(s)</p>
+          <h2>Equipe e Níveis de Acesso</h2>
+          <p>{filteredItems.length} de {dispatchers.length} usuário(s) cadastrado(s)</p>
         </div>
         <div className="panel-actions-group">
           <div className="registry-filter-tabs">
@@ -922,7 +1082,7 @@ function DispatchersPanel({
               setOpenCreate(true);
             }}
           >
-            <Plus size={15} /> Novo Gestor
+            <Plus size={15} /> Novo Usuário
           </button>
         </div>
       </div>
@@ -933,7 +1093,7 @@ function DispatchersPanel({
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar gestor por nome ou e-mail..."
+            placeholder="Buscar por nome ou e-mail..."
           />
           {searchTerm && (
             <button type="button" className="clear-search" onClick={() => setSearchTerm("")}>
@@ -947,6 +1107,7 @@ function DispatchersPanel({
         {filteredItems.map((d) => {
           const isActive = d.active !== false;
           const isSelf = d.id === sessionInfo?.dispatcherId;
+          const roleInfo = roleLabels[d.role || "admin"] || roleLabels.admin;
 
           return (
             <article key={d.id} className={!isActive ? "item-inactive" : ""}>
@@ -954,13 +1115,25 @@ function DispatchersPanel({
                 {d.name.slice(0, 2).toUpperCase()}
               </span>
               <div className="registry-info">
-                <div className="registry-name-line">
+                <div className="registry-name-line" style={{ flexWrap: "wrap", gap: "6px" }}>
                   <b>{d.name}</b>
                   {isSelf && (
                     <span className="self-user-badge" title="Sua conta conectada no momento">
                       Você
                     </span>
                   )}
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      padding: "2px 7px",
+                      borderRadius: "6px",
+                      background: "rgba(0,0,0,0.06)",
+                      color: roleInfo.color,
+                    }}
+                  >
+                    {roleInfo.label}
+                  </span>
                   <span className={`registry-status-pill ${isActive ? "active" : "inactive"}`}>
                     {isActive ? "Ativo" : "Inativo"}
                   </span>
@@ -978,7 +1151,7 @@ function DispatchersPanel({
                 <button
                   type="button"
                   className="btn-action-icon"
-                  title="Editar dados e senha do gestor"
+                  title="Editar perfil e permissões"
                   onClick={() => {
                     setError("");
                     setEditing(d);
@@ -1005,29 +1178,37 @@ function DispatchersPanel({
         <Empty
           text={
             searchTerm
-              ? `Nenhum gestor encontrado para "${searchTerm}".`
+              ? `Nenhum usuário encontrado para "${searchTerm}".`
               : filter === "inactive"
-                ? "Nenhum gestor inativo."
-                : "Nenhum gestor cadastrado nesta empresa."
+                ? "Nenhum usuário inativo."
+                : "Nenhum usuário cadastrado nesta empresa."
           }
         />
       )}
 
-      {/* Modal Criar Gestor */}
+      {/* Modal Criar Usuário */}
       {openCreate && (
-        <Modal title="Cadastrar Novo Gestor" onClose={() => setOpenCreate(false)}>
+        <Modal title="Cadastrar Novo Usuário da Equipe" onClose={() => setOpenCreate(false)}>
           <form onSubmit={submitCreate} className="form-grid">
             <div className="modal-info-box">
               <ShieldCheck size={20} />
-              <p>O novo gestor terá acesso à Central de Operações da sua empresa para planejar e gerenciar rotas e motoristas.</p>
+              <p>Escolha o perfil do usuário para limitar seu acesso apenas às ferramentas necessárias da operação.</p>
             </div>
             <label>
-              Nome completo do gestor
+              Nome completo
               <input name="name" required placeholder="Ex.: Mariana Rodrigues" autoFocus />
             </label>
             <label>
               E-mail de acesso (login)
               <input name="email" type="email" required placeholder="mariana@empresa.com" autoComplete="email" />
+            </label>
+            <label>
+              Função / Perfil de Acesso
+              <select name="role" defaultValue="route_creator" style={{ height: "46px", borderRadius: "10px", padding: "0 12px", border: "1px solid var(--line)" }}>
+                <option value="admin">Administrador (Acesso total)</option>
+                <option value="route_creator">Criador de rotas (Roteirizador, Planejador, Rotas, Veículos, Motoristas)</option>
+                <option value="office">Escritório (Rastreio SSW / Correios)</option>
+              </select>
             </label>
             <label>
               Senha inicial de acesso
@@ -1041,16 +1222,16 @@ function DispatchersPanel({
               />
             </label>
             <button disabled={busy} className="button primary">
-              {busy ? "Cadastrando…" : "Cadastrar Gestor"}
+              {busy ? "Cadastrando…" : "Cadastrar Usuário"}
             </button>
             {error && <p className="form-error">{error}</p>}
           </form>
         </Modal>
       )}
 
-      {/* Modal Editar Gestor */}
+      {/* Modal Editar Usuário */}
       {editing && (
-        <Modal title={`Editar Gestor: ${editing.name}`} onClose={() => setEditing(null)}>
+        <Modal title={`Editar Usuário: ${editing.name}`} onClose={() => setEditing(null)}>
           <form onSubmit={submitEdit} className="form-grid">
             <label>
               Nome completo
@@ -1059,6 +1240,19 @@ function DispatchersPanel({
             <label>
               E-mail de acesso
               <input name="email" type="email" defaultValue={editing.email} required />
+            </label>
+            <label>
+              Função / Perfil de Acesso
+              <select
+                name="role"
+                defaultValue={editing.role || "admin"}
+                disabled={editing.id === sessionInfo?.dispatcherId}
+                style={{ height: "46px", borderRadius: "10px", padding: "0 12px", border: "1px solid var(--line)" }}
+              >
+                <option value="admin">Administrador (Acesso total)</option>
+                <option value="route_creator">Criador de rotas (Roteirizador, Planejador, Rotas, Veículos, Motoristas)</option>
+                <option value="office">Escritório (Rastreio SSW / Correios)</option>
+              </select>
             </label>
             <label>
               Nova senha de acesso (opcional)
@@ -1104,7 +1298,14 @@ function Dispatcher({
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [dispatchers, setDispatchers] = useState<DispatcherUser[]>([]);
-  const [sessionInfo, setSessionInfo] = useState<{ companyCode?: string; companyName?: string; dispatcherId?: string } | null>(null);
+  const [sessionInfo, setSessionInfo] = useState<{
+    companyId?: string;
+    companyCode?: string;
+    companyName?: string;
+    dispatcherId?: string;
+    userRole?: string;
+    userName?: string;
+  } | null>(null);
   const [message, setMessage] = useState("");
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
@@ -1159,6 +1360,72 @@ function Dispatcher({
     }
   };
 
+  const [companies, setCompanies] = useState<Array<{ id: string; code: string; name: string }>>([]);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [switchingCompany, setSwitchingCompany] = useState(false);
+
+  // Determina o papel do usuário (admin por padrão se for dispatcher geral)
+  const userRole = (sessionInfo as any)?.userRole || (typeof window !== "undefined" ? sessionStorage.getItem("rw_user_role") : null) || "admin";
+
+  useEffect(() => {
+    // Se for criador de rotas, inicia no roteirizador
+    if (userRole === "route_creator" && tab === "overview") {
+      setTab("roteirizador");
+    } else if (userRole === "office" && tab === "overview") {
+      setTab("ssw");
+    }
+  }, [userRole]);
+
+  useEffect(() => {
+    if (userRole === "admin") {
+      api("/api/companies").then((comps) => {
+        if (Array.isArray(comps)) setCompanies(comps);
+      }).catch(() => {});
+    }
+  }, [userRole]);
+
+  const handleSwitchCompany = async (companyId: string) => {
+    if (!companyId || companyId === sessionInfo?.companyId) return;
+    setSwitchingCompany(true);
+    try {
+      await api("/api/companies/switch", {
+        method: "POST",
+        body: JSON.stringify({ companyId }),
+      });
+      await load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setSwitchingCompany(false);
+    }
+  };
+
+  // Filtragem estrita dos itens do menu lateral por perfil:
+  // - Admin: Todas as abas
+  // - Criador de rotas: roteirizador, planner, routes, vehicles, people
+  // - Escritório: ssw
+  const allNavItems: Array<[typeof tab, string, React.ReactNode]> = [
+    ["overview", "Visão geral", <RouteIcon key="o" />],
+    ["roteirizador", "Roteirizador", <FileText key="rot" />],
+    ["planner", "Planejar rota", <Navigation key="n" />],
+    ["routes", "Rotas", <Navigation key="r" />],
+    ["people", "Motoristas", <Users key="p" />],
+    ["vehicles", "Veículos", <Truck key="v" />],
+    ["dispatchers", "Equipe / Acessos", <ShieldCheck key="g" />],
+    ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
+  ];
+
+  const allowedNavItems = allNavItems.filter(([id]) => {
+    if (userRole === "admin") return true;
+    if (userRole === "route_creator") {
+      return ["roteirizador", "planner", "routes", "vehicles", "people"].includes(id);
+    }
+    if (userRole === "office") {
+      return ["ssw"].includes(id);
+    }
+    return true;
+  });
+
   return (
     <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
       <aside className="sidebar">
@@ -1172,22 +1439,13 @@ function Dispatcher({
           <span>Recolher menu</span>
         </button>
         <nav>
-          {[
-            ["overview", "Visão geral", <RouteIcon key="o" />],
-            ["planner", "Planejar rota", <Navigation key="n" />],
-            ["routes", "Rotas", <Navigation key="r" />],
-            ["people", "Motoristas", <Users key="p" />],
-            ["vehicles", "Veículos", <Truck key="v" />],
-            ["dispatchers", "Gestores", <ShieldCheck key="g" />],
-            ["roteirizador", "Roteirizador", <FileText key="rot" />],
-            ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
-          ].map(([id, label, icon]) => (
+          {allowedNavItems.map(([id, label, icon]) => (
             <button
-              key={id as string}
-              title={label as string}
-              aria-label={label as string}
+              key={id}
+              title={label}
+              aria-label={label}
               className={tab === id ? "active" : ""}
-              onClick={() => setTab(id as typeof tab)}
+              onClick={() => setTab(id)}
             >
               {icon}
               <span>{label}</span>
@@ -1195,6 +1453,14 @@ function Dispatcher({
           ))}
         </nav>
         <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <button
+            className="secondary compact"
+            style={{ display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-start", padding: "10px 14px", borderRadius: "10px", border: "1px solid var(--line)", background: "var(--paper)", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}
+            onClick={() => setShowChangePassword(true)}
+            title="Alterar minha senha (desconecta após trocar)"
+          >
+            <KeyRound size={16} /> <span>Alterar senha</span>
+          </button>
           <button className="exit" onClick={onExit}>
             <ArrowLeft /> <span>Sair do painel</span>
           </button>
@@ -1203,7 +1469,16 @@ function Dispatcher({
       <main className="dashboard">
         <header>
           <div>
-            <span className="eyebrow">CENTRAL DE OPERAÇÕES</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+              <span className="eyebrow">
+                {userRole === "admin" ? "PAINEL ADMINISTRADOR" : userRole === "route_creator" ? "CRIADOR DE ROTAS" : "CENTRAL DE ESCRITÓRIO"}
+              </span>
+              {sessionInfo?.companyName && (
+                <span style={{ fontSize: "12px", background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                  {sessionInfo.companyName} ({sessionInfo.companyCode})
+                </span>
+              )}
+            </div>
             <h1>
               {tab === "overview"
                 ? "Visão geral"
@@ -1218,11 +1493,30 @@ function Dispatcher({
                       : tab === "roteirizador"
                         ? "Roteirizador Automático"
                         : tab === "ssw"
-                          ? "Rastreamento pelo DANFE (SSW)"
-                          : "Gestores e Coordenadores"}
+                          ? "Rastreamento pelo DANFE (SSW e Correios)"
+                          : "Equipe e Níveis de Acesso"}
             </h1>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            {/* Troca rápida de empresa para o Administrador Geral */}
+            {userRole === "admin" && companies.length > 1 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <Building2 size={16} color="var(--muted)" />
+                <select
+                  disabled={switchingCompany}
+                  value={sessionInfo?.companyId || ""}
+                  onChange={(e) => handleSwitchCompany(e.target.value)}
+                  style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--line)", background: "white", fontSize: "13px", fontWeight: 600 }}
+                  title="Trocar de empresa no painel de Administrador"
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      Empresa: {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <span className="live">
               <i /> Atualização automática
             </span>
@@ -1267,12 +1561,22 @@ function Dispatcher({
           />
         )}
         {tab === "roteirizador" && (
-          <RoteirizadorPage onBack={() => setTab("overview")} />
+          <RoteirizadorPage onBack={() => setTab(userRole === "admin" ? "overview" : "roteirizador")} />
         )}
         {tab === "ssw" && (
-          <SSWTrackingView onBack={() => setTab("overview")} />
+          <SSWTrackingView onBack={() => setTab(userRole === "admin" ? "overview" : "ssw")} />
         )}
       </main>
+
+      {showChangePassword && (
+        <ChangePasswordModal
+          onClose={() => setShowChangePassword(false)}
+          onLogout={() => {
+            setShowChangePassword(false);
+            onExit();
+          }}
+        />
+      )}
 
       {selectedRouteId && (
         <RouteDetailModal
@@ -3505,6 +3809,8 @@ function DriverApp({
     load();
   }, [load]);
 
+  const [showChangePassword, setShowChangePassword] = useState(false);
+
   const todayStr = new Date().toLocaleDateString("en-CA");
 
   const todayRoutes = useMemo(() => {
@@ -3556,9 +3862,20 @@ function DriverApp({
     <main className="driver-shell">
       <header>
         <Logo />
-        <button className="avatar-button" onClick={onExit} title="Sair do perfil">
-          {driver.name.slice(0, 2).toUpperCase()}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            type="button"
+            className="secondary compact"
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid var(--line)", background: "var(--paper)", cursor: "pointer" }}
+            onClick={() => setShowChangePassword(true)}
+            title="Alterar meu PIN de acesso"
+          >
+            <KeyRound size={14} /> <span>Alterar PIN</span>
+          </button>
+          <button className="avatar-button" onClick={onExit} title="Sair do perfil">
+            {driver.name.slice(0, 2).toUpperCase()}
+          </button>
+        </div>
       </header>
       <section className="driver-content">
         <span className="eyebrow">BOM TRABALHO</span>
@@ -3625,6 +3942,16 @@ function DriverApp({
           )}
         </div>
       </section>
+
+      {showChangePassword && (
+        <ChangePasswordModal
+          onClose={() => setShowChangePassword(false)}
+          onLogout={() => {
+            setShowChangePassword(false);
+            onExit();
+          }}
+        />
+      )}
     </main>
   );
 }

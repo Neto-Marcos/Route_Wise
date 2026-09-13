@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { audit, db, query } from "@/lib/db";
-import { getSession, makeSession, sessionCookie } from "@/lib/auth";
+import { getSession, makeSession, sessionCookie, clearSessionCookie, type UserRole } from "@/lib/auth";
 import { uploadUrl, viewUrl } from "@/lib/storage";
 import { normalizeDriverPhoto } from "@/lib/driver-photo";
 
@@ -196,6 +196,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!session) return json({ authenticated: false }, 200);
       let companyCode = "";
       let companyName = "";
+      let userRole: UserRole = session.userRole || (session.role === "driver" ? "driver" : "admin");
+      let userName = "";
       if (session.companyId) {
         const comp = await query("SELECT code, name FROM companies WHERE id=$1", [session.companyId]);
         if (comp.rows[0]) {
@@ -203,9 +205,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           companyName = comp.rows[0].name;
         }
       }
+      if (session.dispatcherId) {
+        const disp = await query("SELECT name, role FROM dispatchers WHERE id=$1", [session.dispatcherId]);
+        if (disp.rows[0]) {
+          userName = disp.rows[0].name;
+          if (disp.rows[0].role) userRole = disp.rows[0].role as UserRole;
+        }
+      } else if (session.driverId) {
+        const drv = await query("SELECT name FROM drivers WHERE id=$1", [session.driverId]);
+        if (drv.rows[0]) {
+          userName = drv.rows[0].name;
+        }
+      }
       return json({
         authenticated: true,
         role: session.role,
+        userRole,
+        userName,
         companyId: session.companyId,
         companyCode,
         companyName,
@@ -213,11 +229,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         driverId: session.driverId,
       });
     }
+    if (p[0] === "companies" && p.length === 1) {
+      const session = await getSession(requestedRole(req));
+      if (!session || session.role !== "dispatcher") return json({ error: "Acesso restrito" }, 403);
+      // Retorna lista de empresas para o admin poder navegar e gerenciar
+      const { rows } = await query(
+        "SELECT id, code, name, active, created_at FROM companies ORDER BY active DESC, name ASC"
+      );
+      return json(rows);
+    }
     if (p[0] === "dispatchers" && p.length === 1) {
       const session = await getSession(requestedRole(req));
       if (!session || session.role !== "dispatcher") return json({ error: "Acesso restrito" }, 403);
       const { rows } = await query(
-        "SELECT id, name, email, active, created_at FROM dispatchers WHERE company_id=$1 ORDER BY active DESC, created_at ASC",
+        "SELECT id, name, email, COALESCE(role, 'admin') as role, active, created_at FROM dispatchers WHERE company_id=$1 ORDER BY active DESC, created_at ASC",
         [session.companyId],
       );
       return json(rows);
@@ -389,37 +414,53 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       try {
         await client.query("BEGIN");
         const company = await client.query("INSERT INTO companies(code,name) VALUES($1,$2) RETURNING id,code,name", [code, String(data.companyName).trim()]);
-        const dispatcher = await client.query("INSERT INTO dispatchers(company_id,name,email,password_hash) VALUES($1,$2,$3,$4) RETURNING id", [company.rows[0].id, String(data.name || "Gestor").trim(), email, await hash(password, 10)]);
+        const dispatcher = await client.query("INSERT INTO dispatchers(company_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,'admin') RETURNING id,role", [company.rows[0].id, String(data.name || "Administrador").trim(), email, await hash(password, 10)]);
         await client.query("COMMIT");
-        const res = json({ ok: true, company: company.rows[0] }, 201);
-        res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", companyId: company.rows[0].id, dispatcherId: dispatcher.rows[0].id }), "dispatcher"));
+        const res = json({ ok: true, company: company.rows[0], userRole: "admin" }, 201);
+        res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", userRole: "admin", companyId: company.rows[0].id, dispatcherId: dispatcher.rows[0].id }), "dispatcher"));
         return res;
       } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
     }
     if (p.join("/") === "session/dispatcher") {
       if (data.pin && String(data.pin).trim() === "2468") {
-        let { rows } = await query("SELECT u.id,u.company_id,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE u.active=true AND c.active=true LIMIT 1");
+        let { rows } = await query("SELECT u.id,u.company_id,COALESCE(u.role,'admin') as role,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE u.active=true AND c.active=true LIMIT 1");
         if (!rows[0]) {
           const comp = await query("SELECT id FROM companies WHERE code='LEGADO' OR active=true LIMIT 1");
           if (comp.rows[0]) {
-            const disp = await query("INSERT INTO dispatchers(company_id,name,email,password_hash) VALUES($1,$2,$3,$4) RETURNING id", [comp.rows[0].id, "Gestor Padrão", "gestor@routewise.local", await hash("2468", 10)]);
-            rows = [{ id: disp.rows[0].id, company_id: comp.rows[0].id, company_name: "Operação anterior" }];
+            const disp = await query("INSERT INTO dispatchers(company_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,'admin') RETURNING id,role", [comp.rows[0].id, "Administrador Padrão", "admin@routewise.local", await hash("2468", 10)]);
+            rows = [{ id: disp.rows[0].id, company_id: comp.rows[0].id, role: "admin", company_name: "Operação anterior" }];
           }
         }
         if (rows[0]) {
-          const res = json({ ok: true, companyName: rows[0].company_name });
-          res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", companyId: rows[0].company_id, dispatcherId: rows[0].id }), "dispatcher"));
+          const uRole = (rows[0].role || "admin") as UserRole;
+          const res = json({ ok: true, companyName: rows[0].company_name, userRole: uRole });
+          res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", userRole: uRole, companyId: rows[0].company_id, dispatcherId: rows[0].id }), "dispatcher"));
           return res;
         }
       }
       const companyCode = String(data.companyCode || "").trim().toUpperCase();
       const email = String(data.email || "").trim().toLowerCase();
-      const { rows } = await query("SELECT u.id,u.company_id,u.password_hash,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE c.code=$1 AND lower(u.email)=$2 AND u.active=true AND c.active=true", [companyCode, email]);
+      const expectedRole = data.expectedRole ? String(data.expectedRole).trim() : null;
+
+      const { rows } = await query("SELECT u.id,u.company_id,u.password_hash,COALESCE(u.role,'admin') as role,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE c.code=$1 AND lower(u.email)=$2 AND u.active=true AND c.active=true", [companyCode, email]);
       if (!rows[0] || !(await compare(String(data.password || ""), rows[0].password_hash))) {
         return json({ error: "Empresa, e-mail ou senha inválidos" }, 401);
       }
-      const res = json({ ok: true, companyName: rows[0].company_name });
-      res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", companyId: rows[0].company_id, dispatcherId: rows[0].id }), "dispatcher"));
+      const userRole = (rows[0].role || "admin") as UserRole;
+
+      // Validação amigável se tentou logar por um portal diferente do seu perfil cadastrado
+      if (expectedRole && expectedRole !== "admin" && userRole !== "admin" && userRole !== expectedRole) {
+        const roleLabels: Record<string, string> = {
+          admin: "Administrador",
+          route_creator: "Criador de rotas",
+          office: "Escritório",
+          driver: "Motorista",
+        };
+        return json({ error: `Este usuário está cadastrado como "${roleLabels[userRole] || userRole}". Por favor, utilize a opção correta na tela inicial.` }, 403);
+      }
+
+      const res = json({ ok: true, companyName: rows[0].company_name, userRole });
+      res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", userRole, companyId: rows[0].company_id, dispatcherId: rows[0].id }), "dispatcher"));
       return res;
     }
     if (p.join("/") === "session/driver") {
@@ -434,13 +475,62 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!rows[0]) return json({ error: "Motorista inválido" }, 400);
       if (!(await compare(String(data.password || ""), rows[0].pin_hash)))
         return json({ error: "Senha incorreta" }, 401);
-      const res = json({ ok: true });
+      const res = json({ ok: true, userRole: "driver" });
       res.cookies.set(
         sessionCookie(
-          await makeSession({ role: "driver", driverId: rows[0].id, companyId: rows[0].company_id }),
+          await makeSession({ role: "driver", userRole: "driver", driverId: rows[0].id, companyId: rows[0].company_id }),
           "driver",
         ),
       );
+      return res;
+    }
+    if (p.join("/") === "session/change-password") {
+      const session = await getSession(requestedRole(req));
+      if (!session) return json({ error: "Sessão não encontrada" }, 401);
+
+      const currentPassword = String(data.currentPassword || "");
+      const newPassword = String(data.newPassword || "");
+
+      if (!currentPassword || !newPassword) {
+        return json({ error: "Informe a senha atual e a nova senha." }, 400);
+      }
+
+      if (session.role === "driver") {
+        if (!/^\d{4,8}$/.test(newPassword)) {
+          return json({ error: "A nova senha do motorista deve ser numérica de 4 a 8 dígitos." }, 400);
+        }
+        const { rows } = await query("SELECT pin_hash FROM drivers WHERE id=$1", [session.driverId]);
+        if (!rows[0] || !(await compare(currentPassword, rows[0].pin_hash))) {
+          return json({ error: "Senha atual incorreta." }, 400);
+        }
+        const newHash = await hash(newPassword, 10);
+        await query("UPDATE drivers SET pin_hash=$1 WHERE id=$2", [newHash, session.driverId]);
+        await audit("driver", session.driverId || null, "change_password", "driver", session.driverId || null);
+
+        const res = json({ ok: true, message: "Senha alterada com sucesso! Você foi desconectado." });
+        res.cookies.set(clearSessionCookie("driver"));
+        return res;
+      } else {
+        if (newPassword.length < 6) {
+          return json({ error: "A nova senha deve possuir no mínimo 6 caracteres." }, 400);
+        }
+        const { rows } = await query("SELECT password_hash FROM dispatchers WHERE id=$1", [session.dispatcherId]);
+        if (!rows[0] || !(await compare(currentPassword, rows[0].password_hash))) {
+          return json({ error: "Senha atual incorreta." }, 400);
+        }
+        const newHash = await hash(newPassword, 10);
+        await query("UPDATE dispatchers SET password_hash=$1 WHERE id=$2", [newHash, session.dispatcherId]);
+        await audit("dispatcher", session.dispatcherId || null, "change_password", "dispatcher", session.dispatcherId || null);
+
+        const res = json({ ok: true, message: "Senha alterada com sucesso! Você foi desconectado." });
+        res.cookies.set(clearSessionCookie("dispatcher"));
+        return res;
+      }
+    }
+    if (p.join("/") === "session/logout") {
+      const res = json({ ok: true });
+      res.cookies.set(clearSessionCookie("dispatcher"));
+      res.cookies.set(clearSessionCookie("driver"));
       return res;
     }
     if (p[0] === "uploads" && p[1] === "presign") {
@@ -522,10 +612,25 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const isDispatcher = session?.role === "dispatcher";
 
     if (!session && !isDispatcher) return json({ error: "Sessão necessária" }, 401);
+    if (p[0] === "companies" && p[1] === "switch" && isDispatcher) {
+      const companyId = String(data.companyId || "").trim();
+      if (!companyId) return json({ error: "Empresa não informada" }, 400);
+      const comp = await query("SELECT id, code, name FROM companies WHERE id=$1 AND active=true", [companyId]);
+      if (!comp.rows[0]) return json({ error: "Empresa não encontrada" }, 404);
+      const res = json({ ok: true, company: comp.rows[0] });
+      res.cookies.set(sessionCookie(await makeSession({
+        role: "dispatcher",
+        userRole: session!.userRole || "admin",
+        companyId: comp.rows[0].id,
+        dispatcherId: session!.dispatcherId
+      }), "dispatcher"));
+      return res;
+    }
     if (p[0] === "dispatchers" && isDispatcher) {
       const name = String(data.name || "").trim();
       const email = String(data.email || "").trim().toLowerCase();
       const password = String(data.password || "");
+      const role = data.role && ["admin", "route_creator", "office"].includes(data.role) ? data.role : "route_creator";
       if (!name || !email.includes("@") || password.length < 6)
         return json({ error: "Preencha nome, e-mail válido e senha com no mínimo 6 caracteres" }, 400);
 
@@ -534,11 +639,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         [session!.companyId, email],
       );
       if (existing.rows[0])
-        return json({ error: "Já existe um gestor com este e-mail nesta empresa" }, 409);
+        return json({ error: "Já existe um usuário com este e-mail nesta empresa" }, 409);
 
       const { rows } = await query(
-        "INSERT INTO dispatchers(company_id,name,email,password_hash) VALUES($1,$2,$3,$4) RETURNING id,name,email,active,created_at",
-        [session!.companyId, name, email, await hash(password, 10)],
+        "INSERT INTO dispatchers(company_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,active,created_at",
+        [session!.companyId, name, email, await hash(password, 10), role],
       );
       await audit("dispatcher", session!.dispatcherId || null, "create", "dispatcher", rows[0].id);
       return json(rows[0], 201);
@@ -1035,22 +1140,24 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
         return json({ error: "Já existe outro gestor com este e-mail nesta empresa" }, 409);
       }
 
+      const role = data.role && ["admin", "route_creator", "office"].includes(data.role) ? data.role : undefined;
+
       if (data.password && String(data.password).length >= 6) {
         const passHash = await hash(String(data.password), 10);
         const { rows } = await query(
-          "UPDATE dispatchers SET name=$1, email=$2, active=$3, password_hash=$4 WHERE id=$5 AND company_id=$6 RETURNING id,name,email,active,created_at",
-          [name, email, active, passHash, p[1], session.companyId],
+          "UPDATE dispatchers SET name=$1, email=$2, active=$3, password_hash=$4, role=COALESCE($7, role) WHERE id=$5 AND company_id=$6 RETURNING id,name,email,role,active,created_at",
+          [name, email, active, passHash, p[1], session.companyId, role],
         );
-        if (!rows[0]) return json({ error: "Gestor não encontrado" }, 404);
-        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, password_changed: true });
+        if (!rows[0]) return json({ error: "Usuário não encontrado" }, 404);
+        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, role, password_changed: true });
         return json(rows[0]);
       } else {
         const { rows } = await query(
-          "UPDATE dispatchers SET name=$1, email=$2, active=$3 WHERE id=$4 AND company_id=$5 RETURNING id,name,email,active,created_at",
-          [name, email, active, p[1], session.companyId],
+          "UPDATE dispatchers SET name=$1, email=$2, active=$3, role=COALESCE($6, role) WHERE id=$4 AND company_id=$5 RETURNING id,name,email,role,active,created_at",
+          [name, email, active, p[1], session.companyId, role],
         );
-        if (!rows[0]) return json({ error: "Gestor não encontrado" }, 404);
-        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, password_changed: false });
+        if (!rows[0]) return json({ error: "Usuário não encontrado" }, 404);
+        await audit("dispatcher", session.dispatcherId || null, "update", "dispatcher", p[1], { name, email, active, role, password_changed: false });
         return json(rows[0]);
       }
     }
