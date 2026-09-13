@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
 const secret = () => new TextEncoder().encode(process.env.SESSION_SECRET || "routewise-dev-secret-change-me");
-export type UserRole = "admin" | "route_creator" | "office" | "driver";
+export type UserRole = "superadmin" | "admin" | "route_creator" | "office" | "driver";
 export type Session = {
   role: "dispatcher" | "driver";
   userRole?: UserRole;

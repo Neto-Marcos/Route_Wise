@@ -232,7 +232,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p[0] === "companies" && p.length === 1) {
       const session = await getSession(requestedRole(req));
       if (!session || session.role !== "dispatcher") return json({ error: "Acesso restrito" }, 403);
-      // Retorna lista de empresas para o admin poder navegar e gerenciar
+      // Apenas o Administrador Supremo pode visualizar e navegar por todas as empresas
+      if (session.userRole !== "superadmin") {
+        const { rows } = await query(
+          "SELECT id, code, name, active, created_at FROM companies WHERE id=$1 ORDER BY name ASC",
+          [session.companyId],
+        );
+        return json(rows);
+      }
       const { rows } = await query(
         "SELECT id, code, name, active, created_at FROM companies ORDER BY active DESC, name ASC"
       );
@@ -442,16 +449,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const email = String(data.email || "").trim().toLowerCase();
       const expectedRole = data.expectedRole ? String(data.expectedRole).trim() : null;
 
-      const { rows } = await query("SELECT u.id,u.company_id,u.password_hash,COALESCE(u.role,'admin') as role,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE c.code=$1 AND lower(u.email)=$2 AND u.active=true AND c.active=true", [companyCode, email]);
+      // Autenticação pelo código da empresa e e-mail/usuário
+      const { rows } = await query(
+        "SELECT u.id,u.company_id,u.password_hash,COALESCE(u.role,'admin') as role,c.name company_name,c.code company_code FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE (c.code=$1 OR ($1='EU' AND c.code='EU')) AND (lower(u.email)=$2 OR lower(u.name)=$2) AND u.active=true AND c.active=true",
+        [companyCode, email],
+      );
       if (!rows[0] || !(await compare(String(data.password || ""), rows[0].password_hash))) {
-        return json({ error: "Empresa, e-mail ou senha inválidos" }, 401);
+        return json({ error: "Empresa, usuário/e-mail ou senha inválidos" }, 401);
       }
       const userRole = (rows[0].role || "admin") as UserRole;
 
       // Validação amigável se tentou logar por um portal diferente do seu perfil cadastrado
-      if (expectedRole && expectedRole !== "admin" && userRole !== "admin" && userRole !== expectedRole) {
+      if (expectedRole && expectedRole !== "admin" && userRole !== "superadmin" && userRole !== "admin" && userRole !== expectedRole) {
         const roleLabels: Record<string, string> = {
-          admin: "Administrador",
+          superadmin: "Administrador Supremo",
+          admin: "Administrador da Empresa",
           route_creator: "Criador de rotas",
           office: "Escritório",
           driver: "Motorista",
@@ -613,6 +625,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     if (!session && !isDispatcher) return json({ error: "Sessão necessária" }, 401);
     if (p[0] === "companies" && p[1] === "switch" && isDispatcher) {
+      if (session?.userRole !== "superadmin") {
+        return json({ error: "Apenas o Administrador Supremo pode alternar entre empresas" }, 403);
+      }
       const companyId = String(data.companyId || "").trim();
       if (!companyId) return json({ error: "Empresa não informada" }, 400);
       const comp = await query("SELECT id, code, name FROM companies WHERE id=$1 AND active=true", [companyId]);
@@ -620,7 +635,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const res = json({ ok: true, company: comp.rows[0] });
       res.cookies.set(sessionCookie(await makeSession({
         role: "dispatcher",
-        userRole: session!.userRole || "admin",
+        userRole: "superadmin",
         companyId: comp.rows[0].id,
         dispatcherId: session!.dispatcherId
       }), "dispatcher"));

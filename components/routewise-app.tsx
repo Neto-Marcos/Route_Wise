@@ -65,7 +65,7 @@ type DispatcherUser = {
   id: string;
   name: string;
   email: string;
-  role?: "admin" | "route_creator" | "office";
+  role?: "superadmin" | "admin" | "route_creator" | "office";
   active: boolean;
   created_at: string;
 };
@@ -677,8 +677,8 @@ function Pin({
           )}
 
           <>
-            <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
-            <label><span>E-mail</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" required /></label>
+            <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA ou EU" autoComplete="organization" required /></label>
+            <label><span>E-mail ou Usuário</span><input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com ou Marcos" autoComplete="username" required /></label>
             <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
           </>
         </div>
@@ -1072,7 +1072,8 @@ function DispatchersPanel({
   };
 
   const roleLabels: Record<string, { label: string; color: string }> = {
-    admin: { label: "Administrador (Total)", color: "#4f46e5" },
+    superadmin: { label: "Administrador Supremo", color: "#7c3aed" },
+    admin: { label: "Administrador (Empresa)", color: "#4f46e5" },
     route_creator: { label: "Criador de rotas", color: "#059669" },
     office: { label: "Escritório", color: "#2563eb" },
   };
@@ -1426,7 +1427,7 @@ function Dispatcher({
   }, [userRole]);
 
   useEffect(() => {
-    if (userRole === "admin") {
+    if (userRole === "superadmin") {
       api("/api/companies").then((comps) => {
         if (Array.isArray(comps)) setCompanies(comps);
       }).catch(() => {});
@@ -1450,7 +1451,7 @@ function Dispatcher({
   };
 
   // Filtragem estrita dos itens do menu lateral por perfil:
-  // - Admin: Todas as abas
+  // - Superadmin / Admin: Todas as abas
   // - Criador de rotas: roteirizador, planner, routes, vehicles, people
   // - Escritório: ssw
   const allNavItems: Array<[typeof tab, string, React.ReactNode]> = [
@@ -1465,7 +1466,7 @@ function Dispatcher({
   ];
 
   const allowedNavItems = allNavItems.filter(([id]) => {
-    if (userRole === "admin") return true;
+    if (userRole === "superadmin" || userRole === "admin") return true;
     if (userRole === "route_creator") {
       return ["roteirizador", "planner", "routes", "vehicles", "people"].includes(id);
     }
@@ -1519,8 +1520,14 @@ function Dispatcher({
         <header>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-              <span className="eyebrow">
-                {userRole === "admin" ? "PAINEL ADMINISTRADOR" : userRole === "route_creator" ? "CRIADOR DE ROTAS" : "CENTRAL DE ESCRITÓRIO"}
+              <span className="eyebrow" style={{ color: userRole === "superadmin" ? "#7c3aed" : undefined }}>
+                {userRole === "superadmin"
+                  ? "ADMINISTRADOR SUPREMO"
+                  : userRole === "admin"
+                  ? "PAINEL ADMINISTRADOR (EMPRESA)"
+                  : userRole === "route_creator"
+                  ? "CRIADOR DE ROTAS"
+                  : "CENTRAL DE ESCRITÓRIO"}
               </span>
               {sessionInfo?.companyName && (
                 <span style={{ fontSize: "12px", background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
@@ -1547,8 +1554,8 @@ function Dispatcher({
             </h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            {/* Troca rápida de empresa para o Administrador Geral */}
-            {userRole === "admin" && companies.length > 1 && (
+            {/* Troca rápida de empresa para o Administrador Supremo */}
+            {userRole === "superadmin" && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                 <Building2 size={16} color="var(--muted)" />
                 <select
@@ -1556,7 +1563,7 @@ function Dispatcher({
                   value={sessionInfo?.companyId || ""}
                   onChange={(e) => handleSwitchCompany(e.target.value)}
                   style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--line)", background: "white", fontSize: "13px", fontWeight: 600 }}
-                  title="Trocar de empresa no painel de Administrador"
+                  title="Trocar de empresa no painel de Administrador Supremo"
                 >
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
