@@ -1,53 +1,63 @@
 "use client";
 
 import { useState } from "react";
-import { Search, ExternalLink, Package, Clock, MapPin, AlertCircle, ArrowLeft, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Search, ExternalLink, Package, AlertCircle, ArrowRight, ShieldCheck } from "lucide-react";
 
 export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   const [danfeKey, setDanfeKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<any | null>(null);
 
-  const handleSearch = async (e?: React.FormEvent) => {
+  const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanKey = danfeKey.replace(/\D/g, "");
+    const clean = danfeKey.replace(/\D/g, "");
 
-    if (cleanKey.length < 1) {
-      setError("Por favor, digite a Chave DANFE (44 dígitos) ou o Número da Nota.");
+    if (clean.length < 10) {
+      setError("Por favor, digite a Chave DANFE (44 dígitos) ou número da nota.");
       return;
     }
 
-    setLoading(true);
     setError("");
+    setLoading(true);
 
-    try {
-      const res = await fetch("/api/ssw/rastreio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ danfeKey: cleanKey, invoiceNumber: cleanKey }),
-      });
+    // Cria um form invisível que submete direto para o ssw.inf.br
+    // Isso abre a consulta oficial com o resultado dos parceiros no próprio SSW
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "https://ssw.inf.br/2/rastreamento_danfe";
+    form.target = "_blank"; // abre em nova aba
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao consultar SSW");
-      setResult(data);
-    } catch (err: any) {
-      setError(err.message || "Não foi possível carregar o rastreamento no momento.");
-    } finally {
+    const inputDanfe = document.createElement("input");
+    inputDanfe.type = "hidden";
+    inputDanfe.name = "danfe";
+    inputDanfe.value = clean;
+    form.appendChild(inputDanfe);
+
+    const inputUrl = document.createElement("input");
+    inputUrl.type = "hidden";
+    inputUrl.name = "urlori";
+    inputUrl.value = "";
+    form.appendChild(inputUrl);
+
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+
+    setTimeout(() => {
       setLoading(false);
-    }
+    }, 800);
   };
 
   return (
-    <section className="panel" style={{ maxWidth: 1000, margin: "0 auto" }}>
+    <section className="panel" style={{ maxWidth: 900, margin: "0 auto" }}>
       <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 16 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Package size={22} color="var(--green)" />
-            <h2 style={{ margin: 0 }}>Rastreamento pelo DANFE — SSW Sistemas</h2>
+            <Package size={22} color="#0284c7" />
+            <h2 style={{ margin: 0 }}>Rastreamento SSW de Parceiros (ssw.inf.br)</h2>
           </div>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>
-            Consulta direta integrada ao portal <strong>ssw.inf.br/2/rastreamento_danfe</strong>
+            Consulte notas fiscais transportadas pela rede de transportadoras parceiras usuárias do <strong>SSW Sistemas</strong>.
           </p>
         </div>
         <a
@@ -57,111 +67,79 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
           className="button secondary compact"
           style={{ display: "flex", alignItems: "center", gap: 6 }}
         >
-          <ExternalLink size={14} /> Abrir SSW Oficial
+          <ExternalLink size={14} /> Abrir SSW direto
         </a>
       </div>
 
-      {/* Input Form matching ssw.inf.br style */}
-      <form onSubmit={handleSearch} style={{ marginTop: 24, padding: 20, background: "var(--card-subtle)", borderRadius: 14, border: "1px solid var(--line)" }}>
-        <label style={{ display: "block", marginBottom: 8, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>
-          Chave DANFE (44 dígitos) ou Número da Nota Fiscal
-        </label>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input
-            type="text"
-            value={danfeKey}
-            onChange={(e) => setDanfeKey(e.target.value)}
-            placeholder="Ex.: 41260900000000000000550010000001231000001234"
-            maxLength={50}
-            style={{
-              flex: 1,
-              minWidth: 280,
-              padding: "12px 16px",
-              borderRadius: 10,
-              border: "1px solid var(--line)",
-              background: "var(--card)",
-              color: "var(--ink)",
-              fontSize: 14,
-            }}
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="button primary"
-            style={{
-              padding: "12px 24px",
-              background: "var(--navy)",
-              color: "#fff",
-              fontWeight: 700,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              border: "none",
-              borderRadius: 10,
-              cursor: "pointer",
-            }}
-          >
-            {loading ? <RefreshCw size={16} className="spin" /> : <Search size={16} />}
-            RASTREAR
-          </button>
+      <div style={{ marginTop: 20, padding: 24, background: "var(--card-subtle)", borderRadius: 16, border: "1px solid var(--line)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, color: "var(--ink)" }}>
+          <ShieldCheck size={20} color="var(--green)" />
+          <strong style={{ fontSize: 14 }}>Consulta Oficial de Cargas de Parceiros</strong>
         </div>
-        <small style={{ display: "block", marginTop: 8, color: "var(--muted)", fontSize: 12 }}>
-          💡 Digite a chave de 44 dígitos ou capture-a com o leitor de código de barras.
-        </small>
-      </form>
+        <p style={{ margin: "0 0 20px", fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+          Digite abaixo a <strong>Chave de Acesso DANFE (44 dígitos)</strong> da NF-e emitida pelo seu fornecedor/parceiro. Ao clicar em <strong>Consultar no SSW</strong>, o sistema conectará com o portal oficial do SSW e abrirá a linha do tempo completa de ocorrências e comprovantes de entrega da transportadora responsável.
+        </p>
 
-      {error && (
-        <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", color: "var(--red)", display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-          <AlertCircle size={16} /> {error}
-        </div>
-      )}
-
-      {/* SSW Timeline / Occurrences Result */}
-      {result && (
-        <div style={{ marginTop: 24, padding: 20, borderRadius: 14, background: "var(--card)", border: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, borderBottom: "1px solid var(--line)", paddingBottom: 16, marginBottom: 16 }}>
-            <div>
-              <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>Nota Fiscal / Documento</span>
-              <h3 style={{ margin: "2px 0 0", fontSize: 20 }}>NF {result.invoiceNumber}</h3>
-              <small style={{ color: "var(--muted)", fontSize: 11, wordBreak: "break-all" }}>Chave: {result.danfeKey}</small>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "rgba(16,185,129,0.15)", color: "var(--green)", fontWeight: 800, fontSize: 12 }}>
-                <CheckCircle2 size={14} /> {result.status}
-              </span>
-              <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)" }}>
-                {result.originCity} ➔ {result.destinationCity}
-              </p>
-            </div>
+        <form onSubmit={handleSearch} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>
+            Chave DANFE da Nota Fiscal (44 dígitos)
+          </label>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              value={danfeKey}
+              onChange={(e) => setDanfeKey(e.target.value)}
+              placeholder="Ex.: 2524 0900 0000 0000 0000 5500 1000 0001 2310 0000 1234"
+              maxLength={54}
+              style={{
+                flex: 1,
+                minWidth: 320,
+                padding: "14px 16px",
+                borderRadius: 12,
+                border: "1px solid var(--line)",
+                background: "var(--card)",
+                color: "var(--ink)",
+                fontSize: 15,
+                fontFamily: "monospace",
+              }}
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="button primary"
+              style={{
+                padding: "14px 28px",
+                background: "linear-gradient(135deg, #0284c7, #06b6d4)",
+                color: "#fff",
+                fontWeight: 800,
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                border: "none",
+                borderRadius: 12,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(2, 132, 199, 0.35)",
+              }}
+            >
+              <Search size={16} />
+              {loading ? "Consultando..." : "Consultar no SSW"}
+              <ArrowRight size={16} />
+            </button>
           </div>
+        </form>
 
-          <h4 style={{ margin: "0 0 14px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>
-            Linha do Tempo de Ocorrências (SSW)
-          </h4>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {result.occurrences?.map((occ: any, i: number) => (
-              <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: 12, borderRadius: 10, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: i === result.occurrences.length - 1 ? "var(--green)" : "var(--line)", color: "#fff", display: "grid", placeItems: "center", flexShrink: 0, fontWeight: 700, fontSize: 12 }}>
-                  {i + 1}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong style={{ fontSize: 13, color: "var(--ink)" }}>{occ.occurrenceName}</strong>
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                      <Clock size={11} style={{ verticalAlign: "middle", marginRight: 3 }} />
-                      {new Date(occ.date).toLocaleString("pt-BR")}
-                    </span>
-                  </div>
-                  <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--muted)" }}>
-                    {occ.status} · <strong>{occ.city}</strong>
-                  </p>
-                </div>
-              </div>
-            ))}
+        {error && (
+          <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)", display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <AlertCircle size={16} /> {error}
           </div>
+        )}
+
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--muted)" }}>
+          <span>🔹 Suporta leitor de código de barras físico ou bipagem.</span>
+          <span>Processado via <strong>ssw.inf.br</strong></span>
         </div>
-      )}
+      </div>
     </section>
   );
 }
