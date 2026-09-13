@@ -678,8 +678,8 @@ function Pin({
           )}
 
           <>
-            <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA ou EU" autoComplete="organization" required /></label>
-            <label><span>E-mail ou Usuário</span><input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com ou Marcos" autoComplete="username" required /></label>
+            <label><span>Código da empresa</span><input autoFocus value={companyCode} onChange={(e) => setCompanyCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} placeholder="Ex.: MINHA-EMPRESA" autoComplete="organization" required /></label>
+            <label><span>E-mail ou Usuário</span><input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="username" required /></label>
             <label><span>Senha</span><input type="password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Digite sua senha" autoComplete={mode === "register" ? "new-password" : "current-password"} required /></label>
           </>
         </div>
