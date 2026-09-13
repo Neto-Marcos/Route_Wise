@@ -54,10 +54,12 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
     setError("");
     setLoading(true);
 
-    // URL direta do SSW para ser embutida no iframe
-    const url = searchType === "danfe"
+    // Roteia pelo proxy reverso próprio para remover o bloqueio de X-Frame-Options do navegador
+    const targetUrl = searchType === "danfe"
       ? `https://ssw.inf.br/2/rastreamento_danfe?danfe=${clean}`
       : `https://ssw.inf.br/2/rastreamento_dest?pwd=2&`;
+
+    const url = `/api/ssw/proxy?url=${encodeURIComponent(targetUrl)}`;
 
     setEmbeddedUrl(url);
     setLoading(false);
