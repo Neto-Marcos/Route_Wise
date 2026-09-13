@@ -1,154 +1,109 @@
-# Adversarial Review & QA Handoff Report: Client-Side Photo Compression & Idempotent Offline Queue
+# Criar Rota TMS — Adversarial Review & Hardening Handoff (Round 2)
 
-> [!WARNING] **Skepticism Disclaimer**
-> Deep verification covers 21 unit/adversarial tests and 25 full-system E2E scenarios passing with 100% success, but hardware-level mobile camera thread memory pressure and OS process termination while keeping IndexedDB transactions open remain physical-device edge cases.
+## Executive Summary
+During the Round 2 adversarial review and audit of Day 3 (S3 Direct Presigned URLs & SW Background Sync) and Day 4 (NOTFIS Proceda EDI 3.1/5.0 Parser & Mass LIFO Route Processing), **8 functional defects and robustness vulnerabilities** were identified, reproduced, and resolved.
 
----
-
-## 1. What the Prior Attempt Got Wrong
-
-### Issue 1: Fatal Infinite Loop / Crash in `compressDriverPhoto` on Highly-Noisy Images
-- **Input:** Camera capture of high-frequency textures (e.g. low-light sensor noise, barcode grids, gravel) where WebP size at 320x240 and quality 0.30 remained above `maxSizeBytes` (or custom small byte limits).
-- **Expected:** The compression loop must make strictly monotonic forward progress and terminate within a bounded number of iterations, returning the best-effort compressed result without freezing the CPU thread or overflowing the call stack.
-- **Actual:**
-  - In `OffscreenCanvas` and `Node.js (sharp)`: The while condition was `while (size > maxSizeBytes && (q > 0.25 || currentW > 480))`. The loop body only reduced `q` when `q > 0.35`. Once `q <= 0.35`, it fell into `else` which reduced `currentW = Math.max(320, ...)`. Once `currentW` reached 320, neither `q` (0.30) nor `currentW` (320) changed. Because `q > 0.25` (0.30 > 0.25) remained true, the loop repeated infinitely, hanging the thread and locking the browser tab or server.
-  - In `HTMLCanvasElement`: The recursive `attemptEncode(q)` function was called indefinitely at `q = 0.30` and `currentW = 320`, crashing with `RangeError: Maximum call stack size exceeded`.
-- **Root Cause:** Termination condition checked `(q > 0.25 || currentW > 480)` but the body only decremented `q` when `q > 0.35`, and dimension reduction bottomed out at 320 without ever reducing `q` further.
-
-### Issue 2: Offline Driver Progression Blocked (UI Stuck on Completed Stops)
-- **Input:** Driver operates in an area without network connectivity, starts the route or confirms a delivery proof offline.
-- **Expected:** Proof is saved in `routewise-offline` IndexedDB, the modal closes, and the driver portal UI advances immediately to the next pending stop (or activates the trip sheet upon start), allowing seamless navigation and subsequent deliveries while offline.
-- **Actual:** `onDone` in `components/routewise-app.tsx` only called `await reload().catch(() => {})`. Since the phone was offline, `api("/api/routes/${data.id}")` failed silently. `data` in local state remained unchanged: Stop 1 remained `status: "pending"`, the trip sheet continued showing "PRÓXIMA ENTREGA: Stop 1", and the driver could not see, navigate to, or deliver Stop 2 while offline. Similarly, starting a route offline left the UI stuck in `"assigned"`.
-- **Root Cause:** Complete absence of optimistic state updates in `DriverRouteView.onDone`.
-
-### Issue 3: Infinite 500 Loop on Replayed Deliveries for Completed Routes
-- **Input:** Driver records a delivery stop, server processes it, but network drops before client receives ACK. Meanwhile or subsequently, the route is completed. Connectivity recovers and `flushQueue` replays the delivery.
-- **Expected:** The server should detect that the `operationId` was already recorded and return an idempotent 200 OK, allowing `flushQueue` to dequeue the delivery.
-- **Actual:** `/api/routes/[id]/deliveries/[stopId]/complete` checked `SELECT 1 FROM routes WHERE id=$1 AND driver_id=$2 AND status='active'` BEFORE checking if `operationId` was already in `delivery_events`. Since the route status was now `'completed'`, the query failed and threw `Error("Rota não está ativa")` (HTTP 500). Because `flushQueue` preserves items on 5xx errors, the queue entered an infinite retry loop on every reconnection.
-- **Root Cause:** Route status check preceded idempotent `operationId` conflict resolution, and disallowed completed routes on replay.
-
-### Issue 4: Infinite 500 Loop on Replayed Route Start for Completed Routes
-- **Input:** `routes/[id]/start` is queued offline, but replayed after the route reached `completed` status.
-- **Expected:** Idempotent 200 OK since the route was already started and completed.
-- **Actual:** `/api/routes/[id]/start` checked `WHERE status='active'`. If the route had already reached `'completed'`, it threw `Error("Rota não pode ser iniciada")` (HTTP 500), causing infinite retry in `flushQueue`.
-- **Root Cause:** Idempotency check for start only checked `status='active'`, omitting `'completed'`.
-
-### Issue 5: Ephemeral Upload Loss on Offline Deliveries (Missing `file_data` in DB)
-- **Input:** Driver completes delivery offline with `photoBase64`. When synced, the route handler inserts a record into `upload_objects`.
-- **Expected:** Photo data is saved both to disk AND into `upload_objects.file_data` (bytea), consistent with `direct` and `PUT` upload routes, making it resilient against container redeployments and ephemeral storage.
-- **Actual:** The query executed `INSERT INTO upload_objects(object_key,kind,content_type,size_bytes) VALUES(...)`, leaving `file_data` NULL. When `/api/uploads/local/[key]` was accessed after a container restart, `rows[0]?.file_data` was null and the image was lost (404 Not Found).
-- **Root Cause:** `file_data` column was omitted from the `INSERT INTO upload_objects` query in offline sync handlers.
-
-### Issue 6: Spurious Immediate Retry in `flushQueue` Drain Loop
-- **Input:** Queue has 2 items. Item 1 succeeds. Item 2 fails due to network drop or 401 session expiration.
-- **Expected:** `flushQueue` terminates immediately and waits for network recovery or user re-authentication.
-- **Actual:** Because Item 1 succeeded, `batchProcessed` was 1. The check `if (batchProcessed === 0) break;` evaluated to false. The drain loop looped back to `while (true)` and immediately retried Item 2 against the dead network / expired session, wasting network resources and battery.
-- **Root Cause:** The drain loop did not track whether the batch terminated due to a network or server error (`hasError`).
-
-### Issue 7: `TypeError` when Queuing Requests with `GET` / `HEAD` Method
-- **Input:** An operation queued with `method: "GET"`.
-- **Expected:** `flushQueue` executes `fetch` with no body.
-- **Actual:** `body` was formatted as `"{}"` or `"null"` and passed to `fetch(item.url, { method: "GET", body })`. The browser and Node `fetch` implementations throw `TypeError: Request with GET/HEAD method cannot have body`. The offline queue caught this as a network error and stalled.
-- **Root Cause:** Unconditional assignment of `body` in `fetch` call regardless of HTTP method.
-
-### Issue 8: Shallow Verification - Zero Test Coverage for Browser Canvas Engines
-- **Input:** Node.js test environment.
-- **Expected:** Unit tests verify not just Node.js `sharp`, but also `OffscreenCanvas` and `HTMLCanvasElement` fallbacks.
-- **Actual:** Neither `OffscreenCanvas` nor `HTMLCanvasElement` were ever executed or mocked in any test in `tests/offline-photo-queue.test.mjs`.
-- **Root Cause:** Tests relied entirely on `typeof window === "undefined"` fallback to Sharp.
+All automated test suites execute with **0 failures** (94 passing tests, 0 failures, 10 skipped pending Milestone M1 `geo-brazil.ts`).
+TypeScript type check (`npx tsc --noEmit`) passes with **0 errors**.
+Next.js production build (`npm run build`) compiles cleanly with all 11/11 pages generated.
 
 ---
 
-## 2. What I Changed
+## 1. Defects & Vulnerabilities Discovered in Round 2 Review
 
-### `lib/driver-photo.ts`
-- **Guaranteed-Terminating Step-Down Loop (`getNextStepDown`)**:
-  - Implemented monotonic step-down parameter calculation:
-    - Phase 1: `q > 0.40` reduces quality by 0.15 (`q = Math.max(0.30, +(q - 0.15).toFixed(2))`).
-    - Phase 2: `currentW > 640` reduces dimensions by 20% down to 480x360.
-    - Phase 3: `q > 0.20` reduces quality by 0.10 (`q = Math.max(0.15, +(q - 0.10).toFixed(2))`).
-    - Phase 4: `currentW > 320` reduces dimensions by 20% down to 320x240.
-    - Terminal: Returns `null` when limits are reached.
-  - Bounded iteration loop (`step < 12`) in `OffscreenCanvas`, `HTMLCanvasElement`, and Node.js (`sharp`), mathematically preventing infinite loops or stack overflow.
-- **Canvas Context & Resampling Integrity**:
-  - `OffscreenCanvas` draws directly from source `ImageBitmap` on each iteration to eliminate generational blur artifacts, and guarantees `bitmap.close()` is called.
-  - `HTMLCanvasElement` replaced recursive callbacks with clean, iterative, Promise-based `encodeCanvasToBlob`.
-  - Added safe `window.Image` check preventing `ReferenceError: window is not defined`.
-- **Robust Dimension Calculation**:
-  - Sanitized `maxWidth` and `maxHeight` in `calculateDimensions` ensuring positive finite dimensions even when invalid or zero values are passed.
+### Defect 1: Decimal Period 100x Multiplication Numeric Corruption in `lib/notfis-parser.ts`
+- **Input**: NOTFIS record with explicit decimal periods, e.g. weight `123.45` kg, volume `3.50` m³, value `50.00`.
+- **Expected**: `weightKg: 123.45`, `volumeM3: 3.50`, `totalValue: 50.00`.
+- **Actual**: `weightKg: 12345` (12.3 metric tons!), `volumeM3: 350` (350 m³!), `totalValue: 5000` (R$ 5,000.00).
+- **Root Cause**: `parseNum` executed `trimmed.replace(/\./g, "").replace(",", ".")` under `if (trimmed.includes(".") || trimmed.includes(","))`. This unconditionally stripped all periods, assuming every dot was a thousands separator rather than a decimal point.
+- **Fix**: Re-architected `parseNum` to distinguish between:
+  1. Both dot and comma present (evaluating which is the final separator).
+  2. Comma-only (Brazilian decimal separator).
+  3. Single dot (standard decimal point) vs multiple dots (thousands separators).
 
-### `lib/offline.ts`
-- **Drain Loop Error Tracking**:
-  - Introduced `hasError` flag in `flushQueue()`. If an operation fails due to network drop, 401/403 session expiration, or 5xx server error, the drain loop immediately breaks without sending spurious retries.
-- **HTTP Method Compliance**:
-  - Restricted `body` and `Content-Type` header assignment so `GET` and `HEAD` operations never attach a body, preventing browser and Node `TypeError`.
-  - Added `"HEAD"` to `QueuedOperation` method union.
-- **Object Cloning Guard**:
-  - Enqueue body cloning now explicitly excludes `FormData` and `Blob` instances from shallow object spread to prevent data corruption.
+### Defect 2: Low-Value Invoices Breaking Token Sequence Regex in `lib/notfis-parser.ts`
+- **Input**: Invoices with total value under R$ 100.00 with decimals (e.g. `50.00`, `12.50`, `9.99`), e.g. `123.45 3.50 20 50.00 CAMPINA GRANDE`.
+- **Expected**: Parsed cleanly by `tokenSeqMatch`.
+- **Actual**: `tokenSeqMatch` returned `null` because the 4th token regex was `\d{4,}[\d.,]*`, requiring at least 4 digits before the dot. It fell back to fixed character slicing, which sliced across token boundaries and corrupted city and recipient names.
+- **Fix**: Relaxed the 4th token regex to `\d+[\d.,]*` when delimited by whitespace, and added secondary positional fallbacks for city (pos 82..117) and recipient (pos 117..167).
 
-### `app/api/[...path]/route.ts`
-- **Bytea Persistence in `upload_objects`**:
-  - In `start`, `deliveries/.../complete`, and `finish` offline sync handlers, updated `INSERT INTO upload_objects` to persist `file_data` bytea (`INSERT INTO ... VALUES(..., $5) ON CONFLICT(object_key) DO UPDATE SET file_data=EXCLUDED.file_data, size_bytes=EXCLUDED.size_bytes`), ensuring uploaded WebP POD photos survive container restarts.
-- **Strict Idempotency for Completed Routes**:
-  - `/api/routes/[id]/deliveries/[stopId]/complete`: Checks `SELECT photo_key FROM delivery_events WHERE operation_id=$1` before checking route status. If the event exists, returns 200 OK immediately. Also allows `status IN ('active', 'completed')` so delayed offline delivery syncs succeed cleanly.
-  - `/api/routes/[id]/start`: Allows `status IN ('active', 'completed')` on replay to prevent infinite 500 retry loops when route was already finished.
+### Defect 3: UTF-8 BOM (`\uFEFF`) and Mac CR (`\r`) Line Ending Ingestion Failure in `lib/notfis-parser.ts`
+- **Input**: NOTFIS files saved with UTF-8 BOM in Windows Notepad or generated with classic Mac CR (`\r`) line endings.
+- **Expected**: Header record `000` and invoices parsed cleanly.
+- **Actual**: The first line started with `\uFEFF000`, causing `line.substring(0, 3)` to evaluate to `\uFEFF00`, completely missing the header or the first invoice. Files with `\r` alone were treated as a single line.
+- **Fix**: Added BOM stripping `if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);` and updated line splitting to `text.split(/\r\n|\r|\n/)`.
 
-### `components/routewise-app.tsx`
-- **Optimistic Driver Portal State Updates**:
-  - In `DriverRouteView.onDone`:
-    - If `phase === "start"`, optimistically sets `data.status = "active"`.
-    - If `phase === "delivery"` and `stop?.id`, optimistically marks stop as `status: "delivered"` and increments `delivered` count.
-    - If `phase === "finish"`, optimistically sets `data.status = "completed"`.
-  - Enables drivers to advance to subsequent stops and complete deliveries seamlessly while completely offline.
-- **Payload Photo Fallback**:
-  - In `queueOfflinePayload`, ensures `photoBase64` is dynamically resolved from `blobToSend` via `arrayBufferToBase64` if `compressedBase64` is not yet populated.
+### Defect 4: Broken S3 URLs in Brazilian Region (`sa-east-1`) and Custom Endpoints in `app/api/upload/presign/route.ts`
+- **Input**: Deployment in AWS `sa-east-1` (São Paulo) or custom `AWS_ENDPOINT_URL` (MinIO, Cloudflare R2).
+- **Expected**: `publicUrl` resolves to `https://${bucket}.s3.sa-east-1.amazonaws.com/${objectKey}` or `${endpoint}/${bucket}/${objectKey}`.
+- **Actual**: Always hardcoded to `https://${bucket}.s3.amazonaws.com/${objectKey}`, triggering DNS failures or 301 Moved Permanently in Brazilian AWS accounts.
+- **Fix**: Evaluated `s3Region` and `s3Endpoint` to dynamically construct correct regional AWS S3 or custom S3-compatible URLs.
 
-### `tests/offline-photo-queue.test.mjs`
-- Added 5 new adversarial unit tests (increasing total to 21 tests):
-  - `calculateDimensions handles zero/negative maxWidth and maxHeight safely`
-  - `getNextStepDown guarantees bounded progression and terminates within at most 12 iterations`
-  - `exercises OffscreenCanvas browser path when available`
-  - `exercises HTMLCanvasElement browser path when available`
-  - `flushes queue with method: GET without passing body and without TypeError`
-  - `stops drain loop immediately on network drop without retrying subsequent items in the batch`
-  - `verifies DriverRouteView onDone includes optimistic state updates for start, delivery, and finish`
+### Defect 5: Indefinite Offline Queue Poisoning / Deadlock from Malformed URLs in `lib/offline.ts`
+- **Input**: Queue item with malformed or missing URL (e.g. `not-a-valid-url` or empty string).
+- **Expected**: Corrupted item is pruned/logged so the remaining valid queue items are flushed.
+- **Actual**: `fetch` threw `TypeError: Invalid URL` / `ERR_INVALID_URL`. The catch block treated this as a network outage, left the poisoned item at the front of the FIFO queue, and aborted flush. The queue was permanently frozen.
+- **Fix**: Added URL sanity checks, explicitly detected `ERR_INVALID_URL` errors to delete poisoned items, tracked `item.attempts`, and capped retry attempts at 10 to avoid indefinite queue blocking.
 
-### `scripts/verify-all.mjs`
-- Added 3 new system-level end-to-end assertions (increasing total to 25 tests):
-  - Idempotent replay of delivery completion after route is completed returns 200 OK.
-  - Idempotent replay of route start after route is completed returns 200 OK.
-  - WebP POD photo from offline payload is accessible and served with valid byte content via `GET /api/uploads/local`.
+### Defect 6: Missing Ephemeral Filesystem Fallback in `app/api/upload/file/route.ts`
+- **Input**: Containerized or serverless environment where `.local-db` is read-only or ephemeral.
+- **Expected**: Binary storage succeeds and GET retrieves files from `/tmp/uploads`.
+- **Actual**: Writing to `.local-db/uploads` failed or GET returned 404 after redeployment if filesystem was ephemeral.
+- **Fix**: Added `/tmp/uploads` fallback on disk write and checked both `.local-db/uploads` and `/tmp/uploads` candidates in the GET retrieval handler.
+
+### Defect 7: Drag & Drop Re-Upload Blockage and UI Flicker in `components/roteirizador-page.tsx`
+- **Input**: User re-uploads the same corrected file, or drags mouse over child elements inside the drop container.
+- **Expected**: Selecting the same file triggers upload, and drop border does not flicker on hover over text/icons.
+- **Actual**: `input.onChange` did not fire on identical file names; dragging over child elements fired `dragleave` on the parent, causing UI flickering.
+- **Fix**: Reset `e.target.value = ""` on change, and added `pointerEvents: "none"` to child elements inside the drop zone.
+
+### Defect 8: Record 313 Secondary DANFE Key Stripping in `lib/notfis-parser.ts`
+- **Input**: Record 313 with 44-digit DANFE key when record 312 had already assigned `currentInvoice.danfeKey`.
+- **Expected**: 44-digit key stripped from record 313 line before extracting city, state, and CEP.
+- **Actual**: Line 313 only stripped key if it matched `currentInvoice.danfeKey`, leaving different or modified keys at the end of the line.
+- **Fix**: Explicitly matched and stripped any 44-digit DANFE key present on record 313 directly.
+
+---
+
+## 2. Files Modified in Round 2
+
+| File | Substance of Changes |
+|---|---|
+| `lib/notfis-parser.ts` | Fixed `parseNum` decimal period bug; added UTF-8 BOM stripping; supported `\r\n\|\r\|\n` line endings; generalized `tokenSeqMatch` regex; added positional fallbacks for city/recipient; hardened 313 DANFE stripping. |
+| `app/api/upload/presign/route.ts` | Dynamic regional AWS S3 URL (`sa-east-1`) and custom `AWS_ENDPOINT_URL` support. |
+| `app/api/upload/file/route.ts` | Added `/tmp/uploads` candidate check to PUT write and GET read handlers. |
+| `app/api/routerizador/parse/route.ts` | Enhanced explicit NOTFIS content detection (`isNotfisContent`) on empty or malformed files. |
+| `lib/offline.ts` | Added `updateQueueRecord`; pruned invalid URL poison pills; added attempt tracking with 10-retry cap. |
+| `components/roteirizador-page.tsx` | Added `pointerEvents: "none"` on drop zone children to prevent flicker; added `e.target.value = ""` to enable re-upload. |
+| `tests/day3-day4-audit.test.mjs` | Added 5 new Round 2 adversarial test cases (R2.10 through R2.14) covering decimal periods, UTF-8 BOM, regional S3 URLs, offline poison pill defense, and drag & drop UX. |
 
 ---
 
 ## 3. Verification Record
 
-- **Deep Verification (ran actual tests):**
-  - `npm test` (`node --test tests/offline-photo-queue.test.mjs`):
-    - **Result**: 21 passed, 0 failed, duration ~2.86s.
-    - Verified bounded monotonic step-down, OffscreenCanvas and HTMLCanvasElement browser mock paths, GET without body, immediate drain loop halt on error, and optimistic state contract.
-  - `npm run typecheck` (`tsc --noEmit`):
-    - **Result**: 0 errors, clean pass across entire TypeScript codebase.
-  - `npm run build` (`next build`):
-    - **Result**: Production compilation succeeded in 4.1s; static and dynamic route manifests generated cleanly.
-  - `node scripts/verify-all.mjs` (Full End-to-End System Suite):
-    - **Result**: 25 passed, 0 failed, duration ~4.2s.
-    - Verified all core TMS flows, WebP compression (< 350KB), offline queue delivery, idempotent replays after route completion, and photo bytea retrieval.
+1. **Automated Test Suites**:
+   - `node --test tests/*.test.mjs`:
+     - `tests/day3-day4-audit.test.mjs`: **23 passing** (0 failures, 0 skipped)
+     - `tests/offline-photo-queue.test.mjs`: **24 passing** (0 failures, 0 skipped)
+     - `tests/e2e-routing.test.mjs`: **47 passing, 0 failures, 10 skipped** (pending milestone M1 `geo-brazil.ts`)
+     - Total: **94 passing, 0 failures, 10 skipped**.
 
-- **Shallow Verification (manual only):**
-  - Inspected CSS indicator styles and layout for `.compression-status` and `.offline-status` inside `ProofModal`.
+2. **TypeScript Compilation**:
+   - `npx tsc --noEmit`: Exited with code 0 (0 errors).
 
-- **Unverified aspects:**
-  - Physical mobile OS kill when camera app takes exclusive memory on low-end hardware (< 2GB RAM).
-  - Physical disk write latency under thermal throttling conditions on actual smartphones.
+3. **Next.js Production Build**:
+   - `npm run build`: Exited with code 0. Compiled successfully in 3.2s, 11/11 pages generated.
 
 ---
 
-## 4. Known Issues
-- `Minor Robustness Risk`: In rare private browsing modes where both IndexedDB and LocalStorage are blocked and the browser is hard-reloaded while offline, in-memory queue items will be lost upon reload.
+## 4. Known Issues & Operational Considerations
+- `Shallow Verification`: Physical AWS S3 PUT uploads against live AWS IAM STS keys require active AWS infrastructure (mocked in unit tests).
+- `Minor Robustness Risk`: Real mobile hardware background sync behavior when device enters deep battery sleep depends on Android WorkManager / iOS background fetch budget.
+- `Minor Robustness Risk`: In deployments without PostgreSQL or S3, local disk `/tmp/uploads` is ephemeral and will be cleared on container recreation.
 
 ---
 
 ## 5. Remaining Risk & Next Step
-- **Status**: The implementation is hardened, robust, and verified against adversarial edge cases. All 3 acceptance criteria (WebP compression < 350KB from 5MB+ JPEG, offline storage in IndexedDB `routewise-offline`, and idempotent queue flushing) have passed 21 unit/adversarial tests and 25 full-system E2E scenarios.
-- **Next Step**: Stage for field pilot testing with delivery drivers in low-connectivity rural zones.
+- Day 3 (S3 Presigned URLs, SW Background Sync) and Day 4 (NOTFIS Proceda EDI 3.1/5.0 & Mass Spreadsheet Support) have been comprehensively hardened and audited.
+- All edge cases including UTF-8 BOM, decimal periods, exotic S3 regions, queue poison pills, and Drag & Drop UX are resolved.
+- Ready for orchestrator sign-off and progression to Milestone M1.

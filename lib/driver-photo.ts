@@ -446,19 +446,35 @@ export async function normalizeDriverPhoto(value: unknown): Promise<string | nul
   }
 }
 
+function resolveStorageUrl(url: string): string {
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return new URL(url, window.location.origin).toString();
+  }
+  const base = process.env.APP_URL || process.env.NEXTAUTH_URL || process.env.BASE_URL || "http://localhost:3000";
+  return new URL(url, base).toString();
+}
+
 /**
  * Envia uma foto comprimida para o S3 via URL pré-assinada.
  * Se o S3 não estiver configurado, retorna a chave local com fallback automático.
  */
 export async function uploadPhotoToStorage(
-  photo: CompressedPhotoResult,
-  kind: "pod_photo" | "odometer" | "report" = "pod_photo"
-): Promise<{ objectKey: string; directS3: boolean }> {
-  const presignRes = await fetch("/api/upload/presign", {
+  photoInput: CompressedPhotoResult | File | Blob,
+  kind: "pod_photo" | "odometer" | "report" = "pod_photo",
+  options?: CompressPhotoOptions
+): Promise<{ objectKey: string; directS3: boolean; photo: CompressedPhotoResult; publicUrl?: string }> {
+  // Garante compressão WebP antes da transmissão pela rede
+  const photo: CompressedPhotoResult =
+    photoInput && typeof photoInput === "object" && "blob" in photoInput && "format" in photoInput && (photoInput as CompressedPhotoResult).format === "image/webp"
+      ? (photoInput as CompressedPhotoResult)
+      : await compressDriverPhoto(photoInput as File | Blob, options);
+
+  const presignRes = await fetch(resolveStorageUrl("/api/upload/presign"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      filename: photo.file.name || "proof.webp",
+      filename: photo.file?.name || "proof.webp",
       contentType: photo.format,
       kind,
     }),
@@ -468,21 +484,21 @@ export async function uploadPhotoToStorage(
     throw new Error("Erro ao obter autorização de upload");
   }
 
-  const { directS3, uploadUrl, objectKey } = await presignRes.json();
+  const { directS3, uploadUrl, objectKey, publicUrl } = await presignRes.json();
 
-  if (directS3 && uploadUrl) {
-    // Upload direto para o S3 (bypassing o servidor Node)
-    const uploadRes = await fetch(uploadUrl, {
+  if (uploadUrl) {
+    // Upload direto (S3 Presigned PUT ou fallback local)
+    const uploadRes = await fetch(resolveStorageUrl(uploadUrl), {
       method: "PUT",
       headers: { "Content-Type": photo.format },
       body: photo.blob,
     });
 
     if (!uploadRes.ok) {
-      throw new Error(`Falha no upload direto para o S3 (${uploadRes.status})`);
+      throw new Error(`Falha no upload para storage (${uploadRes.status})`);
     }
   }
 
-  return { objectKey, directS3 };
+  return { objectKey, directS3, photo, publicUrl };
 }
 

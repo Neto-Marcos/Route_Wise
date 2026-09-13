@@ -148,15 +148,55 @@ export async function enqueue<T = any>(operation: {
   }
 
   // Registra Background Sync para sincronizar assim que a rede voltar
-  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-    navigator.serviceWorker.ready.then((reg) => {
-      if ("sync" in reg) {
-        (reg as any).sync.register("rw-background-sync").catch(() => {});
-      }
-    }).catch(() => {});
-  }
+  registerBackgroundSync("rw-background-sync").catch(() => {});
 
   return record;
+}
+
+/**
+ * Registers the background sync tag (default: 'rw-background-sync') with the Service Worker
+ * to automatically flush queued POD proofs upon network recovery.
+ */
+export async function registerBackgroundSync(tag = "rw-background-sync"): Promise<boolean> {
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg && "sync" in reg) {
+        await (reg as any).sync.register(tag);
+        return true;
+      }
+    } catch (e) {
+      console.warn("[offline-queue] Falha ao registrar background sync:", e);
+    }
+  }
+  return false;
+}
+
+// Escuta mensagens do Service Worker (ex: quando o evento sync dispara no SW em background)
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  try {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (
+        event.data?.type === "SYNC_OFFLINE_QUEUE" &&
+        (event.data?.tag === "rw-background-sync" || event.data?.tag === "routewise-offline-sync")
+      ) {
+        flushQueue().catch((err) =>
+          console.warn("[offline-queue] Background sync auto-flush failed:", err)
+        );
+      }
+    });
+  } catch {}
+}
+
+// Escuta evento 'online' do navegador para sincronização imediata em todas as plataformas (incluindo iOS Safari)
+if (typeof window !== "undefined") {
+  try {
+    window.addEventListener("online", () => {
+      flushQueue().catch((err) =>
+        console.warn("[offline-queue] Auto-flush on online event failed:", err)
+      );
+    });
+  } catch {}
 }
 
 /**
@@ -194,6 +234,36 @@ export async function getQueueItems(): Promise<QueuedOperation[]> {
   }
 
   return Array.from(map.values());
+}
+
+/**
+ * Safely updates an item in both memory and IndexedDB.
+ */
+async function updateQueueRecord(item: QueuedOperation): Promise<void> {
+  memoryStore.set(item.id, item);
+  const idb = getIndexedDB();
+  if (!idb) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(item);
+      tx.oncomplete = () => {
+        try { db.close(); } catch {}
+        resolve();
+      };
+      tx.onerror = () => {
+        try { db.close(); } catch {}
+        reject(tx.error);
+      };
+      tx.onabort = () => {
+        try { db.close(); } catch {}
+        reject(tx.error || new Error("Transaction aborted"));
+      };
+    });
+  } catch (e) {
+    console.warn("[offline-queue] Falha ao atualizar item no IndexedDB:", e);
+  }
 }
 
 /**
@@ -327,11 +397,18 @@ export async function flushQueue(): Promise<number> {
           };
 
           let body: any = undefined;
-          if (isBodyAllowed && item.body !== undefined) {
+          if (isBodyAllowed && item.body !== undefined && item.body !== null) {
             body =
               typeof item.body === "string"
                 ? item.body
                 : JSON.stringify(item.body);
+          }
+
+          if (!item.url || typeof item.url !== "string" || !item.url.trim()) {
+            console.warn(`[offline-queue] Operação ${item.id} com URL ausente ou inválida. Removendo da fila.`);
+            await deleteQueueRecord(item.id);
+            batchProcessed++;
+            continue;
           }
 
           const rawUrl = item.url;
@@ -350,9 +427,23 @@ export async function flushQueue(): Promise<number> {
               ...(isBodyAllowed ? { body } : {}),
               signal: controller.signal,
             });
-          } catch (fetchErr) {
-            // Network failed mid-request: do NOT delete, break and retry on next reconnect
+          } catch (fetchErr: any) {
+            // Se o erro foi URL inválida/malformada, remove o registro envenenado para não travar a fila
+            if (
+              fetchErr?.code === "ERR_INVALID_URL" ||
+              fetchErr?.message?.includes("Invalid URL") ||
+              fetchErr?.message?.includes("Failed to parse URL")
+            ) {
+              console.warn(`[offline-queue] URL malformada na operação ${item.id} (${targetUrl}). Removendo da fila.`);
+              await deleteQueueRecord(item.id);
+              batchProcessed++;
+              continue;
+            }
+
+            // Network failed mid-request: incrementa tentativas, persiste e pausa sincronização
             console.warn(`[offline-queue] Falha de rede ao enviar operação ${item.id}:`, fetchErr);
+            item.attempts = (item.attempts || 0) + 1;
+            await updateQueueRecord(item);
             hasError = true;
             break;
           } finally {
@@ -371,8 +462,16 @@ export async function flushQueue(): Promise<number> {
             hasError = true;
             break;
           } else if (res.status === 429 || res.status >= 500) {
-            // 5xx Server Error or 429 Rate Limit: preserve in queue, stop flush, retry later
-            console.warn(`[offline-queue] Servidor retornou ${res.status} para ${item.id}. Fila pausada.`);
+            // 5xx Server Error or 429 Rate Limit: incrementa tentativas e preserva
+            item.attempts = (item.attempts || 0) + 1;
+            if (item.attempts >= 10) {
+              console.warn(`[offline-queue] Operação ${item.id} atingiu o limite de 10 tentativas com status ${res.status}. Removendo da fila.`);
+              await deleteQueueRecord(item.id);
+              batchProcessed++;
+              continue;
+            }
+            await updateQueueRecord(item);
+            console.warn(`[offline-queue] Servidor retornou ${res.status} para ${item.id} (tentativa ${item.attempts}). Fila pausada.`);
             hasError = true;
             break;
           } else {

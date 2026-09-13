@@ -1,122 +1,91 @@
-# Adversarial Review & QA Handoff Report (Round 3): Client-Side Photo Compression & Idempotent Offline Queue
+# Criar Rota TMS — Adversarial Review & Hardening Handoff (Round 3)
 
 > [!WARNING] **Skepticism Disclaimer**
-> Deep verification covers 24 unit/adversarial tests and 25 end-to-end full-stack system scenarios passing at 100%, but physical camera hardware sensor interrupts and mobile OS background process termination while a raw camera frame is in memory cannot be simulated with pure software tests.
-
----
+> Verified across 99 passing automated tests, 0 compilation errors, and successful production Next.js build; however, physical Service Worker background sync wakeups during Android/iOS deep OS power sleep and physical AWS S3 upload CORS against live Amazon endpoints remain mock-tested.
 
 ## 1. What the Prior Attempt Got Wrong
 
-### Issue 1: Duplicate Delivery Events on Re-submission with New Operation ID or Rapid Double Clicks
-- **Input:** Driver taps "Confirmar registro" twice in rapid succession, or re-submits a delivery proof after a connection drop where a new `operationId` was generated for an already-delivered stop.
-- **Expected:** The server endpoint `/api/routes/[id]/deliveries/[stopId]/complete` must detect that the stop was already delivered, return 200 OK idempotently, and insert strictly zero duplicate records into `delivery_events`.
-- **Actual:** The server only checked `SELECT photo_key FROM delivery_events WHERE operation_id=$1`. When called with a new `operationId` for the same stop, it inserted a second record into `delivery_events`, creating duplicate delivery events and violating Acceptance Criteria 3.
-- **Root Cause:** The server-side idempotency query omitted `OR (route_id=$2 AND stop_id=$3)`, and the client modal lacked an instantaneous double-submission lock (`isSubmittingRef`).
+### Issue 1: Numeric CFOP & Emission Date Token Collision in NOTFIS Record 312 (`lib/notfis-parser.ts`)
+- **Input:** NOTFIS 3.1/5.0 record 312 containing a numeric CFOP code (e.g. `5102`, `6108`, `5405`) or space-delimited emission date before delivery metrics (e.g., `312000001234 1 20260913 5102 00052050 000003500 00020 00000001525000 CAMPINA GRANDE ...`).
+- **Expected:** `weightKg: 520.50`, `volumeM3: 3.50`, `boxes: 20`, `totalValue: 15250.00`, `city: "CAMPINA GRANDE"`, `recipientName: "MERCADO CENTRAL DA PARAIBA LTDA"`.
+- **Actual:** `weightKg: 1.02` (CFOP `5102` divided by 100), `volumeM3: 52.05` (actual weight parsed as volume), `boxes: 3500` (volume parsed as boxes), `totalValue: 0.20` (boxes parsed as total value), `city: "00000001525000"` (total value parsed as city), and recipient was corrupted or dropped.
+- **Root Cause:** Regex `/(\d+[\d.,]*)\s+(\d+[\d.,]*)\s+(\d+[\d.,]*)\s+(\d+[\d.,]*)/` was evaluated against `cleanLine.substring(25)`, capturing the 4-digit CFOP as token 1 (weight), shifting all 4 delivery metrics left by one position, and spilling the total value into the city text field.
 
-### Issue 2: Optimistic UI Progression Cancelled when Dismissing Modal Early
-- **Input:** Driver completes delivery proof offline. `queueOfflinePayload` schedules `setTimeout(() => onDone(), 1200)`. Driver taps the modal close button "X" or backdrop before the 1200ms delay elapses.
-- **Expected:** The driver route view optimistically marks the stop as delivered and advances navigation to the next stop regardless of modal dismissal timing.
-- **Actual:** `ActiveRoute` defined `onDone` reading parent state: `const currentPhase = modal; const currentStop = next;`. When the modal was closed, `setModal(null)` reset `modal` to `null`. When `onDone` fired from the timer, `currentPhase` was `null`, so the optimistic state updates (`currentPhase === "delivery"`) were completely skipped, leaving the driver stuck on the completed stop while offline.
-- **Root Cause:** `onDone` relied on mutable parent component state variables (`modal`, `next`) instead of `ProofModal` explicitly passing `onDone(phase, stop)`.
+### Issue 2: Service Worker Background Sync Dormant When No Browser Window Client Is Open (`public/sw.js`)
+- **Input:** Driver enqueues delivery proof offline in remote area with no signal, then turns off screen or closes the browser tab. Network connectivity is later restored while device is idle.
+- **Expected:** Service Worker `sync` event handler flushes the queued proofs directly from IndexedDB without requiring the driver to manually reopen the app.
+- **Actual:** Service Worker queried `self.clients.matchAll({ type: "window" })`. Because no browser window/tab was active, `clientList` was empty (`[]`), no message was posted, and the queue remained dormant in IndexedDB until user intervention.
+- **Root Cause:** Service Worker delegated sync processing exclusively to open window clients via `postMessage` with no direct IndexedDB drain fallback.
 
-### Issue 3: Cumulative IndexedDB Database Connection Leaks
-- **Input:** Continuous offline usage where driver queues location points and delivery proofs, checks queue count, and flushes operations.
-- **Expected:** Every IndexedDB connection opened via `openDB()` is cleanly closed when transactions complete or abort.
-- **Actual:** `enqueue()`, `getQueueItems()`, `deleteQueueRecord()`, and `clearQueue()` opened connections via `openDB()` without ever calling `db.close()`. This accumulated dozens of unclosed connections, exhausting connection pools and causing transaction freezes on mobile browsers (iOS Safari / Android Chrome).
-- **Root Cause:** Missing `db.close()` calls inside `tx.oncomplete`, `tx.onerror`, and `tx.onabort` callbacks.
+### Issue 3: Unhandled DB Tracking Failure Aborting S3 Presigned URL Issuance (`app/api/upload/presign/route.ts`)
+- **Input:** Transient PostgreSQL/PGlite database error, connection pool exhaustion, or read-only volume during `POST /api/upload/presign`.
+- **Expected:** S3 Request Presigner still generates and returns the 15-minute Presigned URL (since S3 signing is an in-memory cryptographic operation that does not depend on database state), logging a tracking warning.
+- **Actual:** `await query("INSERT INTO upload_objects...")` threw an unhandled exception, causing the entire endpoint to return HTTP 500 error to the driver.
+- **Root Cause:** Missing `try/catch` block around the database audit tracking query.
 
-### Issue 4: ImageBitmap Memory Leak on OffscreenCanvas Encoding Failures
-- **Input:** Camera captures where `OffscreenCanvas.convertToBlob` throws an error or is unsupported by the platform WebView.
-- **Expected:** The allocated `ImageBitmap` must always be closed to reclaim GPU/heap memory before falling back to `HTMLCanvasElement`.
-- **Actual:** `bitmap.close()` was positioned after the step-down loop outside of a `finally` block. Any exception thrown during canvas allocation or `convertToBlob` aborted the function into `catch`, leaking the raw uncompressed bitmap (~48MB for a 12MP camera frame).
-- **Root Cause:** Missing `try ... finally` block around `bitmap` usage.
+### Issue 4: Directory Traversal Vulnerability in Presigned URL Object Keys (`app/api/upload/presign/route.ts`)
+- **Input:** Request payload with malicious `kind` (e.g., `kind: "../../../secret"`) or unsanitized `filename`.
+- **Expected:** `objectKey` is strictly scoped to safe folder prefixes (`pod_photo/`, `odometer/`, `report/`, etc.).
+- **Actual:** `objectKey` was directly interpolated: `${kind}/${dateStr}/${uniqueId}.${ext}`, permitting directory traversal in fallback filesystem storage.
+- **Root Cause:** Lack of input sanitization on `kind` and `filename` extension.
 
-### Issue 5: Photo Data Loss on Offline Sync when Photo Key Was Pre-assigned
-- **Input:** Device attempts presigned PUT upload, receives a `photoKey`, but network drops before delivery completion. The operation is queued with both `photoKey` and `photoBase64`.
-- **Expected:** When synced, the server persists `photoBase64` into `upload_objects.file_data` (bytea) so the POD photo survives disk cache purges and container restarts.
-- **Actual:** Handlers checked `if (!photoKey && data.photoBase64)`. Because `photoKey` was already populated, the byte data was ignored and `upload_objects.file_data` remained NULL.
-- **Root Cause:** Missing `UPDATE upload_objects SET file_data=COALESCE(file_data, $1) WHERE object_key=$2` fallback for pre-assigned keys.
+### Issue 5: Truncated Multi-Part Recipient Names in NOTFIS Parser (`lib/notfis-parser.ts`)
+- **Input:** Recipient company name containing double spaces or multi-word business suffixes (e.g. `"LOJAS AMERICANAS  FILIAL NORDESTE 02"`).
+- **Expected:** Full company name preserved in `recipientName`.
+- **Actual:** Sliced `textBlocks[1]`, discarding any tokens beyond the second space-separated block.
+- **Root Cause:** Missing join across subsequent text blocks (`textBlocks.slice(1).join(" ")`).
 
-### Issue 6: `TypeError: Failed to parse URL` in Node.js Environment on Relative Paths
-- **Input:** `flushQueue()` invoked in Node.js, SSR, or worker environment with a relative path (e.g., `"/api/routes/..."`).
-- **Expected:** `flushQueue()` resolves relative URLs against `process.env.APP_URL` or `http://localhost:3000`.
-- **Actual:** Native Node.js `fetch` threw `TypeError: Failed to parse URL from /api/...`, halting the queue.
-- **Root Cause:** Absence of base URL resolution for relative paths when `typeof window === "undefined"`.
+### Issue 6: Misclassified NOTFIS Files Uploaded with Spreadsheet Extensions (`app/api/routerizador/parse/route.ts`)
+- **Input:** NOTFIS EDI file mistakenly saved with `.csv` or `.xlsx` extension.
+- **Expected:** If spreadsheet parsing yields 0 rows, system checks for NOTFIS positional records (`000`, `310`, `311`, `312`) and parses orders cleanly.
+- **Actual:** Returned 422: "Nenhum pedido elegível encontrado na planilha."
+- **Root Cause:** Unidirectional parser branching without fallback from spreadsheet to NOTFIS.
 
 ---
 
 ## 2. What I Changed
 
-### `app/api/[...path]/route.ts`
-- **True Stop-Level Idempotency (`deliveries/[stopId]/complete`)**:
-  - Enhanced query to `SELECT operation_id, photo_key FROM delivery_events WHERE operation_id=$1 OR (route_id=$2 AND stop_id=$3)`.
-  - If already delivered, returns 200 OK immediately with existing `operation_id` and `photo_key`, preventing duplicate rows in `delivery_events`.
-- **Pre-assigned Key Bytea Persistence**:
-  - Added `UPDATE upload_objects SET file_data=COALESCE(file_data, $1), size_bytes=COALESCE(size_bytes, $2) WHERE object_key=$3` across `start`, `deliveries/.../complete`, and `finish` when both `photoKey` and `data.photoBase64` are present.
-- **Odometer Reading Conflict Prevention**:
-  - Added `ON CONFLICT (route_id, phase) DO UPDATE SET kilometers=EXCLUDED.kilometers, photo_key=EXCLUDED.photo_key, lat=EXCLUDED.lat, lng=EXCLUDED.lng` in `start` and `finish` handlers to prevent 500 errors on replayed submissions.
-
-### `components/routewise-app.tsx`
-- **Submission Lock in `ProofModal`**:
-  - Added `isSubmittingRef` to instantaneously prevent re-entrancy from double clicks or double taps before React state re-renders the disabled button.
-- **Explicit Pass-Through to `onDone(phase, stop)`**:
-  - Updated `ProofModal` to pass `(phase, stop)` directly to `onDone`.
-  - Updated `ActiveRoute.onDone(completedPhase, completedStop)` to use passed arguments `const currentPhase = completedPhase || modal; const currentStop = completedStop !== undefined ? completedStop : next;`, eliminating race conditions when the modal is dismissed early.
-- **Explicit Role Header**:
-  - Included `headers: { "X-RouteWise-Role": "driver" }` directly in `enqueue(...)` payload within `ProofModal` to protect against lost session storage.
-- **Object URL Cleanup**:
-  - Added `URL.revokeObjectURL(previewUrl)` on file selection and unmount to prevent memory leaks.
-
-### `lib/offline.ts`
-- **IDB Connection Lifetime Management**:
-  - Added `db.close()` to `oncomplete`, `onerror`, and `onabort` handlers in `enqueue()`, `getQueueItems()`, `deleteQueueRecord()`, and `clearQueue()`.
-- **Node.js Relative URL Resolution**:
-  - In `flushQueue()`, added resolution of relative paths against `process.env.APP_URL || "http://localhost:3000"` when `typeof window === "undefined"`.
-
-### `lib/driver-photo.ts`
-- **Guaranteed ImageBitmap Cleanup**:
-  - Enclosed `OffscreenCanvas` drawing, step-down compression, and blob conversion inside `try ... finally { try { bitmap.close(); } catch {} }` to prevent bitmap memory leaks on encode failures.
-
-### `tests/offline-photo-queue.test.mjs`
-- Added 3 new adversarial unit tests (increasing total to 24 tests):
-  - Verified `mockDB.close()` is called on IndexedDB operations.
-  - Verified `ImageBitmap` is closed in a `finally` block when `convertToBlob` throws.
-  - Verified `flushQueue` resolves relative URLs with base URL in Node.js environment.
-  - Verified `ProofModal` contains double-submit lock, explicit role header, and pass-through `onDone`.
-
-### `scripts/verify-all.mjs`
-- Added assertion verifying that replaying delivery completion with a **different operationId** for an already-delivered stop returns 200 OK idempotently and maintains strictly 1 delivery event in the database.
+| File | Substance of Changes |
+|---|---|
+| `lib/notfis-parser.ts` | **Eliminated CFOP Collision:** Implemented `tokenSeqWithTextMatch` (`/(\d+[\d.,]*)\s+(\d+[\d.,]*)\s+(\d+[\d.,]*)\s+(\d+[\d.,]*)\s+([A-Za-zÀ-ÿ].*)/`), anchoring the 4 delivery metrics directly to the destination text and eliminating false positives from numeric CFOPs (`5102`) or emission dates. Preserved multi-part recipient names with `textBlocks.slice(1).join(" ")`. Supported lines with leading indentation. Enhanced address formatting to avoid dangling delimiters. Upgraded `totalVolumeM3` precision to 3 decimals (`parseFloat(totalVol.toFixed(3))`). |
+| `public/sw.js` | **Direct Background Sync Fallback:** Added `flushQueueFromSW()`. If `clientList.length === 0` when the `rw-background-sync` event fires, the Service Worker directly connects to IndexedDB `routewise-offline`, drains queued operations in FIFO order with idempotency headers, and deletes completed operations upon 2xx/409 responses. Added `includeUncontrolled: true` to client matching. |
+| `app/api/upload/presign/route.ts` | **Traversal Hardening & Resilient Tracking:** Sanitized `kind` against directory traversal using `safeKind = /^[a-zA-Z0-9_-]{1,32}$/` and stripped illegal characters from `ext`. Wrapped DB tracking insert in `try/catch` to guarantee S3 presigning resilience against database connection drops. Added `key` and `url` compatibility aliases. |
+| `app/api/routerizador/parse/route.ts` | **Bidirectional Format Recovery:** Added `parseNotfis` fallback when `parseSpreadsheet` yields 0 rows if file content contains NOTFIS record signatures (`000|310|311|312`). |
+| `lib/offline.ts` | **Payload & URL Validation:** Added `item.body !== null` check to prevent stringifying `null` into `"null"`, and added `!item.url.trim()` up-front validation before fetch execution. |
+| `tests/day3-day4-audit.test.mjs` | **Added 5 Round 3 Adversarial Tests:** R2.15 (numeric CFOP protection without weight corruption), R2.16 (multi-part recipient name preservation), R2.17 (indented lines and 3-decimal volume statistics), R2.18 (SW `flushQueueFromSW` direct IndexedDB background drain), and R2.19 (presign route traversal sanitization & compatibility aliases). |
 
 ---
 
 ## 3. Verification Record
 
 - **Deep Verification (ran actual tests):**
-  - `npm test` (`node --test tests/offline-photo-queue.test.mjs`):
-    - **Result**: 24 passed, 0 failed, duration ~3.02s.
-    - Verified bounded step-down compression, OffscreenCanvas and HTMLCanvasElement browser engines, ImageBitmap finally cleanup, IDB database close calls, relative URL resolution, and UI contract indicators.
-  - `npm run typecheck` (`tsc --noEmit`):
-    - **Result**: 0 errors, clean pass across entire TypeScript codebase.
-  - `npm run build` (`next build`):
-    - **Result**: Production compilation succeeded in 4.4s; all routes and static assets compiled cleanly.
-  - `node scripts/verify-all.mjs` (Full End-to-End System Suite):
-    - **Result**: 25 passed, 0 failed, duration ~4.5s.
-    - Verified all core TMS flows, WebP compression (< 350KB), offline queue delivery, duplicate replay with different operationIds (strictly 1 event in DB), route start/finish replay after completion, and POD photo bytea retrieval.
+  - `node --test tests/*.test.mjs`:
+    - `tests/day3-day4-audit.test.mjs`: **28 passing, 0 failures, 0 skipped** (includes all R1.1..R1.9 and R2.1..R2.19 tests).
+    - `tests/offline-photo-queue.test.mjs`: **24 passing, 0 failures, 0 skipped**.
+    - `tests/e2e-routing.test.mjs`: **47 passing, 0 failures, 10 skipped** (pending Milestone M1 `geo-brazil.ts`).
+    - **Total: 99 passing, 0 failures, 10 skipped**.
+  - `npx tsc --noEmit`: Exited with code 0 (0 compilation errors).
+  - `npm run build`: Exited with code 0 (Next.js 15 production build compiled successfully in 3.1s, 11/11 static/dynamic pages generated).
 
 - **Shallow Verification (manual only):**
-  - Inspected button disabled states (`disabled={busy || compressing || offlineSaved || (!selectedFile && !previewUrl)}`) and CSS layout in `ProofModal`.
+  - Verified Drag & Drop UI contracts and LIFO sequence visualization in `components/roteirizador-page.tsx`.
 
 - **Unverified aspects:**
-  - Physical mobile OS background kill when the camera app acquires exclusive memory on low-end smartphones (< 2GB RAM).
-  - Physical device flash memory write latency under extreme thermal throttling conditions.
+  - Live AWS S3 direct browser PUT execution against physical Amazon S3 bucket with production CORS policy (requires active AWS IAM STS credentials).
+  - Physical mobile device Service Worker background sync behavior under aggressive manufacturer OS battery optimizations (Samsung OneUI / Xiaomi MIUI deep sleep).
 
 ---
 
 ## 4. Known Issues
-- `Minor Robustness Risk`: In private browsing modes where both IndexedDB and LocalStorage are blocked and the browser tab is hard-reloaded while offline, in-memory queue items will be lost upon reload.
+
+- `Shallow Verification`: Physical AWS S3 direct upload with real Amazon S3 STS keys and S3 bucket CORS configuration must be verified on live staging infrastructure.
+- `Minor Robustness Risk`: In bare containerized environments deployed without persistent volumes or S3, local fallback storage in `/tmp/uploads` is ephemeral across container recreations.
+- `Minor Robustness Risk`: Background sync execution timing depends on client browser implementation of the Service Worker Sync API (Chrome/Edge fully support; iOS Safari triggers via the `online` event listener fallback).
 
 ---
 
 ## 5. Remaining Risk & Next Step
-- **Status**: The implementation is completely hardened, robust, and verified against adversarial edge cases. All 3 acceptance criteria (WebP compression < 350KB from 5MB+ JPEG, offline storage in IndexedDB `routewise-offline`, and idempotent queue flushing without duplicate events) have passed 24 unit/adversarial tests and 25 full-system E2E scenarios.
-- **Next Step**: The task is complete. Ready for field pilot testing with delivery drivers in low-connectivity rural zones.
+
+Day 3 (S3 Direct Presigned URLs & SW Background Sync) and Day 4 (NOTFIS Proceda EDI 3.1/5.0 & Mass Routing) are complete, hardened, and verified with zero test failures.
+
+**Next Step:** Proceed to Milestone M1 (Brazil geographic dictionary `lib/geo-brazil.ts`, municipal CEP resolution, and route optimization benchmarks).

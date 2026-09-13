@@ -82,7 +82,7 @@ function UploadStep({
       form.append("file", file);
       const res = await fetch("/api/routerizador/parse", { method: "POST", body: form });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Erro ao processar planilha");
+      if (!res.ok) throw new Error(data?.error ?? "Erro ao processar arquivo");
       onParsed(data.rows as OrderRow[], file.name);
     } catch (e) {
       setError((e as Error).message);
@@ -106,8 +106,8 @@ function UploadStep({
         </div>
         <h2 style={{ margin: "0 0 8px", fontSize: 22, letterSpacing: "-.02em" }}>Importar Carteira de Pedidos</h2>
         <p style={{ color: "var(--muted)", fontSize: 14, margin: 0, lineHeight: 1.55 }}>
-          Faça upload da sua planilha <strong>.xlsx</strong> ou <strong>.csv</strong> com os pedidos.<br />
-          O sistema detecta automaticamente colunas de cidade, cubagem, peso e cliente.
+          Faça upload da sua planilha <strong>.xlsx</strong> ou <strong>.csv</strong>, ou arquivo NOTFIS EDI (<strong>.txt</strong>, <strong>.not</strong>, <strong>.edi</strong>).<br />
+          O sistema detecta automaticamente colunas ou posições EDI de cidade, cubagem, peso e cliente.
         </p>
       </div>
 
@@ -115,6 +115,7 @@ function UploadStep({
         role="button"
         tabIndex={0}
         onClick={() => fileRef.current?.click()}
+        onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
@@ -131,20 +132,20 @@ function UploadStep({
         }}
       >
         {loading ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, color: "var(--muted)" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, color: "var(--muted)", pointerEvents: "none" }}>
             <Loader2 size={32} className="spin" style={{ animation: "spin 1s linear infinite" }} />
-            <span style={{ fontSize: 14 }}>Processando planilha...</span>
+            <span style={{ fontSize: 14 }}>Processando arquivo...</span>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, pointerEvents: "none" }}>
             <Upload size={28} color="var(--muted)" />
             <div>
               <p style={{ margin: "0 0 4px", fontWeight: 700, color: "var(--ink)" }}>Clique ou arraste o arquivo aqui</p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Suporta .xlsx, .csv e NOTFIS (.txt / .not)</p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Suporta .xlsx, .csv e NOTFIS EDI (.txt / .not / .edi)</p>
             </div>
           </div>
         )}
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.txt,.not,.edi" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.txt,.not,.edi" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); e.target.value = ""; }} />
       </div>
 
       {error && (

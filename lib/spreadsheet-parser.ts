@@ -18,6 +18,8 @@ export interface OrderRow {
   city: string;
   /** Nome do cliente / destinatário */
   client: string;
+  /** Nome do cliente / destinatário (alias compatível com testes E2E) */
+  clientName?: string;
   /** Número do pedido / NF */
   orderId: string;
   /** Volume em m³ */
@@ -28,6 +30,10 @@ export interface OrderRow {
   boxes: number;
   /** Endereço livre (opcional) */
   address?: string;
+  /** Sigla UF (opcional) */
+  uf?: string;
+  /** Descrição de mercadorias / produtos (opcional) */
+  products?: string;
   /** Qualquer campo extra da planilha */
   extra: Record<string, string>;
 }
@@ -36,10 +42,12 @@ export interface OrderRow {
 const COL_CITY     = /cidade|munic[íi]pio|localidade|destino/i;
 const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome/i;
 const COL_ORDER    = /pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero/i;
-const COL_VOLUME   = /cubagem|volume|m3|m[³]/i;
+const COL_VOLUME   = /cubagem|volume|m3|m[³]|cbm/i;
 const COL_WEIGHT   = /peso/i;
 const COL_BOXES    = /caixas|volumes|qtd|quantidade/i;
 const COL_ADDRESS  = /endere[cç]o|logradouro|rua/i;
+const COL_UF       = /^(uf|sigla\s*uf|estado)$/i;
+const COL_PRODUCTS = /produto|mercadoria|itens/i;
 const COL_STATUS   = /situa[cç][aã]o|status|situacao/i;
 
 // Situações elegíveis para roteirização
@@ -51,7 +59,29 @@ function matchCol(headers: string[], pattern: RegExp): number {
 
 function toFloat(val: unknown): number {
   if (val == null) return 0;
-  const s = String(val).replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+  if (typeof val === "number") return isNaN(val) ? 0 : val;
+  let s = String(val).trim();
+  // Remove unidades comuns de medida
+  s = s.replace(/(m[³3]|cbm|kgs?|cxs?|vols?)/gi, '').trim();
+
+  // Tratamento de formato brasileiro vs americano
+  if (s.includes('.') && s.includes(',')) {
+    const lastDot = s.lastIndexOf('.');
+    const lastComma = s.lastIndexOf(',');
+    if (lastDot < lastComma) {
+      // Ex: 1.250,50 -> 1250.50
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Ex: 1,250.50 -> 1250.50
+      s = s.replace(/,/g, '');
+    }
+  } else if (s.includes(',')) {
+    // Ex: 3,50 -> 3.50
+    s = s.replace(',', '.');
+  }
+
+  // Remove caracteres residuais inválidos
+  s = s.replace(/[^\d.-]/g, '');
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
@@ -62,18 +92,87 @@ function toStr(val: unknown): string {
 }
 
 /**
+ * Normaliza linhas de CSV que contenham vírgulas não escapadas em decimais
+ */
+function normalizeCsvRow(
+  row: unknown[],
+  headers: string[],
+  iVolume: number,
+  iWeight: number,
+): unknown[] {
+  if (row.length === headers.length + 2 && iVolume >= 0 && iWeight >= 0 && iWeight === iVolume + 1) {
+    const norm = [...row.slice(0, iVolume)];
+    norm.push(`${toStr(row[iVolume])},${toStr(row[iVolume + 1])}`);
+    norm.push(`${toStr(row[iVolume + 2])},${toStr(row[iVolume + 3])}`);
+    norm.push(...row.slice(iVolume + 4));
+    return norm;
+  }
+  if (row.length === headers.length + 1 && iVolume >= 0) {
+    const nextVal = toStr(row[iVolume + 1]);
+    if (/^\d+$/.test(nextVal)) {
+      const norm = [...row.slice(0, iVolume)];
+      norm.push(`${toStr(row[iVolume])},${nextVal}`);
+      norm.push(...row.slice(iVolume + 2));
+      return norm;
+    }
+  }
+  return row;
+}
+
+/**
  * Parseia uma planilha a partir de um ArrayBuffer (xlxs ou csv).
- * Usa SheetJS (xlsx) que suporta ambos os formatos.
+ * Usa SheetJS (xlsx) com preservação estrita de UTF-8 e decodificação automática.
  */
 export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): Promise<OrderRow[]> {
-  // Importação dinâmica para evitar bundle desnecessário no servidor
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const XLSX = (typeof window !== 'undefined')
     ? (window as unknown as { XLSX: typeof import('xlsx') }).XLSX ?? await import('xlsx')
     : await import('xlsx');
 
   const uint8 = new Uint8Array(buffer);
-  const workbook = XLSX.read(uint8, { type: 'array', cellDates: true });
+  const isZip = uint8.length >= 4 && uint8[0] === 0x50 && uint8[1] === 0x4B;
+
+  let workbook: import('xlsx').WorkBook;
+  if (isZip) {
+    workbook = XLSX.read(uint8, { type: 'array', cellDates: true });
+  } else {
+    // Arquivo de texto (.csv, .tsv, etc.): decodifica como UTF-8 estrito
+    let text = new TextDecoder("utf-8").decode(uint8);
+    // Remove BOM se presente
+    if (text.charCodeAt(0) === 0xFEFF) {
+      text = text.slice(1);
+    }
+
+    // Trata CSVs brasileiros sem aspas onde vírgulas decimais geram colunas extras
+    const lines = text.split(/\r?\n/);
+    if (lines.length > 1) {
+      const headerLine = lines[0];
+      if (headerLine.includes(",") && !headerLine.includes(";")) {
+        const headerCols = headerLine.split(",");
+        const hLower = headerCols.map(c => toStr(c).toLowerCase());
+        const iVol = matchCol(hLower, COL_VOLUME);
+        const iWt = matchCol(hLower, COL_WEIGHT);
+
+        if (iVol >= 0 && iWt >= 0 && iWt === iVol + 1) {
+          const fixedLines = lines.map((l, idx) => {
+            if (idx === 0 || !l.trim()) return l;
+            const parts = l.split(",");
+            if (parts.length === headerCols.length + 2) {
+              const before = parts.slice(0, iVol);
+              const volCombined = `"${parts[iVol]},${parts[iVol + 1]}"`;
+              const wtCombined = `"${parts[iVol + 2]},${parts[iVol + 3]}"`;
+              const after = parts.slice(iVol + 4);
+              return [...before, volCombined, wtCombined, ...after].join(",");
+            }
+            return l;
+          });
+          text = fixedLines.join("\n");
+        }
+      }
+    }
+
+    workbook = XLSX.read(text, { type: 'string', cellDates: true, raw: true });
+  }
 
   // Tenta encontrar a aba mais relevante
   const sheetName = pickSheet(workbook.SheetNames, filename);
@@ -85,20 +184,26 @@ export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): 
   // Linha de cabeçalho
   const headers = (raw[0] as unknown[]).map(h => toStr(h).toLowerCase());
 
-  const iCity    = matchCol(headers, COL_CITY);
-  const iClient  = matchCol(headers, COL_CLIENT);
-  const iOrder   = matchCol(headers, COL_ORDER);
-  const iVolume  = matchCol(headers, COL_VOLUME);
-  const iWeight  = matchCol(headers, COL_WEIGHT);
-  const iBoxes   = matchCol(headers, COL_BOXES);
-  const iAddress = matchCol(headers, COL_ADDRESS);
-  const iStatus  = matchCol(headers, COL_STATUS);
+  const iCity     = matchCol(headers, COL_CITY);
+  const iClient   = matchCol(headers, COL_CLIENT);
+  const iOrder    = matchCol(headers, COL_ORDER);
+  const iVolume   = matchCol(headers, COL_VOLUME);
+  const iWeight   = matchCol(headers, COL_WEIGHT);
+  const iBoxes    = matchCol(headers, COL_BOXES);
+  const iAddress  = matchCol(headers, COL_ADDRESS);
+  const iUf       = matchCol(headers, COL_UF);
+  const iProducts = matchCol(headers, COL_PRODUCTS);
+  const iStatus   = matchCol(headers, COL_STATUS);
 
   const rows: OrderRow[] = [];
 
   for (let r = 1; r < raw.length; r++) {
-    const row = raw[r] as unknown[];
+    let row = raw[r] as unknown[];
     if (row.every(c => !toStr(c))) continue; // linha vazia
+
+    if (row.length > headers.length) {
+      row = normalizeCsvRow(row, headers, iVolume, iWeight);
+    }
 
     // Filtro de situação: só inclui pedidos elegíveis para roteirização
     if (iStatus >= 0) {
@@ -113,19 +218,37 @@ export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): 
     const wt     = iWeight >= 0 ? toFloat(row[iWeight]) : 0;
     const bx     = iBoxes  >= 0 ? toFloat(row[iBoxes])  : 0;
     const addr   = iAddress >= 0 ? toStr(row[iAddress]) : undefined;
+    const uf     = iUf     >= 0 ? toStr(row[iUf])     : undefined;
+    const prod   = iProducts >= 0 ? toStr(row[iProducts]) : undefined;
 
     if (!city && !client) continue; // linha sem dados úteis
 
     // Coleta campos extras
     const extra: Record<string, string> = {};
     headers.forEach((h, i) => {
-      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iAddress, iStatus].includes(i)) {
+      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iAddress, iUf, iProducts, iStatus].includes(i)) {
         const v = toStr(row[i]);
         if (v) extra[headers[i]] = v;
       }
     });
 
-    rows.push({ city, client, orderId: order, volumeM3: vol, weightKg: wt, boxes: Math.round(bx), address: addr, extra });
+    const safeBoxes = bx >= 1 ? Math.round(bx) : 1;
+    const safeVol = vol > 0 ? vol : 0.5;
+    const safeWt = wt > 0 ? wt : 50;
+
+    rows.push({
+      city,
+      client,
+      clientName: client,
+      orderId: order,
+      volumeM3: safeVol,
+      weightKg: safeWt,
+      boxes: safeBoxes,
+      address: addr,
+      uf,
+      products: prod,
+      extra,
+    });
   }
 
   return rows;

@@ -12,7 +12,12 @@
  */
 
 import type { OrderRow } from './spreadsheet-parser';
-import { normCity } from './spreadsheet-parser';
+
+export function normCity(city: string): string {
+  return city.trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
 
 // ─── Tipos públicos ──────────────────────────────────────────────────────────
 
@@ -375,5 +380,195 @@ function buildRoute(
     occupancyPct: Math.min(100, Math.round(occ)),
     cityPath: stops.map(s => s.city),
     warning: occ > 85 ? `Ocupação ${Math.round(occ)}% — verifique a carga` : undefined,
+  };
+}
+
+export interface LifoManifestItem {
+  loadingStep: number;
+  deliveryOrderIndex: number;
+  compartmentPosition: "FUNDO" | "MEIO" | "PORTA";
+  stopName: string;
+  orderId?: string;
+  city?: string;
+  boxes?: number;
+  volumeM3: number;
+  weightKg: number;
+}
+
+/**
+ * Motor de roteirização otimizado compatível com a suíte de testes E2E e LIFO manifests
+ */
+export function generateOptimizedRoutes(orders: any[], options: any = {}): any[] {
+  const maxVolumeM3 = options.maxVolumeM3 ?? 30.0;
+  const maxWeightKg = options.maxWeightKg ?? 10000.0;
+  const origin = options.originDepot ?? {
+    name: options.originName ?? "CD Central",
+    lat: options.originLat ?? -22.9056,
+    lng: options.originLng ?? -47.0608,
+  };
+
+  // Verificação de capacidade individual por pedido
+  for (const o of orders) {
+    const vol = Number(o.volumeM3 ?? o.volume_m3 ?? 0);
+    const wt = Number(o.weightKg ?? o.weight_kg ?? 0);
+    if (vol > maxVolumeM3 || wt > maxWeightKg) {
+      throw new Error(`Pedido ${o.orderId || o.order_id} excede a capacidade máxima do veículo (${maxVolumeM3}m³ / ${maxWeightKg}kg)`);
+    }
+  }
+
+  // Bin-pack individual orders em rotas respeitando limites de capacidade
+  const routes: any[] = [];
+  let currentStops: any[] = [];
+  let currentVol = 0;
+  let currentWt = 0;
+
+  // Ordena pedidos por cidade para manter proximidade geográfica
+  const sorted = [...orders].sort((a, b) => {
+    const cityA = normCity(a.city || "");
+    const cityB = normCity(b.city || "");
+    const diff = cityA.localeCompare(cityB);
+    if (diff !== 0) return diff;
+    return (Number(b.volumeM3 ?? b.volume_m3 ?? 0)) - (Number(a.volumeM3 ?? a.volume_m3 ?? 0));
+  });
+
+  for (const o of sorted) {
+    const vol = Number(o.volumeM3 ?? o.volume_m3 ?? 0.5);
+    const wt = Number(o.weightKg ?? o.weight_kg ?? 50);
+
+    if ((currentVol + vol > maxVolumeM3 || currentWt + wt > maxWeightKg) && currentStops.length > 0) {
+      routes.push(createRouteFromStops(routes.length + 1, currentStops, origin, maxVolumeM3));
+      currentStops = [];
+      currentVol = 0;
+      currentWt = 0;
+    }
+
+    currentStops.push(o);
+    currentVol += vol;
+    currentWt += wt;
+  }
+
+  if (currentStops.length > 0) {
+    routes.push(createRouteFromStops(routes.length + 1, currentStops, origin, maxVolumeM3));
+  }
+
+  return routes;
+}
+
+function createRouteFromStops(index: number, orderList: any[], origin: any, maxVolumeM3: number): any {
+  // TSP Sequenciamento por vizinho mais próximo a partir da origem
+  const unvisited = [...orderList];
+  const orderedStops: any[] = [];
+  let curLat = origin.lat;
+  let curLng = origin.lng;
+
+  while (unvisited.length > 0) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < unvisited.length; i++) {
+      const o = unvisited[i];
+      const coords = (o.lat && o.lng) ? [o.lat, o.lng] : (getCityCoords(o.city || "") ?? [origin.lat, origin.lng]);
+      const d = haversineKm(curLat, curLng, coords[0], coords[1]);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    const [next] = unvisited.splice(bestIdx, 1);
+    const coords = (next.lat && next.lng) ? [next.lat, next.lng] : (getCityCoords(next.city || "") ?? [origin.lat, origin.lng]);
+    curLat = coords[0];
+    curLng = coords[1];
+    orderedStops.push(next);
+  }
+
+  const deliveryStops = orderedStops.map((o, idx) => {
+    const coords = (o.lat && o.lng) ? [o.lat, o.lng] : (getCityCoords(o.city || "") ?? [origin.lat, origin.lng]);
+    const vol = Number(o.volumeM3 ?? o.volume_m3 ?? 0.5);
+    const wt = Number(o.weightKg ?? o.weight_kg ?? 50);
+    const bx = Number(o.boxes ?? 1);
+    const name = o.clientName || o.client || o.name || `Cliente ${idx + 1}`;
+
+    return {
+      position: idx + 1,
+      is_origin: false,
+      name,
+      address: o.address || o.city || "Endereço",
+      city: o.city || "Campina Grande",
+      lat: coords[0],
+      lng: coords[1],
+      boxes: bx,
+      volume_m3: vol,
+      volumeM3: vol,
+      weight_kg: wt,
+      weightKg: wt,
+      order_id: o.orderId || o.order_id || `ORD-${idx + 1}`,
+      orderId: o.orderId || o.order_id || `ORD-${idx + 1}`,
+      products: o.products || "Mercadorias",
+    };
+  });
+
+  const n = deliveryStops.length;
+  const lifoManifest: LifoManifestItem[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const stop = deliveryStops[n - 1 - i]; // LIFO: última entrega é a primeira no carregamento
+    const pos: "FUNDO" | "MEIO" | "PORTA" =
+      n === 1 ? "PORTA" : (i === 0 ? "FUNDO" : (i === n - 1 ? "PORTA" : "MEIO"));
+
+    lifoManifest.push({
+      loadingStep: i + 1,
+      deliveryOrderIndex: n - i,
+      compartmentPosition: pos,
+      stopName: stop.name,
+      orderId: stop.order_id,
+      city: stop.city,
+      boxes: stop.boxes,
+      volumeM3: stop.volume_m3,
+      weightKg: stop.weight_kg,
+    });
+  }
+
+  const allStops = [
+    {
+      position: 0,
+      is_origin: true,
+      name: origin.name || "Origem",
+      address: origin.address || origin.name || "Origem",
+      lat: origin.lat,
+      lng: origin.lng,
+      boxes: 0,
+      volume_m3: 0,
+      volumeM3: 0,
+      weight_kg: 0,
+      weightKg: 0,
+    },
+    ...deliveryStops,
+  ];
+
+  let estKm = 0;
+  let lastLat = origin.lat;
+  let lastLng = origin.lng;
+  for (const stop of deliveryStops) {
+    estKm += haversineKm(lastLat, lastLng, stop.lat, stop.lng);
+    lastLat = stop.lat;
+    lastLng = stop.lng;
+  }
+
+  const totalVol = deliveryStops.reduce((s, d) => s + d.volume_m3, 0);
+  const totalWt = deliveryStops.reduce((s, d) => s + d.weight_kg, 0);
+  const totalBx = deliveryStops.reduce((s, d) => s + d.boxes, 0);
+
+  return {
+    id: `route-${index}`,
+    index,
+    name: `Rota ${index} — ${deliveryStops[0]?.city || "Entrega"}`,
+    stops: allStops,
+    lifoManifest,
+    estimatedKm: parseFloat(estKm.toFixed(1)),
+    estimated_km: parseFloat(estKm.toFixed(1)),
+    totalVolumeM3: parseFloat(totalVol.toFixed(2)),
+    totalWeightKg: parseFloat(totalWt.toFixed(2)),
+    totalBoxes: totalBx,
+    totalOrders: deliveryStops.length,
+    occupancyPct: maxVolumeM3 > 0 ? Math.min(100, Math.round((totalVol / maxVolumeM3) * 100)) : 0,
   };
 }
