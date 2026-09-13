@@ -1340,6 +1340,20 @@ function Overview({
         <Metric label="Concluídas" value={completed.length} icon={<Check />} />
       </section>
 
+      <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)" }}>
+        <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h2 style={{ color: "#10b981", display: "flex", alignItems: "center", gap: 8 }}>
+              📄 Roteirizador Automático por Planilha (Novo)
+            </h2>
+            <p>Faça upload da carteira (.xlsx / .csv) e gere rotas com cubagem m³ e ordem LIFO automaticamente.</p>
+          </div>
+          <button type="button" className="button primary" style={{ background: "#10b981", border: "none" }} onClick={() => window.location.hash = "roteirizador"}>
+            Abrir Roteirizador
+          </button>
+        </div>
+      </section>
+
       {/* Task 1: Mapa ao vivo para o Organizador */}
       <section className="panel live-fleet-panel">
         <div className="panel-title">
