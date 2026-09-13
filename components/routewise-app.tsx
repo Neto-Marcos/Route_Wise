@@ -1505,8 +1505,22 @@ function Dispatcher({
         </nav>
         <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
           <button
-            className="secondary compact"
-            style={{ display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-start", padding: "10px 14px", borderRadius: "10px", border: "1px solid var(--line)", background: "var(--paper)", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}
+            type="button"
+            className="sidebar-btn-action"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              justifyContent: "flex-start",
+              padding: "10px 14px",
+              borderRadius: "10px",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              background: "rgba(255, 255, 255, 0.06)",
+              color: "#e2e8f0",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: 600,
+            }}
             onClick={() => setShowChangePassword(true)}
             title="Alterar minha senha (desconecta após trocar)"
           >
@@ -1563,11 +1577,21 @@ function Dispatcher({
                   disabled={switchingCompany}
                   value={sessionInfo?.companyId || ""}
                   onChange={(e) => handleSwitchCompany(e.target.value)}
-                  style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--line)", background: "white", fontSize: "13px", fontWeight: 600 }}
+                  style={{
+                    height: "36px",
+                    padding: "0 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--line)",
+                    background: "var(--card)",
+                    color: "var(--ink)",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
                   title="Trocar de empresa no painel de Administrador Supremo"
                 >
                   {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
+                    <option key={c.id} value={c.id} style={{ background: "var(--card)", color: "var(--ink)" }}>
                       Empresa: {c.name} ({c.code})
                     </option>
                   ))}
