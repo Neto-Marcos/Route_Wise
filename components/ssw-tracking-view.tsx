@@ -26,8 +26,8 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
       setError("");
       setLoading(true);
 
-      // Carrega diretamente embutido na página sem sair do site
-      const url = `https://rastreamento.correios.com.br/app/index.php?codigo=${encodeURIComponent(code)}`;
+      // Carrega através do proxy para não dar tela branca
+      const url = `/api/ssw/proxy?correios=${encodeURIComponent(code)}`;
       setEmbeddedUrl(url);
       setLoading(false);
       return;
