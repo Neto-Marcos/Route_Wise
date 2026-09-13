@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, ExternalLink, Package, AlertCircle, ArrowRight, ShieldCheck, UserCheck, FileText, Truck } from "lucide-react";
+import { Search, Package, AlertCircle, RefreshCw, Truck, FileText, UserCheck, ShieldCheck, X, Maximize2 } from "lucide-react";
 
 export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   const [provider, setProvider] = useState<"ssw" | "correios">("ssw");
@@ -11,6 +11,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   const [daysLimit, setDaysLimit] = useState("30");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [embeddedUrl, setEmbeddedUrl] = useState<string | null>(null);
 
   const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -25,17 +26,14 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
       setError("");
       setLoading(true);
 
-      // Abre a consulta oficial dos Correios rastreamento
-      const correiosUrl = `https://rastreamento.correios.com.br/app/index.php?codigo=${encodeURIComponent(code)}`;
-      window.open(correiosUrl, "_blank");
-
-      setTimeout(() => {
-        setLoading(false);
-      }, 500);
+      // Carrega diretamente embutido na página sem sair do site
+      const url = `https://rastreamento.correios.com.br/app/index.php?codigo=${encodeURIComponent(code)}`;
+      setEmbeddedUrl(url);
+      setLoading(false);
       return;
     }
 
-    // Provedor SSW
+    // SSW
     const clean = queryValue.replace(/\D/g, "");
 
     if (searchType === "danfe" && clean.length < 10) {
@@ -56,59 +54,17 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
     setError("");
     setLoading(true);
 
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.target = "_blank"; // abre em nova aba
+    // URL direta do SSW para ser embutida no iframe
+    const url = searchType === "danfe"
+      ? `https://ssw.inf.br/2/rastreamento_danfe?danfe=${clean}`
+      : `https://ssw.inf.br/2/rastreamento_dest?pwd=2&`;
 
-    if (searchType === "danfe") {
-      form.action = "https://ssw.inf.br/2/rastreamento_danfe";
-
-      const inputDanfe = document.createElement("input");
-      inputDanfe.type = "hidden";
-      inputDanfe.name = "danfe";
-      inputDanfe.value = clean;
-      form.appendChild(inputDanfe);
-
-      const inputUrl = document.createElement("input");
-      inputUrl.type = "hidden";
-      inputUrl.name = "urlori";
-      inputUrl.value = "";
-      form.appendChild(inputUrl);
-    } else {
-      form.action = "https://ssw.inf.br/2/resultSSW_dest";
-
-      const inputCnpj = document.createElement("input");
-      inputCnpj.type = "hidden";
-      inputCnpj.name = "cnpjdest";
-      inputCnpj.value = clean;
-      form.appendChild(inputCnpj);
-
-      if (searchType === "cnpj" && cnpjPassword) {
-        const inputSenha = document.createElement("input");
-        inputSenha.type = "hidden";
-        inputSenha.name = "senha";
-        inputSenha.value = cnpjPassword;
-        form.appendChild(inputSenha);
-      }
-
-      const inputDias = document.createElement("input");
-      inputDias.type = "hidden";
-      inputDias.name = "limite_dias";
-      inputDias.value = daysLimit;
-      form.appendChild(inputDias);
-    }
-
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-
-    setTimeout(() => {
-      setLoading(false);
-    }, 800);
+    setEmbeddedUrl(url);
+    setLoading(false);
   };
 
   return (
-    <section className="panel" style={{ maxWidth: 960, margin: "0 auto" }}>
+    <section className="panel" style={{ maxWidth: 1040, margin: "0 auto" }}>
       {/* Header com seleção de Provedor */}
       <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 16 }}>
         <div>
@@ -119,7 +75,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             </h2>
           </div>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>
-            Consulte remessas e encomendas através do <strong>SSW Sistemas</strong> ou <strong>Correios</strong>.
+            Consulte diretamente na tela encomendas dos <strong>Correios</strong> ou cargas do <strong>SSW Sistemas</strong>.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -127,7 +83,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             type="button"
             className={`button compact ${provider === "ssw" ? "primary" : "secondary"}`}
             style={{ borderRadius: 8, background: provider === "ssw" ? "#0284c7" : undefined }}
-            onClick={() => { setProvider("ssw"); setQueryValue(""); setError(""); }}
+            onClick={() => { setProvider("ssw"); setQueryValue(""); setError(""); setEmbeddedUrl(null); }}
           >
             SSW Sistemas
           </button>
@@ -135,7 +91,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             type="button"
             className={`button compact ${provider === "correios" ? "primary" : "secondary"}`}
             style={{ borderRadius: 8, background: provider === "correios" ? "#f59e0b" : undefined }}
-            onClick={() => { setProvider("correios"); setQueryValue(""); setError(""); }}
+            onClick={() => { setProvider("correios"); setQueryValue(""); setError(""); setEmbeddedUrl(null); }}
           >
             Correios
           </button>
@@ -150,7 +106,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               type="button"
               className={`button compact ${searchType === "danfe" ? "primary" : "secondary"}`}
               style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "danfe" ? "#0284c7" : undefined, border: "none" }}
-              onClick={() => { setSearchType("danfe"); setQueryValue(""); setError(""); }}
+              onClick={() => { setSearchType("danfe"); setQueryValue(""); setError(""); setEmbeddedUrl(null); }}
             >
               <FileText size={14} /> Chave DANFE (44 dígitos)
             </button>
@@ -158,7 +114,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               type="button"
               className={`button compact ${searchType === "cpf" ? "primary" : "secondary"}`}
               style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "cpf" ? "#0284c7" : undefined, border: "none" }}
-              onClick={() => { setSearchType("cpf"); setQueryValue(""); setError(""); }}
+              onClick={() => { setSearchType("cpf"); setQueryValue(""); setError(""); setEmbeddedUrl(null); }}
             >
               <UserCheck size={14} /> CPF do Cliente (Pessoa Física)
             </button>
@@ -166,7 +122,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               type="button"
               className={`button compact ${searchType === "cnpj" ? "primary" : "secondary"}`}
               style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "cnpj" ? "#0284c7" : undefined, border: "none" }}
-              onClick={() => { setSearchType("cnpj"); setQueryValue(""); setError(""); }}
+              onClick={() => { setSearchType("cnpj"); setQueryValue(""); setError(""); setEmbeddedUrl(null); }}
             >
               <ShieldCheck size={14} /> CNPJ da Empresa (Pessoa Jurídica)
             </button>
@@ -258,32 +214,9 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               }}
             >
               <Search size={16} />
-              {loading ? "Consultando..." : provider === "correios" ? "Rastrear nos Correios" : "Consultar no SSW"}
-              <ArrowRight size={16} />
+              {loading ? "Consultando..." : "Rastrear na Tela"}
             </button>
           </div>
-
-          {provider === "ssw" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Considerar entregas dos últimos:</span>
-              <select
-                value={daysLimit}
-                onChange={(e) => setDaysLimit(e.target.value)}
-                style={{
-                  background: "var(--card)",
-                  color: "var(--ink)",
-                  border: "1px solid var(--line)",
-                  borderRadius: 8,
-                  padding: "4px 8px",
-                  fontSize: 12,
-                }}
-              >
-                <option value="10">10 dias</option>
-                <option value="20">20 dias</option>
-                <option value="30">30 dias</option>
-              </select>
-            </div>
-          )}
         </form>
 
         {error && (
@@ -291,19 +224,42 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             <AlertCircle size={16} /> {error}
           </div>
         )}
-
-        <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--muted)" }}>
-          <span>🔹 Consulta oficial direta aos servidores dos <strong>{provider === "correios" ? "Correios" : "SSW Sistemas"}</strong>.</span>
-          <a
-            href={provider === "correios" ? "https://rastreamento.correios.com.br" : "https://ssw.inf.br/2/rastreamento_danfe"}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "var(--muted)", textDecoration: "underline", display: "flex", alignItems: "center", gap: 4 }}
-          >
-            <ExternalLink size={12} /> Abrir portal oficial do {provider === "correios" ? "Correios" : "SSW"}
-          </a>
-        </div>
       </div>
+
+      {/* Painel Embutido na Tela (Sem redirecionar para fora) */}
+      {embeddedUrl && (
+        <div style={{ marginTop: 24, borderRadius: 16, border: "1px solid var(--line)", background: "#fff", overflow: "hidden", boxShadow: "0 8px 30px rgba(0,0,0,0.12)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", background: provider === "correios" ? "#fef3c7" : "#e0f2fe", borderBottom: "1px solid var(--line)", color: "#1e293b" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong>{provider === "correios" ? "📦 Portal de Rastreamento Correios" : "📦 Portal SSW Sistemas"}</strong>
+              <span style={{ fontSize: 11, background: "rgba(0,0,0,0.08)", padding: "2px 8px", borderRadius: 999 }}>Integrado na Tela</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button
+                type="button"
+                className="button compact secondary"
+                onClick={() => setEmbeddedUrl(null)}
+                style={{ padding: "4px 8px", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}
+                title="Fechar consulta"
+              >
+                <X size={14} /> Fechar
+              </button>
+            </div>
+          </div>
+
+          <iframe
+            src={embeddedUrl}
+            title="Rastreamento Embutido"
+            style={{
+              width: "100%",
+              height: "650px",
+              border: "none",
+              background: "#fff",
+            }}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </div>
+      )}
     </section>
   );
 }
