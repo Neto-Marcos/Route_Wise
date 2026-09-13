@@ -332,6 +332,30 @@ export function RouteDetailModal({
                         </div>
                       )}
 
+                      {!isOrigin && (
+                        <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className="button secondary compact"
+                            style={{ fontSize: 11, padding: "3px 8px" }}
+                            onClick={() => {
+                              fetch("/api/ssw/rastreio", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ invoiceNumber: stop.name }),
+                              })
+                                .then((r) => r.json())
+                                .then((data) => {
+                                  alert(`📦 Rastreamento SSW — ${stop.name}\nStatus: ${data.status}\nÚltima atualização: ${data.occurrences?.[2]?.occurrenceName || "Em Rota"} (${data.occurrences?.[2]?.city || "Filial"})`);
+                                })
+                                .catch(() => alert("Não foi possível consultar o SSW no momento."));
+                            }}
+                          >
+                            <ExternalLink size={12} /> Rastreio SSW
+                          </button>
+                        </div>
+                      )}
+
                       {isDelivered && (
                         <div className="delivery-proof-meta">
                           <span className="delivery-time">
