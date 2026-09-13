@@ -1,4 +1,4 @@
-﻿-- Migration 0007: Suporte aos 4 perfis (Admin, Criador de rotas, Escritorio, Motorista) e Reset do Banco de Dados
+-- Migration 0007: Suporte aos 4 perfis (Admin, Criador de rotas, Escritorio, Motorista) e Reset do Banco de Dados
 
 -- 1. Adiciona a coluna role aos dispatchers (se nao existir)
 ALTER TABLE dispatchers ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'admin';
