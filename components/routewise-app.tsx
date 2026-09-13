@@ -317,6 +317,7 @@ export default function RouteWiseApp() {
         ) : (
           <Dispatcher
             onExit={() => {
+              api("/api/session/logout", { method: "POST" }).catch(() => {});
               sessionStorage.removeItem("rw_role");
               sessionStorage.removeItem("rw_user_role");
               setDispatcherAuthed(false);
@@ -1511,8 +1512,8 @@ function Dispatcher({
           >
             <KeyRound size={16} /> <span>Alterar senha</span>
           </button>
-          <button className="exit" onClick={onExit}>
-            <ArrowLeft /> <span>Sair do painel</span>
+          <button className="exit" onClick={onExit} title="Desconectar do sistema">
+            <LogOut size={16} /> <span>Sair / Desconectar</span>
           </button>
         </div>
       </aside>
@@ -1577,6 +1578,15 @@ function Dispatcher({
               <i /> Atualização automática
             </span>
             <ThemeToggle />
+            <button
+              type="button"
+              className="button secondary compact"
+              onClick={onExit}
+              title="Desconectar do sistema"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#dc2626", border: "1px solid rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)" }}
+            >
+              <LogOut size={14} /> <span>Sair</span>
+            </button>
           </div>
         </header>
         {message && <p className="form-error">{message}</p>}
@@ -3923,7 +3933,16 @@ function DriverApp({
           >
             <KeyRound size={14} /> <span>Alterar PIN</span>
           </button>
-          <button className="avatar-button" onClick={onExit} title="Sair do perfil">
+          <button
+            type="button"
+            className="secondary compact"
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)", color: "#dc2626", cursor: "pointer" }}
+            onClick={onExit}
+            title="Sair / Desconectar"
+          >
+            <LogOut size={14} /> <span>Sair</span>
+          </button>
+          <button className="avatar-button" onClick={onExit} title="Perfil / Sair">
             {driver.name.slice(0, 2).toUpperCase()}
           </button>
         </div>
