@@ -1177,6 +1177,24 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       }
     }
 
+    if (p[0] === "companies" && p[1]) {
+      if (session.userRole !== "superadmin") {
+        return json({ error: "Apenas o Administrador Supremo pode gerenciar empresas" }, 403);
+      }
+      const data = await body(req);
+      const name = String(data.name || "").trim();
+      const active = Boolean(data.active !== false);
+      if (!name) return json({ error: "Nome da empresa é obrigatório" }, 400);
+
+      const { rows } = await query(
+        "UPDATE companies SET name=$1, active=$2 WHERE id=$3 RETURNING id, code, name, active, created_at",
+        [name, active, p[1]],
+      );
+      if (!rows[0]) return json({ error: "Empresa não encontrada" }, 404);
+      await audit("dispatcher", session.dispatcherId || null, "update", "company", p[1], { name, active });
+      return json(rows[0]);
+    }
+
     return json({ error: "Não encontrado" }, 404);
   } catch (e: any) {
     if (e?.code === "23505" || String(e?.message).includes("vehicles_plate_key")) {
@@ -1192,6 +1210,38 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (!session || session.role !== "dispatcher")
     return json({ error: "Acesso restrito" }, 403);
   try {
+    if (p[0] === "companies" && p[1]) {
+      if (session.userRole !== "superadmin") {
+        return json({ error: "Apenas o Administrador Supremo pode excluir empresas" }, 403);
+      }
+      const compCheck = await query("SELECT id, code, name FROM companies WHERE id=$1", [p[1]]);
+      if (!compCheck.rows[0]) return json({ error: "Empresa não encontrada" }, 404);
+      if (compCheck.rows[0].code === "EU") {
+        return json({ error: "A empresa principal (EU) do Administrador Supremo não pode ser excluída." }, 400);
+      }
+
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        // Deletar dependências da empresa
+        await client.query("DELETE FROM audit_log WHERE company_id=$1", [p[1]]).catch(() => {});
+        await client.query("DELETE FROM stops WHERE route_id IN (SELECT id FROM routes WHERE company_id=$1)", [p[1]]);
+        await client.query("DELETE FROM routes WHERE company_id=$1", [p[1]]);
+        await client.query("DELETE FROM vehicles WHERE company_id=$1", [p[1]]);
+        await client.query("DELETE FROM drivers WHERE company_id=$1", [p[1]]);
+        await client.query("DELETE FROM dispatchers WHERE company_id=$1", [p[1]]);
+        await client.query("DELETE FROM companies WHERE id=$1", [p[1]]);
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      } finally {
+        client.release();
+      }
+
+      await audit("dispatcher", session.dispatcherId || null, "delete", "company", p[1], { code: compCheck.rows[0].code, name: compCheck.rows[0].name });
+      return json({ ok: true, deleted: compCheck.rows[0] });
+    }
     if (p[0] === "drivers" && p[1]) {
       const { rows } = await query(
         "UPDATE drivers SET active=false WHERE id=$1 AND company_id=$2 RETURNING id",

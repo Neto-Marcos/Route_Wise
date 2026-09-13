@@ -1337,6 +1337,218 @@ function DispatchersPanel({
   );
 }
 
+function CompaniesManagementModal({
+  companies,
+  currentCompanyId,
+  onClose,
+  onReload,
+}: {
+  companies: Array<{ id: string; code: string; name: string; active?: boolean }>;
+  currentCompanyId?: string;
+  onClose: () => void;
+  onReload: () => Promise<void>;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [editingCompany, setEditingCompany] = useState<{ id: string; name: string } | null>(null);
+
+  const toggleActive = async (c: { id: string; code: string; name: string; active?: boolean }) => {
+    if (c.code === "EU") {
+      alert("A empresa principal do Administrador Supremo não pode ser inativada.");
+      return;
+    }
+    const nextActive = c.active === false;
+    const confirmMsg = nextActive
+      ? `Reativar a empresa "${c.name}" (${c.code})?`
+      : `Inativar a empresa "${c.name}" (${c.code})? Seus usuários não conseguirão fazer login enquanto ela estiver inativa.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setError("");
+    setBusyId(c.id);
+    try {
+      await api(`/api/companies/${c.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: c.name, active: nextActive }),
+      });
+      await onReload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const deleteCompany = async (c: { id: string; code: string; name: string }) => {
+    if (c.code === "EU") {
+      alert("A empresa principal do Administrador Supremo não pode ser excluída.");
+      return;
+    }
+    const confirm1 = window.confirm(
+      `ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE a empresa "${c.name}" (${c.code})?\n\nTodas as rotas, motoristas, veículos e usuários vinculados a esta empresa serão permanentemente removidos.`,
+    );
+    if (!confirm1) return;
+
+    const confirmText = window.prompt(
+      `Para confirmar a exclusão, digite o código da empresa "${c.code}" em maiúsculas:`,
+    );
+    if (confirmText !== c.code) {
+      alert("Código digitado incorreto. Operação cancelada por segurança.");
+      return;
+    }
+
+    setError("");
+    setBusyId(c.id);
+    try {
+      await api(`/api/companies/${c.id}`, {
+        method: "DELETE",
+      });
+      await onReload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const saveRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCompany) return;
+    setError("");
+    setBusyId(editingCompany.id);
+    try {
+      await api(`/api/companies/${editingCompany.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: editingCompany.name }),
+      });
+      setEditingCompany(null);
+      await onReload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Modal title="Gerenciamento de Empresas (Supremo)" onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: "min(100%, 540px)" }}>
+        <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
+          Aqui você pode renomear, inativar temporariamente ou excluir de forma definitiva empresas e todos os dados vinculados a elas.
+        </p>
+
+        {error && <p className="form-error">{error}</p>}
+
+        {editingCompany ? (
+          <form onSubmit={saveRename} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", border: "1px solid var(--line)", borderRadius: "10px" }}>
+            <b style={{ fontSize: "14px" }}>Editar Nome da Empresa</b>
+            <input
+              autoFocus
+              value={editingCompany.name}
+              onChange={(e) => setEditingCompany({ ...editingCompany, name: e.target.value })}
+              placeholder="Nome da empresa"
+              required
+              style={{ height: "42px", borderRadius: "8px", padding: "0 12px", border: "1px solid var(--line)" }}
+            />
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button type="button" className="button secondary compact" onClick={() => setEditingCompany(null)}>Cancelar</button>
+              <button type="submit" disabled={busyId === editingCompany.id} className="button primary compact">
+                {busyId === editingCompany.id ? "Salvando…" : "Salvar Nome"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "380px", overflowY: "auto" }}>
+          {companies.map((c) => {
+            const isSelfComp = c.code === "EU";
+            const isActive = c.active !== false;
+            const isCurrent = c.id === currentCompanyId;
+
+            return (
+              <div
+                key={c.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "12px 14px",
+                  borderRadius: "10px",
+                  border: "1px solid var(--line)",
+                  background: isCurrent ? "rgba(99, 102, 241, 0.05)" : "var(--card)",
+                  opacity: isActive ? 1 : 0.6,
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <b style={{ fontSize: "14px", color: "var(--ink)" }}>{c.name}</b>
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "var(--line)", color: "var(--ink)" }}>
+                      {c.code}
+                    </span>
+                    {isSelfComp && (
+                      <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#7c3aed", color: "#fff" }}>
+                        Matriz / Você
+                      </span>
+                    )}
+                    {!isActive && (
+                      <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#ef4444", color: "#fff" }}>
+                        Inativa
+                      </span>
+                    )}
+                  </div>
+                  {isCurrent && (
+                    <small style={{ color: "#4f46e5", fontWeight: 600 }}>Visualizando no momento</small>
+                  )}
+                </div>
+
+                {!isSelfComp && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <button
+                      type="button"
+                      disabled={busyId === c.id}
+                      onClick={() => setEditingCompany({ id: c.id, name: c.name })}
+                      className="button secondary compact"
+                      title="Editar nome da empresa"
+                      style={{ padding: "6px 8px", height: "32px" }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === c.id}
+                      onClick={() => toggleActive(c)}
+                      className="button secondary compact"
+                      title={isActive ? "Inativar empresa" : "Reativar empresa"}
+                      style={{ padding: "6px 8px", height: "32px" }}
+                    >
+                      <Power size={13} color={isActive ? "#d97706" : "#059669"} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === c.id}
+                      onClick={() => deleteCompany(c)}
+                      className="button secondary compact"
+                      title="Excluir empresa definitivamente"
+                      style={{ padding: "6px 8px", height: "32px", color: "#dc2626", borderColor: "rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)" }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+          <button type="button" className="button secondary compact" onClick={onClose}>
+            Fechar
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function Dispatcher({
   onExit,
 }: {
@@ -1411,8 +1623,9 @@ function Dispatcher({
     }
   };
 
-  const [companies, setCompanies] = useState<Array<{ id: string; code: string; name: string }>>([]);
+  const [companies, setCompanies] = useState<Array<{ id: string; code: string; name: string; active?: boolean }>>([]);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showManageCompanies, setShowManageCompanies] = useState(false);
   const [switchingCompany, setSwitchingCompany] = useState(false);
 
   // Determina o papel do usuário (admin por padrão se for dispatcher geral)
@@ -1596,6 +1809,15 @@ function Dispatcher({
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={() => setShowManageCompanies(true)}
+                  title="Gerenciar, editar ou excluir empresas"
+                  style={{ height: "36px", padding: "0 10px", fontSize: "13px", display: "flex", alignItems: "center", gap: "5px" }}
+                >
+                  <Settings size={14} /> <span>Empresas</span>
+                </button>
               </div>
             )}
             <span className="live">
@@ -1695,6 +1917,19 @@ function Dispatcher({
           onDone={() => {
             setAssigningRoute(null);
             load();
+          }}
+        />
+      )}
+
+      {showManageCompanies && (
+        <CompaniesManagementModal
+          companies={companies}
+          currentCompanyId={sessionInfo?.companyId}
+          onClose={() => setShowManageCompanies(false)}
+          onReload={async () => {
+            const comps = await api("/api/companies");
+            if (Array.isArray(comps)) setCompanies(comps);
+            await load();
           }}
         />
       )}
