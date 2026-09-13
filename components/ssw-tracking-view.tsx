@@ -1,43 +1,80 @@
 "use client";
 
 import { useState } from "react";
-import { Search, ExternalLink, Package, AlertCircle, ArrowRight, ShieldCheck } from "lucide-react";
+import { Search, ExternalLink, Package, AlertCircle, ArrowRight, ShieldCheck, UserCheck, FileText } from "lucide-react";
 
 export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
-  const [danfeKey, setDanfeKey] = useState("");
+  const [searchType, setSearchType] = useState<"danfe" | "cpf" | "cnpj">("danfe");
+  const [queryValue, setQueryValue] = useState("");
+  const [cnpjPassword, setCnpjPassword] = useState("");
+  const [daysLimit, setDaysLimit] = useState("30");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const clean = danfeKey.replace(/\D/g, "");
+    const clean = queryValue.replace(/\D/g, "");
 
-    if (clean.length < 10) {
+    if (searchType === "danfe" && clean.length < 10) {
       setError("Por favor, digite a Chave DANFE (44 dígitos) ou número da nota.");
+      return;
+    }
+
+    if (searchType === "cpf" && clean.length !== 11) {
+      setError("Por favor, digite um CPF válido com 11 dígitos.");
+      return;
+    }
+
+    if (searchType === "cnpj" && clean.length !== 14) {
+      setError("Por favor, digite um CNPJ válido com 14 dígitos.");
       return;
     }
 
     setError("");
     setLoading(true);
 
-    // Cria um form invisível que submete direto para o ssw.inf.br
-    // Isso abre a consulta oficial com o resultado dos parceiros no próprio SSW
     const form = document.createElement("form");
     form.method = "POST";
-    form.action = "https://ssw.inf.br/2/rastreamento_danfe";
     form.target = "_blank"; // abre em nova aba
 
-    const inputDanfe = document.createElement("input");
-    inputDanfe.type = "hidden";
-    inputDanfe.name = "danfe";
-    inputDanfe.value = clean;
-    form.appendChild(inputDanfe);
+    if (searchType === "danfe") {
+      form.action = "https://ssw.inf.br/2/rastreamento_danfe";
 
-    const inputUrl = document.createElement("input");
-    inputUrl.type = "hidden";
-    inputUrl.name = "urlori";
-    inputUrl.value = "";
-    form.appendChild(inputUrl);
+      const inputDanfe = document.createElement("input");
+      inputDanfe.type = "hidden";
+      inputDanfe.name = "danfe";
+      inputDanfe.value = clean;
+      form.appendChild(inputDanfe);
+
+      const inputUrl = document.createElement("input");
+      inputUrl.type = "hidden";
+      inputUrl.name = "urlori";
+      inputUrl.value = "";
+      form.appendChild(inputUrl);
+    } else {
+      // Rastreamento por CPF ou CNPJ (resultSSW_dest)
+      form.action = "https://ssw.inf.br/2/resultSSW_dest";
+
+      const inputCnpj = document.createElement("input");
+      inputCnpj.type = "hidden";
+      inputCnpj.name = "cnpjdest";
+      inputCnpj.value = clean;
+      form.appendChild(inputCnpj);
+
+      if (searchType === "cnpj" && cnpjPassword) {
+        const inputSenha = document.createElement("input");
+        inputSenha.type = "hidden";
+        inputSenha.name = "senha";
+        inputSenha.value = cnpjPassword;
+        form.appendChild(inputSenha);
+      }
+
+      const inputDias = document.createElement("input");
+      inputDias.type = "hidden";
+      inputDias.name = "limite_dias";
+      inputDias.value = daysLimit;
+      form.appendChild(inputDias);
+    }
 
     document.body.appendChild(form);
     form.submit();
@@ -49,7 +86,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   };
 
   return (
-    <section className="panel" style={{ maxWidth: 900, margin: "0 auto" }}>
+    <section className="panel" style={{ maxWidth: 960, margin: "0 auto" }}>
       <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 16 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -57,7 +94,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             <h2 style={{ margin: 0 }}>Rastreamento SSW de Parceiros (ssw.inf.br)</h2>
           </div>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>
-            Consulte notas fiscais transportadas pela rede de transportadoras parceiras usuárias do <strong>SSW Sistemas</strong>.
+            Consulte notas de fornecedores e parceiros por <strong>Chave DANFE</strong>, <strong>CPF</strong> ou <strong>CNPJ do Destinatário</strong>.
           </p>
         </div>
         <a
@@ -72,28 +109,59 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
       </div>
 
       <div style={{ marginTop: 20, padding: 24, background: "var(--card-subtle)", borderRadius: 16, border: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, color: "var(--ink)" }}>
-          <ShieldCheck size={20} color="var(--green)" />
-          <strong style={{ fontSize: 14 }}>Consulta Oficial de Cargas de Parceiros</strong>
+        {/* Toggle de Tipo de Rastreio */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={`button compact ${searchType === "danfe" ? "primary" : "secondary"}`}
+            style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "danfe" ? "#0284c7" : undefined, border: "none" }}
+            onClick={() => { setSearchType("danfe"); setQueryValue(""); setError(""); }}
+          >
+            <FileText size={14} /> Pela Chave DANFE (44 dígitos)
+          </button>
+          <button
+            type="button"
+            className={`button compact ${searchType === "cpf" ? "primary" : "secondary"}`}
+            style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "cpf" ? "#0284c7" : undefined, border: "none" }}
+            onClick={() => { setSearchType("cpf"); setQueryValue(""); setError(""); }}
+          >
+            <UserCheck size={14} /> Pelo CPF do Cliente (Pessoa Física)
+          </button>
+          <button
+            type="button"
+            className={`button compact ${searchType === "cnpj" ? "primary" : "secondary"}`}
+            style={{ borderRadius: 999, padding: "8px 16px", background: searchType === "cnpj" ? "#0284c7" : undefined, border: "none" }}
+            onClick={() => { setSearchType("cnpj"); setQueryValue(""); setError(""); }}
+          >
+            <ShieldCheck size={14} /> Pelo CNPJ da Empresa (Pessoa Jurídica)
+          </button>
         </div>
-        <p style={{ margin: "0 0 20px", fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
-          Digite abaixo a <strong>Chave de Acesso DANFE (44 dígitos)</strong> da NF-e emitida pelo seu fornecedor/parceiro. Ao clicar em <strong>Consultar no SSW</strong>, o sistema conectará com o portal oficial do SSW e abrirá a linha do tempo completa de ocorrências e comprovantes de entrega da transportadora responsável.
-        </p>
 
-        <form onSubmit={handleSearch} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <form onSubmit={handleSearch} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <label style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>
-            Chave DANFE da Nota Fiscal (44 dígitos)
+            {searchType === "danfe"
+              ? "Chave DANFE da Nota Fiscal (44 dígitos)"
+              : searchType === "cpf"
+              ? "CPF do Destinatário (11 dígitos)"
+              : "CNPJ da Empresa Destinatária (14 dígitos)"}
           </label>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <input
               type="text"
-              value={danfeKey}
-              onChange={(e) => setDanfeKey(e.target.value)}
-              placeholder="Ex.: 2524 0900 0000 0000 0000 5500 1000 0001 2310 0000 1234"
-              maxLength={54}
+              value={queryValue}
+              onChange={(e) => setQueryValue(e.target.value)}
+              placeholder={
+                searchType === "danfe"
+                  ? "Ex.: 2524 0900 0000 0000 0000 5500 1000 0001 2310 0000 1234"
+                  : searchType === "cpf"
+                  ? "000.000.000-00"
+                  : "00.000.000/0001-00"
+              }
+              maxLength={searchType === "danfe" ? 54 : searchType === "cpf" ? 14 : 18}
               style={{
                 flex: 1,
-                minWidth: 320,
+                minWidth: 280,
                 padding: "14px 16px",
                 borderRadius: 12,
                 border: "1px solid var(--line)",
@@ -103,6 +171,25 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
                 fontFamily: "monospace",
               }}
             />
+
+            {searchType === "cnpj" && (
+              <input
+                type="password"
+                value={cnpjPassword}
+                onChange={(e) => setCnpjPassword(e.target.value)}
+                placeholder="Senha (opcional se fornecida pelo parceiro)"
+                style={{
+                  minWidth: 200,
+                  padding: "14px 16px",
+                  borderRadius: 12,
+                  border: "1px solid var(--line)",
+                  background: "var(--card)",
+                  color: "var(--ink)",
+                  fontSize: 14,
+                }}
+              />
+            )}
+
             <button
               type="submit"
               disabled={loading}
@@ -127,6 +214,26 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               <ArrowRight size={16} />
             </button>
           </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Considerar entregas dos últimos:</span>
+            <select
+              value={daysLimit}
+              onChange={(e) => setDaysLimit(e.target.value)}
+              style={{
+                background: "var(--card)",
+                color: "var(--ink)",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                padding: "4px 8px",
+                fontSize: 12,
+              }}
+            >
+              <option value="10">10 dias</option>
+              <option value="20">20 dias</option>
+              <option value="30">30 dias</option>
+            </select>
+          </div>
         </form>
 
         {error && (
@@ -136,8 +243,8 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
         )}
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--muted)" }}>
-          <span>🔹 Suporta leitor de código de barras físico ou bipagem.</span>
-          <span>Processado via <strong>ssw.inf.br</strong></span>
+          <span>🔹 Consulta em tempo real aos servidores oficiais do <strong>SSW Sistemas</strong>.</span>
+          <span>Compatível com todas as transportadoras usuárias do SSW.</span>
         </div>
       </div>
     </section>
