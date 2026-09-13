@@ -140,11 +140,11 @@ function UploadStep({
             <Upload size={28} color="var(--muted)" />
             <div>
               <p style={{ margin: "0 0 4px", fontWeight: 700, color: "var(--ink)" }}>Clique ou arraste o arquivo aqui</p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Suporta .xlsx, .xls e .csv</p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Suporta .xlsx, .csv e NOTFIS (.txt / .not)</p>
             </div>
           </div>
         )}
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.txt,.not,.edi" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
       </div>
 
       {error && (
@@ -155,10 +155,10 @@ function UploadStep({
       )}
 
       <div style={{ marginTop: 24, padding: 16, borderRadius: 14, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
-        <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Colunas reconhecidas automaticamente</p>
+        <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Formatos e colunas suportadas</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {["Cidade / Município", "Cliente / Destinatário", "Pedido / NF", "Cubagem (m³)", "Peso (kg)", "Caixas / Volumes", "Situação / Status"].map(col => (
-            <span key={col} style={{ padding: "4px 10px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--line)", fontSize: 12, color: "var(--ink)" }}>{col}</span>
+          {["NOTFIS Proceda (EDI)", "Cidade / Município", "Cliente / Destinatário", "Pedido / NF", "Cubagem (m³)", "Peso (kg)", "Caixas / Volumes"].map(col => (
+            <span key={col} style={{ padding: "4px 10px", borderRadius: 8, background: col.includes("NOTFIS") ? "rgba(16,185,129,.15)" : "var(--card)", border: `1px solid ${col.includes("NOTFIS") ? "rgba(16,185,129,.3)" : "var(--line)"}`, fontSize: 12, color: col.includes("NOTFIS") ? "var(--green)" : "var(--ink)", fontWeight: col.includes("NOTFIS") ? 700 : 400 }}>{col}</span>
           ))}
         </div>
       </div>
