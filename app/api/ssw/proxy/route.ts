@@ -3,9 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 /**
- * GET /api/ssw/proxy?url=...
- * Proxy reverso que busca a página do SSW e remove o cabeçalho X-Frame-Options
- * e Content-Security-Policy para permitir renderizar diretamente no seu painel sem bloqueio do navegador.
+ * Proxy reverso seguro para renderizar páginas do SSW sem bloqueios de frame
  */
 export async function GET(req: NextRequest) {
   try {
@@ -21,20 +19,24 @@ export async function GET(req: NextRequest) {
 
     let html = await response.text();
 
-    // Reescreve URLs relativas para apontarem para o domínio do SSW
-    html = html.replace(/href="\/(?!\/)/g, 'href="https://ssw.inf.br/');
-    html = html.replace(/src="\/(?!\/)/g, 'src="https://ssw.inf.br/');
-    html = html.replace(/action="\/(?!\/)/g, 'action="https://ssw.inf.br/');
+    // Insere base href para que todos os scripts, estilos e fontes carreguem do domínio oficial
+    if (html.includes("<head>")) {
+      html = html.replace("<head>", `<head><base href="https://ssw.inf.br/" />`);
+    } else {
+      html = `<base href="https://ssw.inf.br/" />` + html;
+    }
+
+    const headers = new Headers();
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    // Remove cabeçalhos de bloqueio
+    headers.delete("X-Frame-Options");
+    headers.delete("Content-Security-Policy");
 
     return new NextResponse(html, {
       status: response.status,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        // Remove restrições de iframe para rodar liso no seu site
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers,
     });
   } catch (err: any) {
-    return new NextResponse(`Erro ao carregar página do SSW: ${err.message}`, { status: 500 });
+    return new NextResponse(`Erro ao carregar SSW: ${err.message}`, { status: 500 });
   }
 }

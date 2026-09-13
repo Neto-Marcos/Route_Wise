@@ -258,7 +258,6 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               border: "none",
               background: "#fff",
             }}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         </div>
       )}
