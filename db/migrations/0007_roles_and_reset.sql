@@ -13,9 +13,9 @@ DELETE FROM sync_operations;
 DELETE FROM audit_log;
 
 -- Se existir a tabela route_imports do roteirizador automatico, limpa tambem
-DO $\$
+DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'route_imports') THEN
     DELETE FROM route_imports;
   END IF;
-END $\$;
+END $$;
