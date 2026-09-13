@@ -14,6 +14,7 @@ import {
   Copy,
   Download,
   Eye,
+  ExternalLink,
   FileText,
   Filter,
   Gauge,
@@ -56,6 +57,7 @@ import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
 import { printElement } from "@/lib/print-document";
 import RoteirizadorPage from "./roteirizador-page";
+import { SSWTrackingView } from "./ssw-tracking-view";
 
 type DispatcherUser = {
   id: string;
@@ -1095,7 +1097,7 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador">(
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw">(
     "overview",
   );
   const [routes, setRoutes] = useState<RouteData[]>([]);
@@ -1178,6 +1180,7 @@ function Dispatcher({
             ["vehicles", "Veículos", <Truck key="v" />],
             ["dispatchers", "Gestores", <ShieldCheck key="g" />],
             ["roteirizador", "Roteirizador", <FileText key="rot" />],
+            ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
           ].map(([id, label, icon]) => (
             <button
               key={id as string}
@@ -1214,7 +1217,9 @@ function Dispatcher({
                       ? "Frota de Veículos"
                       : tab === "roteirizador"
                         ? "Roteirizador Automático"
-                        : "Gestores e Coordenadores"}
+                        : tab === "ssw"
+                          ? "Rastreamento pelo DANFE (SSW)"
+                          : "Gestores e Coordenadores"}
             </h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -1233,6 +1238,7 @@ function Dispatcher({
             onSelectRoute={(id) => setSelectedRouteId(id)}
             onPrintReport={(r) => openReport(r.id)}
             onAssignRoute={(r) => setAssigningRoute(r)}
+            onOpenTab={(t) => setTab(t as any)}
           />
         )}{" "}
         {tab === "routes" && (
@@ -1262,6 +1268,9 @@ function Dispatcher({
         )}
         {tab === "roteirizador" && (
           <RoteirizadorPage onBack={() => setTab("overview")} />
+        )}
+        {tab === "ssw" && (
+          <SSWTrackingView onBack={() => setTab("overview")} />
         )}
       </main>
 
@@ -1305,6 +1314,7 @@ function Overview({
   onSelectRoute,
   onPrintReport,
   onAssignRoute,
+  onOpenTab,
 }: {
   routes: RouteData[];
   active: RouteData[];
@@ -1312,6 +1322,7 @@ function Overview({
   onSelectRoute: (routeId: string) => void;
   onPrintReport: (route: RouteData) => void;
   onAssignRoute?: (route: RouteData) => void;
+  onOpenTab?: (tab: string) => void;
 }) {
   const delivered = routes.reduce((n, r) => n + Number(r.delivered || 0), 0);
   const todayLocal = new Date().toLocaleDateString("en-CA");
@@ -1340,19 +1351,36 @@ function Overview({
         <Metric label="Concluídas" value={completed.length} icon={<Check />} />
       </section>
 
-      <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)" }}>
-        <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <h2 style={{ color: "#10b981", display: "flex", alignItems: "center", gap: 8 }}>
-              📄 Roteirizador Automático por Planilha (Novo)
-            </h2>
-            <p>Faça upload da carteira (.xlsx / .csv) e gere rotas com cubagem m³ e ordem LIFO automaticamente.</p>
+      {/* Quick Launch Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)", marginBottom: 0 }}>
+          <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <h2 style={{ color: "#10b981", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                📄 Roteirizador de Planilhas
+              </h2>
+              <p style={{ fontSize: 12 }}>Upload de carteira (.xlsx / .csv / NOTFIS) e cubagem m³ com LIFO.</p>
+            </div>
+            <button type="button" className="button primary compact" style={{ background: "#10b981", border: "none" }} onClick={() => onOpenTab?.("roteirizador")}>
+              Abrir
+            </button>
           </div>
-          <button type="button" className="button primary" style={{ background: "#10b981", border: "none" }} onClick={() => window.location.hash = "roteirizador"}>
-            Abrir Roteirizador
-          </button>
-        </div>
-      </section>
+        </section>
+
+        <section className="panel" style={{ background: "linear-gradient(135deg, rgba(14,165,233,0.12), rgba(2,132,199,0.05))", border: "1px solid rgba(14,165,233,0.3)", marginBottom: 0 }}>
+          <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <h2 style={{ color: "#0284c7", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                📦 Rastreamento SSW (DANFE)
+              </h2>
+              <p style={{ fontSize: 12 }}>Consulta direta pelo DANFE (44 dígitos) integrado ao ssw.inf.br.</p>
+            </div>
+            <button type="button" className="button primary compact" style={{ background: "#0284c7", border: "none" }} onClick={() => onOpenTab?.("ssw")}>
+              Consultar
+            </button>
+          </div>
+        </section>
+      </div>
 
       {/* Task 1: Mapa ao vivo para o Organizador */}
       <section className="panel live-fleet-panel">
