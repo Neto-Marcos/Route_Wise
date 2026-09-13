@@ -367,6 +367,46 @@ function Logo() {
   );
 }
 
+function ThemeToggle({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  const [currentTheme, setCurrentTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = (localStorage.getItem("rw_theme") as "light" | "dark") ||
+        (document.documentElement.getAttribute("data-theme") as "light" | "dark") ||
+        "light";
+      setCurrentTheme(saved);
+    }
+  }, []);
+
+  const toggle = () => {
+    const next = currentTheme === "dark" ? "light" : "dark";
+    setCurrentTheme(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("rw_theme", next);
+      document.documentElement.setAttribute("data-theme", next);
+      if (next === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`theme-toggle-btn ${className || ""}`}
+      style={style}
+      onClick={toggle}
+      title={currentTheme === "dark" ? "Alternar para modo claro" : "Alternar para modo escuro"}
+      aria-label="Alternar modo de cor"
+    >
+      {currentTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
+  );
+}
+
 function ChangePasswordModal({
   onClose,
   onLogout,
@@ -464,7 +504,10 @@ function Home({
   return (
     <main className="home">
       <section className="home-copy">
-        <Logo />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+          <Logo />
+          <ThemeToggle />
+        </div>
         <div>
           <span className="eyebrow">SISTEMA INTELIGENTE DE ROTAS</span>
           <h1>
@@ -611,9 +654,12 @@ function Pin({
   return (
     <main className="center-page">
       <form className="card narrow auth-card" onSubmit={submit}>
-        <button type="button" className="back" onClick={onBack}>
-          <ArrowLeft size={17} /> Voltar
-        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: "8px" }}>
+          <button type="button" className="back" onClick={onBack} style={{ margin: 0 }}>
+            <ArrowLeft size={17} /> Voltar
+          </button>
+          <ThemeToggle />
+        </div>
         <Logo />
         <h1>{mode === "register" ? "Cadastrar nova empresa" : currentRoleInfo.title}</h1>
         <p>
@@ -756,9 +802,12 @@ function DriverPicker({
   return (
     <main className="center-page">
       <section className="card auth-card picker-card">
-        <button className="back" onClick={onBack}>
-          <ArrowLeft size={17} /> Voltar
-        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: "8px" }}>
+          <button type="button" className="back" onClick={onBack} style={{ margin: 0 }}>
+            <ArrowLeft size={17} /> Voltar
+          </button>
+          <ThemeToggle />
+        </div>
         <Logo />
         <h1>Quem está dirigindo?</h1>
         <p>Informe o código da sua empresa e selecione seu perfil de motorista.</p>
@@ -1520,6 +1569,7 @@ function Dispatcher({
             <span className="live">
               <i /> Atualização automática
             </span>
+            <ThemeToggle />
           </div>
         </header>
         {message && <p className="form-error">{message}</p>}
@@ -2911,14 +2961,7 @@ function RoutePlannerView({
             </div>
           </div>
           <div className="planner-header-actions">
-            <button
-              type="button"
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              title="Alternar modo claro / escuro"
-            >
-              <Sun size={15} />
-            </button>
+            <ThemeToggle />
             <button
               type="button"
               className="planner-mobile-toggle"
@@ -3863,6 +3906,7 @@ function DriverApp({
       <header>
         <Logo />
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ThemeToggle />
           <button
             type="button"
             className="secondary compact"
@@ -4065,7 +4109,10 @@ function ActiveRoute({
           <small>{driver.name}</small>
           <b>{data.name}</b>
         </div>
-        <Status value={data.status} />
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ThemeToggle />
+          <Status value={data.status} />
+        </div>
       </header>
 
       {/* Task 4: Navegação GPS / mini-mapa interativo integrado */}
