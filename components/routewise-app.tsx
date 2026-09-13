@@ -2299,6 +2299,7 @@ function RoutePlannerView({
   const [geometry, setGeometry] = useState<[number, number][]>([]);
   const [routeInfo, setRouteInfo] = useState<{ km: number; seconds: number } | null>(null);
   const [circular, setCircular] = useState(false);
+  const [showStations, setShowStations] = useState(true);
   const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">("distance");
   const [routeName, setRouteName] = useState("");
   const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString("en-CA"));
@@ -2885,6 +2886,21 @@ function RoutePlannerView({
               <div className="toggle-knob" />
             </div>
           </div>
+
+          <div
+            className="travel-options-toggle-row"
+            style={{ marginTop: 8 }}
+            onClick={() => setShowStations(!showStations)}
+            title="Ativa ou desativa a exibição dos postos de combustível e preços ao longo da rota"
+          >
+            <div className="travel-toggle-text">
+              <b>Exibir postos no mapa</b>
+              <small>{showStations ? "Postos de combustível visíveis" : "Postos ocultados para limpar o mapa"}</small>
+            </div>
+            <div className={`toggle-switch ${showStations ? "checked" : ""}`}>
+              <div className="toggle-knob" />
+            </div>
+          </div>
         </div>
 
         {routeInfo && (
@@ -3038,7 +3054,7 @@ function RoutePlannerView({
             </span>
           </div>
         )}
-        <RouteMap stops={stops} geometry={geometry} visible={mobileShowMap} />
+        <RouteMap stops={stops} geometry={geometry} visible={mobileShowMap} showStations={showStations} />
       </section>
 
       <section id="planner-print-document" className="planner-print-sheet" aria-label="Romaneio da rota planejada">
@@ -3184,7 +3200,7 @@ function formatRouteTime(seconds: number) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
 }
 
-function RouteMap({ stops, geometry, visible }: { stops: Stop[]; geometry: [number, number][]; visible?: boolean }) {
+function RouteMap({ stops, geometry, visible, showStations = true }: { stops: Stop[]; geometry: [number, number][]; visible?: boolean; showStations?: boolean }) {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
@@ -3397,19 +3413,21 @@ function RouteMap({ stops, geometry, visible }: { stops: Stop[]; geometry: [numb
       });
     };
 
-    if (stationsDataRef.current) {
+    if (!showStations) {
+      stationsLayer.clearLayers();
+    } else if (stationsDataRef.current) {
       renderStations(stationsDataRef.current);
     } else {
       loadStations()
         .then((data) => {
           if (Array.isArray(data)) {
             stationsDataRef.current = data;
-            renderStations(data);
+            if (showStations) renderStations(data);
           }
         })
         .catch(() => {});
     }
-  }, [stops, geometry, mapReady]);
+  }, [stops, geometry, mapReady, showStations]);
 
   return <div ref={mapElement} className="leaflet-route-map" />;
 }
