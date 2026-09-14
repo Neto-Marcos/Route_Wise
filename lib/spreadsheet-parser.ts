@@ -56,6 +56,12 @@ const COL_ADDRESS  = /endere[cç]o|logradouro|rua|bairro/i;
 const COL_UF       = /^(uf|sigla\s*uf|estado|sigla)$/i;
 const COL_PRODUCTS = /c[oó]digo|cod\s*produto|c[oó]d\s*produto|produto|mercadoria|itens|item|descri[cç][aã]o/i;
 const COL_STATUS   = /situa[cç][aã]o|status|situacao|fase/i;
+// Regra operacional da filial 281: a planilha Sabium traz o saldo separado
+// por filial. BF é "Saldo Disponível 281" e não pode ser substituída por
+// saldo agregado ou por saldo de outra filial.
+const COL_BALANCE_281 = /^saldo\s*dispon[ií]vel\s*281$/i;
+const COL_CLIENT_LOAD_MAP = /^mapa\s*de\s*carga\s*cliente$/i;
+const COL_STORE_LOAD_MAP = /^mapa\s*de\s*carga\s*loja$/i;
 
 // Situações que devem ser EXCLUÍDAS se houver coluna de status
 const INELIGIBLE_STATUS = /cancelad[ao]|entregu?e?|devolvid[ao]|estornad[ao]/i;
@@ -205,8 +211,12 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
   const iUf       = matchCol(headers, COL_UF);
   const iProducts = matchCol(headers, COL_PRODUCTS);
   const iStatus   = matchCol(headers, COL_STATUS);
+  const iBalance281 = matchCol(headers, COL_BALANCE_281);
+  const iClientLoadMap = matchCol(headers, COL_CLIENT_LOAD_MAP);
+  const iStoreLoadMap = matchCol(headers, COL_STORE_LOAD_MAP);
 
   const rawLines: OrderRow[] = [];
+  const ineligibleOrderIds = new Set<string>();
 
   for (let r = headerRowIdx + 1; r < raw.length; r++) {
     let row = raw[r] as unknown[];
@@ -237,6 +247,19 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
       order = order.replace(/\.0+$/, '').trim();
     } else {
       order = `L${r}`;
+    }
+
+    // Carteiras Sabium da filial 281: um pedido só pode seguir para rota se
+    // TODOS os seus itens tiverem saldo suficiente na BF e ainda não estiverem
+    // em mapa de carga. Marcamos o pedido inteiro para impedir roteamento
+    // parcial quando apenas um produto está sem saldo.
+    const balance281 = iBalance281 >= 0 ? toFloat(row[iBalance281]) : null;
+    const hasInsufficient281Balance = balance281 !== null && bx > 0 && balance281 < bx;
+    const hasClientLoadMap = iClientLoadMap >= 0 && !["", "0"].includes(toStr(row[iClientLoadMap]));
+    const hasStoreLoadMap = iStoreLoadMap >= 0 && !["", "0"].includes(toStr(row[iStoreLoadMap]));
+    if (hasInsufficient281Balance || hasClientLoadMap || hasStoreLoadMap) {
+      ineligibleOrderIds.add(order);
+      continue;
     }
 
     // Precisa ter pelo menos algum dado mínimo (cidade OU cliente OU pedido com valor/volume)
@@ -292,6 +315,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
   const productDedupeByOrder = new Map<string, Set<string>>();
 
   for (const line of rawLines) {
+    if (ineligibleOrderIds.has(line.orderId)) continue;
     // Se o pedido for gerado por fallback (L1, L2, etc.), não agrupa com outros
     const isFallbackId = line.orderId.startsWith("L");
     const groupKey = isFallbackId ? `LINE_${line.orderId}_${Math.random()}` : line.orderId;

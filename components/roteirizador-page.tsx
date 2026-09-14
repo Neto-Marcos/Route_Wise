@@ -322,20 +322,20 @@ function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: strin
         style={{ border: `2px dashed ${dragging ? "var(--green)" : "var(--line)"}`, borderRadius: 18, padding: "52px 32px", textAlign: "center", cursor: "pointer", background: dragging ? "rgba(16,185,129,.06)" : "var(--card)", transition: "all .2s" }}
       >
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.xlsm,.not,.edi,.txt" style={{ display: "none" }}
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); e.target.value = ""; }} />
         {loading ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, pointerEvents: "none" }}>
             <Loader2 size={40} color="var(--green)" style={{ animation: "spin 1s linear infinite" }} />
             <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>Lendo planilha...</p>
           </div>
         ) : (
-          <>
+          <div style={{ pointerEvents: "none" }}>
             <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(16,185,129,.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
               <Upload size={28} color="var(--green)" />
             </div>
             <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 16 }}>Importar Planilha Sabium</p>
             <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Arraste ou clique · .xlsx, .xls, .csv</p>
-          </>
+          </div>
         )}
       </div>
       {error && (
@@ -491,20 +491,6 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
                       {uf}
                     </label>
                   );
-                })}
-              </div>
-            </div>
-            {/* Options */}
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
-              {[
-                { label: "Priorizar registros mais antigos", val: prioritizeOld, set: setPrioritizeOld },
-                { label: "Buscar coordenadas online quando não cadastrada", val: searchOnline, set: setSearchOnline },
-                { label: "Incluir retorno a Campina Grande/PB", val: returnOrigin, set: setReturnOrigin },
-              ].map(({ label, val, set }) => (
-                <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
-                  <input type="checkbox" checked={val} onChange={e => set(e.target.checked)} style={{ accentColor: "var(--green)" }} />
-                  {label}
-                </label>
               ))}
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

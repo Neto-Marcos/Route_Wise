@@ -10,12 +10,22 @@ export const maxDuration = 60;
 export async function GET() {
   const session = await getSession("dispatcher");
   if (!session) return NextResponse.json({ error: "Sessão necessária" }, { status: 401 });
-  const result = await query<{ filename: string; parsed_rows: unknown[]; updated_at: string }>(
-    "SELECT filename,parsed_rows,updated_at FROM routing_workbooks WHERE company_id=$1", [session.companyId],
+  const result = await query<{ filename: string; file_data: Buffer | null; parsed_rows: unknown[]; updated_at: string }>(
+    "SELECT filename,file_data,parsed_rows,updated_at FROM routing_workbooks WHERE company_id=$1", [session.companyId],
   );
   const workbook = result.rows[0];
   if (!workbook) return NextResponse.json({ workbook: null });
-  return NextResponse.json({ workbook: { filename: workbook.filename, rows: workbook.parsed_rows, updatedAt: workbook.updated_at } });
+  // Reprocessa o arquivo bruto quando disponível, para que regras novas de
+  // elegibilidade (saldo da filial 281 e mapa de carga) também valham para a
+  // carteira que já estava salva antes da atualização.
+  let rows = workbook.parsed_rows;
+  if (workbook.file_data && !/\.(not|edi|txt)$/i.test(workbook.filename)) {
+    const buf = Buffer.from(workbook.file_data);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    rows = await parseSpreadsheet(ab, workbook.filename);
+    await query("UPDATE routing_workbooks SET parsed_rows=$2,updated_at=now() WHERE company_id=$1", [session.companyId, JSON.stringify(rows)]);
+  }
+  return NextResponse.json({ workbook: { filename: workbook.filename, rows, updatedAt: workbook.updated_at } });
 }
 
 export async function POST(req: NextRequest) {
