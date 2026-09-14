@@ -491,6 +491,19 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
                       {uf}
                     </label>
                   );
+                })}
+              </div>
+            </div>
+            {/* Options */}
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+              {[
+                { label: "Priorizar registros mais antigos", val: prioritizeOld, set: setPrioritizeOld },
+                { label: "Buscar coordenadas online quando não cadastrada", val: searchOnline, set: setSearchOnline },
+              ].map(({ label, val, set }) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
+                  <input type="checkbox" checked={val} onChange={e => set(e.target.checked)} style={{ accentColor: "var(--green)" }} />
+                  {label}
+                </label>
               ))}
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
