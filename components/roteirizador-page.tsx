@@ -621,6 +621,27 @@ export default function RoteirizadorPage({
             <b style={{ fontSize: 16, letterSpacing: "-.02em" }}>Roteirizador Automático</b>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <a
+              href="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--line)",
+                background: "var(--card-subtle)",
+                color: "var(--ink)",
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+              title="Abrir versão alternativa completa do roteirizador em nova aba"
+            >
+              🚀 Roteirizador Avançado (Nova Guia)
+            </a>
             {step !== "done" && (
               <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12 }}>
                 <X size={13} /> Reiniciar
