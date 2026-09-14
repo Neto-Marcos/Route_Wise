@@ -35,8 +35,6 @@ export interface EngineConfig {
   /** Lat/lng da origem */
   originLat: number;
   originLng: number;
-  /** Máximo de destinos distintos por rota */
-  maxStops?: number;
   minVolumeM3?: number;
   corridorAngle?: number;
   prioritizeAging?: boolean;
@@ -297,48 +295,51 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     haversineKm(originLat, originLng, b.coords[0], b.coords[1])
   );
 
-  // 4. Bin-Packing: quebrar grupos em rotas respeitando capacidade
+  // 4. Preencher o veículo por corredor geográfico. A quantidade de paradas
+  // nunca encerra uma rota: apenas volume/peso. Cada rota fica no mesmo estado
+  // e em um mesmo sentido a partir da base; assim uma cidade só entra quando
+  // está no trajeto (aproximação cartográfica) ou muito próxima dele.
   const routes: SuggestedRoute[] = [];
   let routeIndex = 1;
 
   for (const group of groups) {
-    // Ordena pedidos dentro do grupo por cidade e volume (desc)
-    const sorted = [...group.orders].sort((a, b) => {
-      if (config.prioritizeAging) {
-        const ageDiff = agingDays(b) - agingDays(a);
-        if (ageDiff) return ageDiff;
-      }
-      const cityDiff = normCity(a.city).localeCompare(normCity(b.city));
-      if (cityDiff !== 0) return cityDiff;
-      return b.volumeM3 - a.volumeM3;
+    const pending = [...group.orders].sort((a, b) => {
+      const distanceDiff = haversineKm(originLat, originLng, a.lat!, a.lng!) - haversineKm(originLat, originLng, b.lat!, b.lng!);
+      if (distanceDiff) return distanceDiff;
+      return config.prioritizeAging ? agingDays(b) - agingDays(a) : b.volumeM3 - a.volumeM3;
     });
 
-    // Preenche rotas com bin-packing
-    let currentRoute: OrderRow[] = [];
-    let currentVol = 0;
-    let currentWt = 0;
+    while (pending.length) {
+      const seed = pending.shift()!;
+      const corridorBearing = bearingDeg(originLat, originLng, seed.lat!, seed.lng!);
+      const corridorHalfAngle = Math.max(12, (config.corridorAngle ?? 50) / 2);
+      const currentRoute: OrderRow[] = [seed];
+      let currentVol = seed.volumeM3;
+      let currentWt = seed.weightKg;
 
-    for (const order of sorted) {
-      const willExceedVol = currentVol + order.volumeM3 > maxVolumeM3;
-      const willExceedWt  = currentWt + order.weightKg  > maxWeightKg;
-      const existingCities = new Set(currentRoute.map((item) => `${item.uf ?? ''}|${normCity(item.city)}`));
-      const isNewStop = !existingCities.has(`${order.uf ?? ''}|${normCity(order.city)}`);
-      const willExceedStops = Boolean(config.maxStops && isNewStop && existingCities.size >= config.maxStops);
-
-      if ((willExceedVol || willExceedWt || willExceedStops) && currentRoute.length > 0) {
-        // Fecha rota atual
-        routes.push(buildRoute(routeIndex++, currentRoute, group, config));
-        currentRoute = [];
-        currentVol = 0;
-        currentWt = 0;
+      // Escolhe sempre o pedido viável mais próximo dentro do mesmo corredor.
+      // Pedidos fora dele formam outra rota, em vez de provocar um desvio.
+      while (true) {
+        const candidateIndex = pending
+          .map((order, index) => ({ order, index }))
+          .filter(({ order }) =>
+            currentVol + order.volumeM3 <= maxVolumeM3 &&
+            currentWt + order.weightKg <= maxWeightKg &&
+            angleDiff(corridorBearing, bearingDeg(originLat, originLng, order.lat!, order.lng!)) <= corridorHalfAngle,
+          )
+          .sort((a, b) => {
+            const distanceDiff = haversineKm(originLat, originLng, a.order.lat!, a.order.lng!) - haversineKm(originLat, originLng, b.order.lat!, b.order.lng!);
+            if (distanceDiff) return distanceDiff;
+            return config.prioritizeAging ? agingDays(b.order) - agingDays(a.order) : b.order.volumeM3 - a.order.volumeM3;
+          })[0]?.index;
+        if (candidateIndex === undefined) break;
+        const [candidate] = pending.splice(candidateIndex, 1);
+        currentRoute.push(candidate);
+        currentVol += candidate.volumeM3;
+        currentWt += candidate.weightKg;
       }
 
-      currentRoute.push(order);
-      currentVol += order.volumeM3;
-      currentWt  += order.weightKg;
-    }
-
-    if (currentRoute.length > 0) {
+      currentRoute.sort((a, b) => haversineKm(originLat, originLng, a.lat!, a.lng!) - haversineKm(originLat, originLng, b.lat!, b.lng!));
       routes.push(buildRoute(routeIndex++, currentRoute, group, config));
     }
   }

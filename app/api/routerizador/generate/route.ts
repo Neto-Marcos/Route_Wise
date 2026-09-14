@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
       originName:      body.config?.originName      ?? 'Filial',
       originLat:       body.config?.originLat       ?? -7.2306,  // Campina Grande default
       originLng:       body.config?.originLng       ?? -35.8811,
-      maxStops:        body.config?.maxStops        ?? 10,
       minVolumeM3:     body.config?.minVolumeM3     ?? 10,
       corridorAngle:   body.config?.corridorAngle   ?? 60,
       prioritizeAging: body.config?.prioritizeAging ?? true,

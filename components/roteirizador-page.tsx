@@ -22,13 +22,13 @@ import { parseSpreadsheet, type OrderRow } from "@/lib/spreadsheet-parser";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VEHICLE_PRESETS: Record<string, { label: string; maxVol: number; maxWt: number; maxDel: number }> = {
-  tresquartos: { label: "3/4 — 40 m³", maxVol: 40, maxWt: 8000, maxDel: 8 },
-  toco: { label: "Toco — 50 m³", maxVol: 50, maxWt: 12000, maxDel: 10 },
-  truck: { label: "Truck — 70 m³", maxVol: 70, maxWt: 15000, maxDel: 12 },
-  carreta: { label: "Carreta — 95 m³", maxVol: 95, maxWt: 27000, maxDel: 15 },
-  bitrem: { label: "Bitrem — 140 m³", maxVol: 140, maxWt: 40000, maxDel: 20 },
-  custom: { label: "Personalizado", maxVol: 90, maxWt: 20000, maxDel: 12 },
+const VEHICLE_PRESETS: Record<string, { label: string; maxVol: number; maxWt: number }> = {
+  tresquartos: { label: "3/4 — 40 m³", maxVol: 40, maxWt: 8000 },
+  toco: { label: "Toco — 50 m³", maxVol: 50, maxWt: 12000 },
+  truck: { label: "Truck — 70 m³", maxVol: 70, maxWt: 15000 },
+  carreta: { label: "Carreta — 95 m³", maxVol: 95, maxWt: 27000 },
+  bitrem: { label: "Bitrem — 140 m³", maxVol: 140, maxWt: 40000 },
+  custom: { label: "Personalizado", maxVol: 90, maxWt: 20000 },
 };
 
 const NE_STATES = ["AL", "AP", "BA", "CE", "MA", "PA", "PB", "PE", "PI", "RN", "SE", "TO"];
@@ -360,7 +360,6 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const [preset, setPreset] = useState("carreta");
   const [maxVol, setMaxVol] = useState(95);
   const [maxWt, setMaxWt] = useState(27000);
-  const [maxDel, setMaxDel] = useState(15);
   // Parâmetros operacionais estáveis: mantidos no motor, sem poluir a tela.
   const minVolDed = 20;
   const costPctMin = 3;
@@ -378,7 +377,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
 
   const applyPreset = (key: string) => {
     setPreset(key);
-    if (key !== "custom") { const p = VEHICLE_PRESETS[key]; setMaxVol(p.maxVol); setMaxWt(p.maxWt); setMaxDel(p.maxDel); }
+    if (key !== "custom") { const p = VEHICLE_PRESETS[key]; setMaxVol(p.maxVol); setMaxWt(p.maxWt); }
   };
 
   const toggleState = (uf: string) => {
@@ -421,7 +420,6 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         originName: "Campina Grande/PB",
         originLat: -7.2306,
         originLng: -35.8811,
-        maxStops: maxDel,
         minVolumeM3: minVolDed,
         prioritizeAging: prioritizeOld,
         returnToOrigin: returnOrigin,
