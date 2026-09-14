@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
+  ExternalLink,
   Loader2,
   Package,
   RefreshCw,
@@ -493,6 +494,7 @@ function SuccessStep({ routeIds, onNew }: { routeIds: string[]; onNew: () => voi
 type Step = "upload" | "config" | "review" | "done";
 
 export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
+  const [viewMode, setViewMode] = useState<"original" | "wizard">("original");
   const [step, setStep] = useState<Step>("upload");
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [filename, setFilename] = useState("");
@@ -517,6 +519,66 @@ export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
   ];
   const stepIdx = steps.findIndex(s => s.key === step);
 
+  if (viewMode === "original") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 80px)", background: "var(--paper)", overflow: "hidden" }}>
+        {/* Barra superior com botão Voltar e alternador */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", borderBottom: "1px solid var(--line)", background: "var(--card)", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="button secondary compact"
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, height: 34 }}
+              >
+                <ArrowLeft size={15} /> Voltar ao Painel
+              </button>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <FileSpreadsheet size={20} color="#10b981" />
+              <b style={{ fontSize: 15, color: "var(--ink)" }}>Roteirizador de Entregas (Oficial)</b>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setViewMode("wizard")}
+              className="button secondary compact"
+              style={{ fontSize: 12, height: 34 }}
+              title="Alternar para o assistente de upload em 4 etapas"
+            >
+              📋 Assistente de Planilhas
+            </button>
+            <a
+              href="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="button primary compact"
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, height: 34, background: "#0284c7", border: "none", textDecoration: "none" }}
+            >
+              <ExternalLink size={14} /> Abrir em Nova Guia
+            </a>
+          </div>
+        </div>
+
+        {/* Iframe embutido ocupando 100% da tela */}
+        <iframe
+          src="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
+          title="Roteirizador de Entregas Funcional"
+          style={{
+            flex: 1,
+            width: "100%",
+            height: "100%",
+            border: "none",
+            background: "#07111f",
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100dvh", background: "var(--paper)", color: "var(--ink)" }}>
       {/* Header */}
@@ -531,11 +593,21 @@ export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
             <FileSpreadsheet size={20} color="var(--green)" />
             <b style={{ fontSize: 16, letterSpacing: "-.02em" }}>Roteirizador Automático</b>
           </div>
-          {step !== "done" && (
-            <button onClick={reset} style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12 }}>
-              <X size={13} /> Reiniciar
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setViewMode("original")}
+              className="button secondary compact"
+              style={{ fontSize: 12, height: 32 }}
+            >
+              🚀 Roteirizador Original
             </button>
-          )}
+            {step !== "done" && (
+              <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12 }}>
+                <X size={13} /> Reiniciar
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
