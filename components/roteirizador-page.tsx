@@ -272,6 +272,11 @@ function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: strin
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [savedWorkbook, setSavedWorkbook] = useState<{ filename: string; rows: OrderRow[]; updatedAt: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/routerizador/workbook").then(r => r.ok ? r.json() : null).then(data => setSavedWorkbook(data?.workbook ?? null)).catch(() => {});
+  }, []);
 
   const process = useCallback(async (file: File) => {
     setLoading(true); setError("");
@@ -280,8 +285,8 @@ function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: strin
       try {
         const form = new FormData();
         form.append("file", file);
-        const res = await fetch("/api/routerizador/parse", { method: "POST", body: form });
-        if (res.ok) { const data = await res.json(); rows = data.rows ?? []; }
+        const res = await fetch("/api/routerizador/workbook", { method: "POST", body: form });
+        if (res.ok) { const data = await res.json(); rows = data.rows ?? []; setSavedWorkbook({ filename: data.filename, rows, updatedAt: new Date().toISOString() }); }
       } catch { /* fall through */ }
       if (!rows.length) {
         const buf = await file.arrayBuffer();
@@ -301,6 +306,14 @@ function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: strin
 
   return (
     <div style={{ maxWidth: 560, margin: "60px auto" }}>
+      {savedWorkbook && (
+        <div style={{ ...S.card, marginBottom: 14, borderColor: "rgba(16,185,129,.35)" }}>
+          <strong style={{ color: "var(--green)" }}>Carteira atual salva</strong>
+          <p style={{ margin: "6px 0", fontSize: 13 }}>{savedWorkbook.filename} · {savedWorkbook.rows.length} pedidos</p>
+          <button type="button" onClick={() => onParsed(savedWorkbook.rows, savedWorkbook.filename)} style={S.btnPrimary}>Usar carteira salva</button>
+          <small style={{ display: "block", marginTop: 8, color: "var(--muted)" }}>Envie outra planilha abaixo para substituir esta carteira.</small>
+        </div>
+      )}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -308,7 +321,7 @@ function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: strin
         onClick={() => fileRef.current?.click()}
         style={{ border: `2px dashed ${dragging ? "var(--green)" : "var(--line)"}`, borderRadius: 18, padding: "52px 32px", textAlign: "center", cursor: "pointer", background: dragging ? "rgba(16,185,129,.06)" : "var(--card)", transition: "all .2s" }}
       >
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.xlsm" style={{ display: "none" }}
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.xlsm,.not,.edi,.txt" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
         {loading ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -591,7 +604,7 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
       {result.unassigned.length > 0 && (
         <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,.07)", border: "1px dashed rgba(239,68,68,.3)", marginBottom: 14, fontSize: 13 }}>
           <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {result.unassigned.length} pedidos não roteirizados</span>
-          <span style={{ color: "var(--muted)", marginLeft: 6 }}>— cidade não reconhecida no dicionário geográfico.</span>
+          <span style={{ color: "var(--muted)", marginLeft: 6 }}>— cidade sem coordenada confirmada no mapa.</span>
         </div>
       )}
 
