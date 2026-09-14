@@ -361,13 +361,13 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const [maxVol, setMaxVol] = useState(95);
   const [maxWt, setMaxWt] = useState(27000);
   const [maxDel, setMaxDel] = useState(15);
-  const [minVolDed, setMinVolDed] = useState(20);
-  const [costPctMin, setCostPctMin] = useState(3);
-  const [costPctMax, setCostPctMax] = useState(5);
-  const [speedKmh, setSpeedKmh] = useState(52);
-  const [serviceMin, setServiceMin] = useState(40);
-  const [maxHours, setMaxHours] = useState(84);
-  const [period, setPeriod] = useState("0");
+  // Parâmetros operacionais estáveis: mantidos no motor, sem poluir a tela.
+  const minVolDed = 20;
+  const costPctMin = 3;
+  const costPctMax = 5;
+  const speedKmh = 52;
+  const serviceMin = 40;
+  const maxHours = 84;
   const [states, setStates] = useState<Set<string>>(new Set(["Todos"]));
   const [prioritizeOld, setPrioritizeOld] = useState(true);
   const [searchOnline, setSearchOnline] = useState(true);
@@ -435,7 +435,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
     finally { setLoading(false); }
   };
 
-  const reset = () => { applyPreset("carreta"); setMinVolDed(20); setCostPctMin(3); setCostPctMax(5); setSpeedKmh(52); setServiceMin(40); setMaxHours(84); setPeriod("0"); setStates(new Set(["Todos"])); setPrioritizeOld(true); setSearchOnline(true); setReturnOrigin(false); };
+  const reset = () => { applyPreset("carreta"); setStates(new Set(["Todos"])); setPrioritizeOld(true); setSearchOnline(true); setReturnOrigin(false); };
 
   return (
     <div>
@@ -470,21 +470,12 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
       <div style={{ ...S.card, marginBottom: 14 }}>
         <button onClick={() => setConfigOpen(o => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink)", fontWeight: 700, fontSize: 13, padding: 0, display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
           <span style={{ opacity: .5, fontSize: 10 }}>{configOpen ? "▼" : "▶"}</span>
-          Configuração do veículo, período e otimização
+          Configuração do veículo e cálculo
         </button>
         {configOpen && (
           <div style={{ marginTop: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12, marginBottom: 12 }}>
               <label><span style={S.label}>Veículo</span><select style={S.select} value={preset} onChange={e => applyPreset(e.target.value)}>{Object.entries(VEHICLE_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
-              <label><span style={S.label}>Período da Carteira</span><select style={S.select} value={period} onChange={e => setPeriod(e.target.value)}><option value="0">Todos os registros</option><option value="30">Últimos 30 dias</option><option value="60">Últimos 60 dias</option><option value="90">Últimos 90 dias</option></select></label>
-              <label><span style={S.label}>Mínimo dedicado (m³)</span><input type="number" min={0} step={0.5} value={minVolDed} onChange={e => setMinVolDed(Number(e.target.value))} style={S.input} /></label>
-              <label><span style={S.label}>Capacidade máxima (m³)</span><input type="number" min={1} step={0.5} value={maxVol} onChange={e => { setMaxVol(Number(e.target.value)); setPreset("custom"); }} style={S.input} /></label>
-              <label><span style={S.label}>Máximo de entregas</span><input type="number" min={1} max={30} value={maxDel} onChange={e => { setMaxDel(Number(e.target.value)); setPreset("custom"); }} style={S.input} /></label>
-              <label><span style={S.label}>Custo mínimo sobre a rota (%)</span><input type="number" min={0} max={100} step={0.1} value={costPctMin} onChange={e => setCostPctMin(Number(e.target.value))} style={S.input} /></label>
-              <label><span style={S.label}>Custo máximo sobre a rota (%)</span><input type="number" min={0} max={100} step={0.1} value={costPctMax} onChange={e => setCostPctMax(Number(e.target.value))} style={S.input} /></label>
-              <label><span style={S.label}>Velocidade média (km/h)</span><input type="number" min={20} max={120} value={speedKmh} onChange={e => setSpeedKmh(Number(e.target.value))} style={S.input} /></label>
-              <label><span style={S.label}>Descarga por entrega (min)</span><input type="number" min={0} max={300} step={5} value={serviceMin} onChange={e => setServiceMin(Number(e.target.value))} style={S.input} /></label>
-              <label><span style={S.label}>Duração máxima planejada (h)</span><input type="number" min={1} max={200} step={0.5} value={maxHours} onChange={e => setMaxHours(Number(e.target.value))} style={S.input} /></label>
             </div>
             {/* States */}
             <div style={{ marginBottom: 12 }}>
