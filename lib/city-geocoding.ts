@@ -42,7 +42,7 @@ async function geocodeCity(city: string, uf: string): Promise<Geocode | null> {
  * público de geocoding; cidades restantes são resolvidas em importações futuras
  * a partir do cache já construído.
  */
-export async function resolveOrderCoordinates(orders: OrderRow[], maxRemoteLookups = 25): Promise<OrderRow[]> {
+export async function resolveOrderCoordinates(orders: OrderRow[], maxRemoteLookups = 100): Promise<OrderRow[]> {
   const resolved = new Map<string, Geocode | null>();
   let remoteLookups = 0;
   for (const order of orders) {

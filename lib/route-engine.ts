@@ -259,10 +259,16 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
   const byState = new Map<string, CityGroup>();
 
   for (const { city, uf, orders: cityOrders, coords } of byCity.values()) {
+    // Nunca desenhar destino desconhecido na origem: ele deve ser conferido na
+    // planilha/mapa antes do carregamento, em vez de criar marcadores falsos.
+    if (!coords) {
+      unassigned.push(...cityOrders);
+      continue;
+    }
     // Sem UF não pode ser combinado com outro destino desconhecido.
     const groupKey = uf || `SEM_UF:${city}`;
     const groupUf = uf || "";
-    const cityCoords = coords ?? [originLat, originLng] as [number, number];
+    const cityCoords = coords;
     const existing = byState.get(groupKey);
     if (existing) {
       const cityCount = existing.cities.length;
