@@ -254,6 +254,15 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     const safeBoxes = bx >= 1 ? Math.round(bx) : 1;
     const safeVol = vol > 0 ? vol : 0.5;
     const safeWt = wt > 0 ? wt : (safeVol > 0 ? safeVol * 150 : 50);
+    const freightRaw = extra["tipo frete"] ?? extra["tipo_frete"] ?? extra["frete"] ?? "";
+    const freightNormalized = freightRaw.trim().toUpperCase();
+    const freightType = freightNormalized.startsWith("CIF")
+      ? "CIF"
+      : freightNormalized.startsWith("FOB")
+        ? "FOB"
+        : "";
+    const closedAt = extra["fechado"] ?? extra["data fechado"] ?? "";
+    const totalValue = toFloat(extra["total item"] ?? extra["total_item"] ?? extra["valor"] ?? 0);
 
     rawLines.push({
       city: safeCity,
@@ -266,6 +275,9 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
       address: addr,
       uf,
       products: prod,
+      freightType,
+      closedAt,
+      totalValue,
       extra,
     });
   }

@@ -251,40 +251,38 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     byCity.get(key)!.orders.push(o);
   }
 
-  // 2. Clusterizar cidades próximas (Haversine ≤ clusterRadiusKm)
+  // 2. Agrupar pela UF. A operação define estado como a fronteira logística
+  // primária: cidades de estados diferentes nunca compartilham uma rota, e as
+  // cidades do mesmo estado só são separadas por capacidade/limite de paradas.
   type CityGroup = { uf: string; cities: string[]; coords: [number, number]; bearing: number; orders: OrderRow[] };
-  const groups: CityGroup[] = [];
+  const byState = new Map<string, CityGroup>();
 
   for (const { city, uf, orders: cityOrders, coords } of byCity.values()) {
-    if (!coords) {
-      // Sem coordenadas: adiciona como grupo solo
-      groups.push({ uf, cities: [city], coords: [originLat, originLng], bearing: 0, orders: cityOrders });
-      continue;
-    }
-
-    // Tenta encaixar num grupo existente
-    let merged = false;
-    for (const g of groups) {
-      const dist = haversineKm(g.coords[0], g.coords[1], coords[0], coords[1]);
-      const candidateBearing = bearingDeg(originLat, originLng, coords[0], coords[1]);
-      const sameCorridor = angleDiff(g.bearing, candidateBearing) <= (config.corridorAngle ?? 60);
-      if (g.uf === uf && sameCorridor && dist <= clusterRadiusKm) {
-        g.cities.push(city);
-        g.orders.push(...cityOrders);
-        // Atualiza centroide (média ponderada simples)
-        g.coords = [
-          (g.coords[0] + coords[0]) / 2,
-          (g.coords[1] + coords[1]) / 2,
-        ];
-        g.bearing = bearingDeg(originLat, originLng, g.coords[0], g.coords[1]);
-        merged = true;
-        break;
-      }
-    }
-    if (!merged) {
-      groups.push({ uf, cities: [city], coords, bearing: bearingDeg(originLat, originLng, coords[0], coords[1]), orders: cityOrders });
+    // Sem UF não pode ser combinado com outro destino desconhecido.
+    const groupKey = uf || `SEM_UF:${city}`;
+    const groupUf = uf || "";
+    const cityCoords = coords ?? [originLat, originLng] as [number, number];
+    const existing = byState.get(groupKey);
+    if (existing) {
+      const cityCount = existing.cities.length;
+      existing.cities.push(city);
+      existing.orders.push(...cityOrders);
+      existing.coords = [
+        (existing.coords[0] * cityCount + cityCoords[0]) / (cityCount + 1),
+        (existing.coords[1] * cityCount + cityCoords[1]) / (cityCount + 1),
+      ];
+      existing.bearing = bearingDeg(originLat, originLng, existing.coords[0], existing.coords[1]);
+    } else {
+      byState.set(groupKey, {
+        uf: groupUf,
+        cities: [city],
+        coords: cityCoords,
+        bearing: bearingDeg(originLat, originLng, cityCoords[0], cityCoords[1]),
+        orders: [...cityOrders],
+      });
     }
   }
+  const groups = [...byState.values()];
 
   // 3. Ordenar grupos pela distância à origem (mais próximos primeiro)
   groups.sort((a, b) =>
@@ -412,7 +410,9 @@ function buildRoute(
   const maxAge = Math.max(0, ...orders.map(agingDays));
   const warnings = [occ > 85 ? `Ocupação ${Math.round(occ)}% — verifique a carga` : "", config.minVolumeM3 && totalVol < config.minVolumeM3 ? `Abaixo do mínimo de ${config.minVolumeM3} m³` : "", config.maxHours && estimatedDurationMin > config.maxHours * 60 ? "Duração planejada excedida" : ""].filter(Boolean);
 
-  const name = stops.length === 1
+  const name = group.uf
+    ? `Rota ${index} — ${group.uf}`
+    : stops.length === 1
     ? `Rota ${index} — ${stops[0].city}`
     : `Rota ${index} — ${stops[0].city} + ${stops.length - 1} cidades`;
 

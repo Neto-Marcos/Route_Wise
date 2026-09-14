@@ -64,7 +64,7 @@ function fmt(n: number, dec = 2) {
 }
 
 function getFreightType(row: OrderRow): string {
-  const raw = row.extra?.["tipo frete"] ?? row.extra?.["tipo_frete"] ?? row.extra?.["frete"] ?? "";
+  const raw = row.freightType ?? row.extra?.["tipo frete"] ?? row.extra?.["tipo_frete"] ?? row.extra?.["frete"] ?? "";
   return String(raw).trim().toUpperCase();
 }
 
@@ -362,6 +362,18 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const generate = async () => {
     setLoading(true); setError("");
     try {
+      const rowsInSelectedStates = states.has("Todos")
+        ? filtered
+        : filtered.filter(row => states.has((row.uf ?? "").trim().toUpperCase()));
+      const hasFreightData = rowsInSelectedStates.some(row => Boolean(getFreightType(row)));
+      // FOB is a client pickup. It is visible for review, but is never sent to
+      // the company-fleet routing engine.
+      const routableRows = hasFreightData
+        ? rowsInSelectedStates.filter(row => getFreightType(row) === "CIF")
+        : rowsInSelectedStates;
+      if (routableRows.length === 0) {
+        throw new Error("Não há pedidos CIF nos estados selecionados para roteirizar com a frota própria.");
+      }
       const routeDate = new Date().toISOString().slice(0, 10);
       const fullConfig: EngineConfig = {
         maxVolumeM3: maxVol,
@@ -371,8 +383,15 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         originName: "Campina Grande/PB",
         originLat: -7.2306,
         originLng: -35.8811,
+        maxStops: maxDel,
+        minVolumeM3: minVolDed,
+        prioritizeAging: prioritizeOld,
+        returnToOrigin: returnOrigin,
+        averageSpeed: speedKmh,
+        serviceMinutes: serviceMin,
+        maxHours,
       };
-      const result = await api<EngineResult>("/api/routerizador/generate", { method: "POST", body: JSON.stringify({ rows: filtered, config: fullConfig }) });
+      const result = await api<EngineResult>("/api/routerizador/generate", { method: "POST", body: JSON.stringify({ rows: routableRows, config: fullConfig }) });
       onGenerate(result, fullConfig, preset, serviceMin, speedKmh, costPctMin, costPctMax, minVolDed, freightFilter);
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
