@@ -3845,7 +3845,7 @@ function RoutePlannerView({
                   {stop.boxes && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}
                 </td>
                 <td style={{ padding: "8px 10px", textAlign: "center" }}>
-                  {stop.volume_m3 && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}
+                  {stop.volume_m3 && stop.volume_m3 > 0 ? `${Number(stop.volume_m3).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : "--"}
                 </td>
               </tr>
             ))}
@@ -3899,7 +3899,7 @@ function RoutePlannerView({
                       <td style={{ padding: "6px 8px", fontWeight: "700" }}>{stop.name}</td>
                       <td style={{ padding: "6px 8px", color: "#475569" }}>{stop.address}</td>
                       <td style={{ padding: "6px 8px", textAlign: "center" }}>{stop.boxes && stop.boxes > 0 ? `${stop.boxes} cx` : "--"}</td>
-                      <td style={{ padding: "6px 8px", textAlign: "center" }}>{stop.volume_m3 && stop.volume_m3 > 0 ? `${stop.volume_m3} m³` : "--"}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "center" }}>{stop.volume_m3 && stop.volume_m3 > 0 ? `${Number(stop.volume_m3).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : "--"}</td>
                       <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: "700" }}>{originalIndex}ª entrega</td>
                       <td style={{ padding: "6px 8px", textAlign: "center" }}>
                         <div style={{ width: "16px", height: "16px", border: "1.5px solid #94a3b8", borderRadius: "3px", margin: "auto" }} />

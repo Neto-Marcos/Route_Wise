@@ -57,9 +57,11 @@ const COL_UF       = /^(uf|sigla\s*uf|estado|sigla)$/i;
 const COL_PRODUCTS = /c[oó]digo|cod\s*produto|c[oó]d\s*produto|produto|mercadoria|itens|item|descri[cç][aã]o/i;
 const COL_STATUS   = /situa[cç][aã]o|status|situacao|fase/i;
 // Regra operacional da filial 281: a planilha Sabium traz o saldo separado
-// por filial. BF é "Saldo Disponível 281" e não pode ser substituída por
-// saldo agregado ou por saldo de outra filial.
-const COL_BALANCE_281 = /^saldo\s*dispon[ií]vel\s*281$/i;
+// por filial. Esta é a única fonte de disponibilidade para o roteirizador;
+// saldo agregado ou saldo de outra filial nunca torna um pedido elegível.
+// Aceita os rótulos que a exportação usa, como "Saldo Disponível 281",
+// "Saldo filial 281" e "Saldo disponível - Filial 281".
+const COL_BALANCE_281 = /\bsaldo\b.*\b281\b|\b281\b.*\bsaldo\b/i;
 const COL_CLIENT_LOAD_MAP = /^mapa\s*de\s*carga\s*cliente$/i;
 const COL_STORE_LOAD_MAP = /^mapa\s*de\s*carga\s*loja$/i;
 
@@ -250,11 +252,11 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     }
 
     // Carteiras Sabium da filial 281: um pedido só pode seguir para rota se
-    // TODOS os seus itens tiverem saldo suficiente na BF e ainda não estiverem
-    // em mapa de carga. Marcamos o pedido inteiro para impedir roteamento
-    // parcial quando apenas um produto está sem saldo.
+    // TODOS os seus itens tiverem saldo suficiente na filial 281 e ainda não
+    // estiverem em mapa de carga. Marcamos o pedido inteiro para impedir
+    // roteamento parcial quando apenas um produto está sem saldo.
     const balance281 = iBalance281 >= 0 ? toFloat(row[iBalance281]) : null;
-    const hasInsufficient281Balance = balance281 !== null && bx > 0 && balance281 < bx;
+    const hasInsufficient281Balance = balance281 !== null && balance281 < bx;
     const hasClientLoadMap = iClientLoadMap >= 0 && !["", "0"].includes(toStr(row[iClientLoadMap]));
     const hasStoreLoadMap = iStoreLoadMap >= 0 && !["", "0"].includes(toStr(row[iStoreLoadMap]));
     if (hasInsufficient281Balance || hasClientLoadMap || hasStoreLoadMap) {

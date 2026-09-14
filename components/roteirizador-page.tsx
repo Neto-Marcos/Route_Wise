@@ -370,7 +370,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const [states, setStates] = useState<Set<string>>(new Set(["Todos"]));
   const [prioritizeOld, setPrioritizeOld] = useState(true);
   const [searchOnline, setSearchOnline] = useState(true);
-  const [returnOrigin, setReturnOrigin] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(true);
@@ -422,7 +422,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         originLng: -35.8811,
         minVolumeM3: minVolDed,
         prioritizeAging: prioritizeOld,
-        returnToOrigin: returnOrigin,
+        returnToOrigin: false,
         averageSpeed: speedKmh,
         serviceMinutes: serviceMin,
         maxHours,
@@ -433,7 +433,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
     finally { setLoading(false); }
   };
 
-  const reset = () => { applyPreset("carreta"); setStates(new Set(["Todos"])); setPrioritizeOld(true); setSearchOnline(true); setReturnOrigin(false); };
+  const reset = () => { applyPreset("carreta"); setStates(new Set(["Todos"])); setPrioritizeOld(true); setSearchOnline(true); };
 
   return (
     <div>
