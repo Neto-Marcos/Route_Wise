@@ -17,6 +17,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nenhum pedido fornecido.' }, { status: 400 });
     }
 
+    // Se a importação informa o frete, somente CIF pode criar rotas da frota.
+    // Arquivos genéricos sem essa coluna continuam compatíveis com o motor.
+    const hasFreightClassification = body.rows.some((row) => row.freightType !== undefined);
+    const eligibleRows = hasFreightClassification
+      ? body.rows.filter((row) => row.freightType === 'CIF')
+      : body.rows;
+    if (eligibleRows.length === 0) {
+      return NextResponse.json({ error: 'Não há pedidos CIF elegíveis para a frota própria.' }, { status: 422 });
+    }
+
     const config: EngineConfig = {
       maxVolumeM3:     body.config?.maxVolumeM3     ?? 30,
       maxWeightKg:     body.config?.maxWeightKg     ?? 10000,
@@ -25,9 +35,18 @@ export async function POST(req: NextRequest) {
       originName:      body.config?.originName      ?? 'Filial',
       originLat:       body.config?.originLat       ?? -7.2306,  // Campina Grande default
       originLng:       body.config?.originLng       ?? -35.8811,
+      maxStops:        body.config?.maxStops        ?? 10,
+      minVolumeM3:     body.config?.minVolumeM3     ?? 10,
+      corridorAngle:   body.config?.corridorAngle   ?? 60,
+      prioritizeAging: body.config?.prioritizeAging ?? true,
+      returnToOrigin:  body.config?.returnToOrigin  ?? false,
+      roadFactor:      body.config?.roadFactor      ?? 1.22,
+      averageSpeed:    body.config?.averageSpeed    ?? 55,
+      serviceMinutes:  body.config?.serviceMinutes  ?? 40,
+      maxHours:        body.config?.maxHours        ?? 72,
     };
 
-    const result = generateRoutes(body.rows, config);
+    const result = generateRoutes(eligibleRows, config);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[routerizador/generate]', err);

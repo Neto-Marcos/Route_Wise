@@ -35,6 +35,16 @@ export interface EngineConfig {
   /** Lat/lng da origem */
   originLat: number;
   originLng: number;
+  /** Máximo de destinos distintos por rota */
+  maxStops?: number;
+  minVolumeM3?: number;
+  corridorAngle?: number;
+  prioritizeAging?: boolean;
+  returnToOrigin?: boolean;
+  roadFactor?: number;
+  averageSpeed?: number;
+  serviceMinutes?: number;
+  maxHours?: number;
 }
 
 export interface SuggestedStop {
@@ -66,6 +76,12 @@ export interface SuggestedRoute {
   cityPath: string[];
   /** Aviso se acima de 85% */
   warning?: string;
+  estimatedKm?: number;
+  estimatedDurationMin?: number;
+  costEstimateMin?: number;
+  costEstimateMax?: number;
+  maxAgingDays?: number;
+  state?: string;
 }
 
 export interface EngineResult {
@@ -184,6 +200,16 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function bearingDeg(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (n: number) => n * Math.PI / 180;
+  const toDeg = (n: number) => n * 180 / Math.PI;
+  const y = Math.sin(toRad(lng2 - lng1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lng2 - lng1));
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+function angleDiff(a: number, b: number) { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
+function agingDays(order: OrderRow) { const date = order.closedAt ? new Date(order.closedAt) : null; return !date || Number.isNaN(date.getTime()) ? 0 : Math.max(0, Math.floor((Date.now() - date.getTime()) / 86_400_000)); }
+
 /** Obtém coordenadas de uma cidade (normalizada) */
 function getCityCoords(city: string): [number, number] | null {
   const key = normCity(city);
@@ -209,26 +235,30 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     originLng,
   } = config;
 
-  // 1. Agrupar pedidos por cidade (normalizada)
-  const byCity = new Map<string, { orders: OrderRow[]; coords: [number, number] | null }>();
+  // 1. Agrupar por UF + cidade. Nunca se mistura estados, mesmo quando duas
+  // cidades são próximas: essa é uma regra operacional da carteira.
+  const byCity = new Map<string, { city: string; uf: string; orders: OrderRow[]; coords: [number, number] | null }>();
   const unassigned: OrderRow[] = [];
 
   for (const o of orders) {
-    const key = normCity(o.city);
+    if (o.volumeM3 > maxVolumeM3 || o.weightKg > maxWeightKg) { unassigned.push(o); continue; }
+    const city = normCity(o.city);
+    const uf = (o.uf ?? '').trim().toUpperCase();
+    const key = `${uf}|${city}`;
     if (!byCity.has(key)) {
-      byCity.set(key, { orders: [], coords: getCityCoords(o.city) });
+      byCity.set(key, { city, uf, orders: [], coords: getCityCoords(o.city) });
     }
     byCity.get(key)!.orders.push(o);
   }
 
   // 2. Clusterizar cidades próximas (Haversine ≤ clusterRadiusKm)
-  type CityGroup = { cities: string[]; coords: [number, number]; orders: OrderRow[] };
+  type CityGroup = { uf: string; cities: string[]; coords: [number, number]; bearing: number; orders: OrderRow[] };
   const groups: CityGroup[] = [];
 
-  for (const [city, { orders: cityOrders, coords }] of byCity.entries()) {
+  for (const { city, uf, orders: cityOrders, coords } of byCity.values()) {
     if (!coords) {
       // Sem coordenadas: adiciona como grupo solo
-      groups.push({ cities: [city], coords: [originLat, originLng], orders: cityOrders });
+      groups.push({ uf, cities: [city], coords: [originLat, originLng], bearing: 0, orders: cityOrders });
       continue;
     }
 
@@ -236,7 +266,9 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     let merged = false;
     for (const g of groups) {
       const dist = haversineKm(g.coords[0], g.coords[1], coords[0], coords[1]);
-      if (dist <= clusterRadiusKm) {
+      const candidateBearing = bearingDeg(originLat, originLng, coords[0], coords[1]);
+      const sameCorridor = angleDiff(g.bearing, candidateBearing) <= (config.corridorAngle ?? 60);
+      if (g.uf === uf && sameCorridor && dist <= clusterRadiusKm) {
         g.cities.push(city);
         g.orders.push(...cityOrders);
         // Atualiza centroide (média ponderada simples)
@@ -244,12 +276,13 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
           (g.coords[0] + coords[0]) / 2,
           (g.coords[1] + coords[1]) / 2,
         ];
+        g.bearing = bearingDeg(originLat, originLng, g.coords[0], g.coords[1]);
         merged = true;
         break;
       }
     }
     if (!merged) {
-      groups.push({ cities: [city], coords, orders: cityOrders });
+      groups.push({ uf, cities: [city], coords, bearing: bearingDeg(originLat, originLng, coords[0], coords[1]), orders: cityOrders });
     }
   }
 
@@ -266,6 +299,10 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
   for (const group of groups) {
     // Ordena pedidos dentro do grupo por cidade e volume (desc)
     const sorted = [...group.orders].sort((a, b) => {
+      if (config.prioritizeAging) {
+        const ageDiff = agingDays(b) - agingDays(a);
+        if (ageDiff) return ageDiff;
+      }
       const cityDiff = normCity(a.city).localeCompare(normCity(b.city));
       if (cityDiff !== 0) return cityDiff;
       return b.volumeM3 - a.volumeM3;
@@ -279,8 +316,11 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     for (const order of sorted) {
       const willExceedVol = currentVol + order.volumeM3 > maxVolumeM3;
       const willExceedWt  = currentWt + order.weightKg  > maxWeightKg;
+      const existingCities = new Set(currentRoute.map((item) => `${item.uf ?? ''}|${normCity(item.city)}`));
+      const isNewStop = !existingCities.has(`${order.uf ?? ''}|${normCity(order.city)}`);
+      const willExceedStops = Boolean(config.maxStops && isNewStop && existingCities.size >= config.maxStops);
 
-      if ((willExceedVol || willExceedWt) && currentRoute.length > 0) {
+      if ((willExceedVol || willExceedWt || willExceedStops) && currentRoute.length > 0) {
         // Fecha rota atual
         routes.push(buildRoute(routeIndex++, currentRoute, group, config));
         currentRoute = [];
@@ -319,7 +359,7 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
 function buildRoute(
   index: number,
   orders: OrderRow[],
-  group: { cities: string[]; coords: [number, number] },
+  group: { uf: string; cities: string[]; coords: [number, number] },
   config: EngineConfig,
 ): SuggestedRoute {
   // Agrupar pedidos por cidade em paradas
@@ -364,6 +404,13 @@ function buildRoute(
   const totalBx  = stops.reduce((s, p) => s + p.boxes,     0);
   const totalOrd = orders.length;
   const occ = config.maxVolumeM3 > 0 ? (totalVol / config.maxVolumeM3) * 100 : 0;
+  let routeKm = 0, last: [number, number] = [config.originLat, config.originLng];
+  for (const stop of stops) { routeKm += haversineKm(last[0], last[1], stop.lat, stop.lng); last = [stop.lat, stop.lng]; }
+  if (config.returnToOrigin && stops.length) routeKm += haversineKm(last[0], last[1], config.originLat, config.originLng);
+  const estimatedKm = routeKm * (config.roadFactor ?? 1.22);
+  const estimatedDurationMin = estimatedKm / Math.max(20, config.averageSpeed ?? 55) * 60 + stops.length * (config.serviceMinutes ?? 40);
+  const maxAge = Math.max(0, ...orders.map(agingDays));
+  const warnings = [occ > 85 ? `Ocupação ${Math.round(occ)}% — verifique a carga` : "", config.minVolumeM3 && totalVol < config.minVolumeM3 ? `Abaixo do mínimo de ${config.minVolumeM3} m³` : "", config.maxHours && estimatedDurationMin > config.maxHours * 60 ? "Duração planejada excedida" : ""].filter(Boolean);
 
   const name = stops.length === 1
     ? `Rota ${index} — ${stops[0].city}`
@@ -379,7 +426,13 @@ function buildRoute(
     totalOrders: totalOrd,
     occupancyPct: Math.min(100, Math.round(occ)),
     cityPath: stops.map(s => s.city),
-    warning: occ > 85 ? `Ocupação ${Math.round(occ)}% — verifique a carga` : undefined,
+    warning: warnings.join(" · ") || undefined,
+    estimatedKm: parseFloat(estimatedKm.toFixed(1)),
+    estimatedDurationMin: Math.round(estimatedDurationMin),
+    costEstimateMin: parseFloat(((orders.reduce((sum, order) => sum + (order.totalValue ?? 0), 0)) * .03).toFixed(2)),
+    costEstimateMax: parseFloat(((orders.reduce((sum, order) => sum + (order.totalValue ?? 0), 0)) * .05).toFixed(2)),
+    maxAgingDays: maxAge,
+    state: group.uf,
   };
 }
 

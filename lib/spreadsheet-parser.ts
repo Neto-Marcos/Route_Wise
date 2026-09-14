@@ -34,6 +34,10 @@ export interface OrderRow {
   uf?: string;
   /** Descrição de mercadorias / produtos (opcional) */
   products?: string;
+  /** Campos normalizados quando a origem os disponibiliza. */
+  freightType?: "CIF" | "FOB" | "";
+  closedAt?: string;
+  totalValue?: number;
   /** Qualquer campo extra da planilha */
   extra: Record<string, string>;
 }
