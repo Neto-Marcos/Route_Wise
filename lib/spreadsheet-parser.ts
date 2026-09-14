@@ -38,20 +38,20 @@ export interface OrderRow {
   extra: Record<string, string>;
 }
 
-// ─── Sinônimos de coluna ────────────────────────────────────────────────────
-const COL_CITY     = /cidade|munic[íi]pio|localidade|destino/i;
-const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome/i;
-const COL_ORDER    = /pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero/i;
-const COL_VOLUME   = /cubagem|volume|m3|m[³]|cbm/i;
-const COL_WEIGHT   = /peso/i;
-const COL_BOXES    = /caixas|volumes|qtd|quantidade/i;
-const COL_ADDRESS  = /endere[cç]o|logradouro|rua/i;
-const COL_UF       = /^(uf|sigla\s*uf|estado)$/i;
-const COL_PRODUCTS = /produto|mercadoria|itens/i;
-const COL_STATUS   = /situa[cç][aã]o|status|situacao/i;
+// ─── Sinônimos de coluna expandidos ──────────────────────────────────────────
+const COL_CITY     = /cidade|munic[íi]pio|localidade|destino|praca|pra[çc]a|mun\b/i;
+const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*(do\s*cliente)?|dest\b/i;
+const COL_ORDER    = /pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero|chave|doc/i;
+const COL_VOLUME   = /cubagem|volume|m3|m[³]|cbm|m\^3/i;
+const COL_WEIGHT   = /peso|peso\s*bruto|kg\b/i;
+const COL_BOXES    = /caixas|volumes|qtd|quantidade|pecas|pe[çc]as|volume\s*total/i;
+const COL_ADDRESS  = /endere[cç]o|logradouro|rua|bairro/i;
+const COL_UF       = /^(uf|sigla\s*uf|estado|sigla)$/i;
+const COL_PRODUCTS = /produto|mercadoria|itens|item|descri[cç][aã]o/i;
+const COL_STATUS   = /situa[cç][aã]o|status|situacao|fase/i;
 
-// Situações elegíveis para roteirização
-const ELIGIBLE_STATUS = /rota\s*filial|aguardando|pendente|a\s*entregar/i;
+// Situações que devem ser EXCLUÍDAS se houver coluna de status
+const INELIGIBLE_STATUS = /cancelad[ao]|entregu?e?|devolvid[ao]|estornad[ao]/i;
 
 function matchCol(headers: string[], pattern: RegExp): number {
   return headers.findIndex(h => pattern.test(h.trim()));
@@ -120,8 +120,128 @@ function normalizeCsvRow(
 }
 
 /**
+ * Tenta parsear os dados de uma única planilha/aba (sheet)
+ */
+function parseSheetData(raw: unknown[][]): OrderRow[] {
+  if (!raw || raw.length < 2) return [];
+
+  // Encontra a linha de cabeçalho (pode não ser a linha 0 se houver títulos no topo)
+  let headerRowIdx = -1;
+  let headers: string[] = [];
+  let iCity = -1;
+  let iClient = -1;
+  let iOrder = -1;
+
+  for (let r = 0; r < Math.min(raw.length, 12); r++) {
+    const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h).toLowerCase());
+    const cCity = matchCol(candidateRow, COL_CITY);
+    const cClient = matchCol(candidateRow, COL_CLIENT);
+    const cOrder = matchCol(candidateRow, COL_ORDER);
+
+    // Consideramos cabeçalho se encontrar ao menos (cidade E cliente) ou (cidade E pedido) ou (cliente E pedido)
+    const matches = [cCity >= 0, cClient >= 0, cOrder >= 0].filter(Boolean).length;
+    if (matches >= 2 || (cCity >= 0 && candidateRow.length >= 3)) {
+      headerRowIdx = r;
+      headers = candidateRow;
+      iCity = cCity;
+      iClient = cClient;
+      iOrder = cOrder;
+      break;
+    }
+  }
+
+  // Fallback: usa primeira linha não-vazia como cabeçalho se não encontrou cabeçalho óbvio
+  if (headerRowIdx === -1) {
+    for (let r = 0; r < Math.min(raw.length, 5); r++) {
+      const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h).toLowerCase());
+      if (candidateRow.filter(Boolean).length >= 2) {
+        headerRowIdx = r;
+        headers = candidateRow;
+        iCity = matchCol(headers, COL_CITY);
+        iClient = matchCol(headers, COL_CLIENT);
+        iOrder = matchCol(headers, COL_ORDER);
+        break;
+      }
+    }
+  }
+
+  if (headerRowIdx === -1) return [];
+
+  const iVolume   = matchCol(headers, COL_VOLUME);
+  const iWeight   = matchCol(headers, COL_WEIGHT);
+  const iBoxes    = matchCol(headers, COL_BOXES);
+  const iAddress  = matchCol(headers, COL_ADDRESS);
+  const iUf       = matchCol(headers, COL_UF);
+  const iProducts = matchCol(headers, COL_PRODUCTS);
+  const iStatus   = matchCol(headers, COL_STATUS);
+
+  const rows: OrderRow[] = [];
+
+  for (let r = headerRowIdx + 1; r < raw.length; r++) {
+    let row = raw[r] as unknown[];
+    if (!row || row.every(c => !toStr(c))) continue; // linha vazia
+
+    if (row.length > headers.length) {
+      row = normalizeCsvRow(row, headers, iVolume, iWeight);
+    }
+
+    // Filtro de status não-bloqueante: só exclui se for explicitamente cancelado ou entregue
+    if (iStatus >= 0) {
+      const status = toStr(row[iStatus]);
+      if (status && INELIGIBLE_STATUS.test(status)) continue;
+    }
+
+    const city   = iCity   >= 0 ? toStr(row[iCity])   : '';
+    const client = iClient >= 0 ? toStr(row[iClient]) : '';
+    const order  = iOrder  >= 0 ? toStr(row[iOrder])  : `L${r}`;
+    const vol    = iVolume >= 0 ? toFloat(row[iVolume]) : 0;
+    const wt     = iWeight >= 0 ? toFloat(row[iWeight]) : 0;
+    const bx     = iBoxes  >= 0 ? toFloat(row[iBoxes])  : 0;
+    const addr   = iAddress >= 0 ? toStr(row[iAddress]) : undefined;
+    const uf     = iUf     >= 0 ? toStr(row[iUf])     : undefined;
+    const prod   = iProducts >= 0 ? toStr(row[iProducts]) : undefined;
+
+    // Precisa ter pelo menos algum dado mínimo (cidade OU cliente OU pedido)
+    if (!city && !client && (!order || order.startsWith("L"))) continue;
+
+    // Se não tiver cidade, mas tiver UF ou endereço ou cliente, usa cliente como ponto de parada
+    const safeCity = city || (uf ? `Destino ${uf}` : (client || "Cidade a definir"));
+
+    // Coleta campos extras
+    const extra: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iAddress, iUf, iProducts, iStatus].includes(i)) {
+        const v = toStr(row[i]);
+        if (v) extra[headers[i]] = v;
+      }
+    });
+
+    const safeBoxes = bx >= 1 ? Math.round(bx) : 1;
+    const safeVol = vol > 0 ? vol : 0.5;
+    const safeWt = wt > 0 ? wt : 50;
+
+    rows.push({
+      city: safeCity,
+      client: client || "Cliente Geral",
+      clientName: client || "Cliente Geral",
+      orderId: order,
+      volumeM3: safeVol,
+      weightKg: safeWt,
+      boxes: safeBoxes,
+      address: addr,
+      uf,
+      products: prod,
+      extra,
+    });
+  }
+
+  return rows;
+}
+
+/**
  * Parseia uma planilha a partir de um ArrayBuffer (xlxs ou csv).
  * Usa SheetJS (xlsx) com preservação estrita de UTF-8 e decodificação automática.
+ * Escaneia a melhor aba ou faz fallback para as demais abas se vazia.
  */
 export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): Promise<OrderRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -174,92 +294,26 @@ export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): 
     workbook = XLSX.read(text, { type: 'string', cellDates: true, raw: true });
   }
 
-  // Tenta encontrar a aba mais relevante
-  const sheetName = pickSheet(workbook.SheetNames, filename);
-  const sheet = workbook.Sheets[sheetName];
+  // Ordena as abas preferindo abas com nomes de carteira/rota
+  const preferredRegex = /rota|carteira|pedido|entrega|nf|dados/i;
+  const sortedSheetNames = [...workbook.SheetNames].sort((a, b) => {
+    const aPref = preferredRegex.test(a) ? 1 : 0;
+    const bPref = preferredRegex.test(b) ? 1 : 0;
+    return bPref - aPref;
+  });
 
-  const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-  if (raw.length < 2) return [];
-
-  // Linha de cabeçalho
-  const headers = (raw[0] as unknown[]).map(h => toStr(h).toLowerCase());
-
-  const iCity     = matchCol(headers, COL_CITY);
-  const iClient   = matchCol(headers, COL_CLIENT);
-  const iOrder    = matchCol(headers, COL_ORDER);
-  const iVolume   = matchCol(headers, COL_VOLUME);
-  const iWeight   = matchCol(headers, COL_WEIGHT);
-  const iBoxes    = matchCol(headers, COL_BOXES);
-  const iAddress  = matchCol(headers, COL_ADDRESS);
-  const iUf       = matchCol(headers, COL_UF);
-  const iProducts = matchCol(headers, COL_PRODUCTS);
-  const iStatus   = matchCol(headers, COL_STATUS);
-
-  const rows: OrderRow[] = [];
-
-  for (let r = 1; r < raw.length; r++) {
-    let row = raw[r] as unknown[];
-    if (row.every(c => !toStr(c))) continue; // linha vazia
-
-    if (row.length > headers.length) {
-      row = normalizeCsvRow(row, headers, iVolume, iWeight);
+  // Tenta extrair pedidos da aba preferida, e se der vazio, tenta as outras
+  for (const name of sortedSheetNames) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
+    const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const orders = parseSheetData(raw);
+    if (orders.length > 0) {
+      return orders;
     }
-
-    // Filtro de situação: só inclui pedidos elegíveis para roteirização
-    if (iStatus >= 0) {
-      const status = toStr(row[iStatus]);
-      if (status && !ELIGIBLE_STATUS.test(status)) continue;
-    }
-
-    const city   = iCity   >= 0 ? toStr(row[iCity])   : '';
-    const client = iClient >= 0 ? toStr(row[iClient]) : '';
-    const order  = iOrder  >= 0 ? toStr(row[iOrder])  : `L${r}`;
-    const vol    = iVolume >= 0 ? toFloat(row[iVolume]) : 0;
-    const wt     = iWeight >= 0 ? toFloat(row[iWeight]) : 0;
-    const bx     = iBoxes  >= 0 ? toFloat(row[iBoxes])  : 0;
-    const addr   = iAddress >= 0 ? toStr(row[iAddress]) : undefined;
-    const uf     = iUf     >= 0 ? toStr(row[iUf])     : undefined;
-    const prod   = iProducts >= 0 ? toStr(row[iProducts]) : undefined;
-
-    if (!city && !client) continue; // linha sem dados úteis
-
-    // Coleta campos extras
-    const extra: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iAddress, iUf, iProducts, iStatus].includes(i)) {
-        const v = toStr(row[i]);
-        if (v) extra[headers[i]] = v;
-      }
-    });
-
-    const safeBoxes = bx >= 1 ? Math.round(bx) : 1;
-    const safeVol = vol > 0 ? vol : 0.5;
-    const safeWt = wt > 0 ? wt : 50;
-
-    rows.push({
-      city,
-      client,
-      clientName: client,
-      orderId: order,
-      volumeM3: safeVol,
-      weightKg: safeWt,
-      boxes: safeBoxes,
-      address: addr,
-      uf,
-      products: prod,
-      extra,
-    });
   }
 
-  return rows;
-}
-
-/** Escolhe a aba mais relevante baseado no nome */
-function pickSheet(names: string[], filename?: string): string {
-  // Prefere abas com nomes relacionados a rota/carteira
-  const preferred = /rota|carteira|pedido|entrega/i;
-  const match = names.find(n => preferred.test(n));
-  return match ?? names[0];
+  return [];
 }
 
 /** Agrupa OrderRow por cidade para exibição resumida */
