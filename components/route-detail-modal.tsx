@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -77,6 +77,54 @@ export type DetailedRoute = {
   }>;
 };
 
+function SavedRouteMap({
+  stops,
+  selectedStopId,
+  onSelectStop,
+}: {
+  stops: NonNullable<DetailedRoute["stops"]>;
+  selectedStopId: string | null;
+  onSelectStop: (stopId: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const validStops = stops.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)));
+      if (!validStops.length || !containerRef.current) return;
+      const L = (await import("leaflet")).default;
+      if (!mounted || !containerRef.current) return;
+      mapRef.current?.remove();
+      const points = validStops.map((stop) => [Number(stop.lat), Number(stop.lng)] as [number, number]);
+      const selected = validStops.find((stop) => stop.id === selectedStopId);
+      const map = L.map(containerRef.current, { zoomControl: true });
+      mapRef.current = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+      if (selected) map.setView([Number(selected.lat), Number(selected.lng)], 11);
+      else map.fitBounds(L.latLngBounds(points).pad(0.18));
+      L.polyline(points, { color: "#2563eb", weight: 4, opacity: 0.75 }).addTo(map);
+      validStops.forEach((stop, index) => {
+        const active = stop.id === selectedStopId;
+        const marker = L.circleMarker([Number(stop.lat), Number(stop.lng)], {
+          radius: active ? 12 : 8,
+          color: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
+          fillColor: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
+          fillOpacity: 0.95,
+          weight: 3,
+        }).addTo(map);
+        marker.bindTooltip(stop.is_origin ? "Origem" : `${index}ª parada · ${stop.name}`, { direction: "top" });
+        marker.on("click", () => onSelectStop(stop.id));
+      });
+    })();
+    return () => { mounted = false; mapRef.current?.remove(); mapRef.current = null; };
+  }, [stops, selectedStopId, onSelectStop]);
+
+  if (!stops.some((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))) return null;
+  return <div ref={containerRef} style={{ height: 300, borderRadius: 12, overflow: "hidden", border: "1px solid var(--line)", marginTop: 10 }} />;
+}
+
 export function RouteDetailModal({
   routeId,
   onClose,
@@ -95,6 +143,7 @@ export function RouteDetailModal({
     subtitle?: string;
   } | null>(null);
   const [editingStop, setEditingStop] = useState<string | null>(null);
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -255,6 +304,15 @@ export function RouteDetailModal({
             </div>
           </div>
 
+          <section className="detail-section">
+            <div className="section-title">
+              <MapPin size={16} />
+              <h3>Mapa da rota salva</h3>
+            </div>
+            <p className="detail-subtitle" style={{ margin: "0 0 8px" }}>Clique em uma parada abaixo ou em um ponto do mapa para localizá-la.</p>
+            <SavedRouteMap stops={route.stops || []} selectedStopId={selectedStopId} onSelectStop={setSelectedStopId} />
+          </section>
+
           {/* Odometer Section */}
           <section className="detail-section">
             <div className="section-title">
@@ -349,6 +407,9 @@ export function RouteDetailModal({
 
                       {!isOrigin && (
                         <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                          <button type="button" className="button secondary compact" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => setSelectedStopId(stop.id)}>
+                            <MapPin size={12} /> Ver no mapa
+                          </button>
                           <button
                             type="button"
                             className="button secondary compact"
