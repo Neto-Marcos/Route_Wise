@@ -38,16 +38,16 @@ export interface OrderRow {
   extra: Record<string, string>;
 }
 
-// ─── Sinônimos de coluna expandidos ──────────────────────────────────────────
-const COL_CITY     = /cidade|munic[íi]pio|localidade|destino|praca|pra[çc]a|mun\b/i;
-const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*(do\s*cliente)?|dest\b/i;
-const COL_ORDER    = /pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero|chave|doc/i;
-const COL_VOLUME   = /cubagem|volume|m3|m[³]|cbm|m\^3/i;
-const COL_WEIGHT   = /peso|peso\s*bruto|kg\b/i;
-const COL_BOXES    = /caixas|volumes|qtd|quantidade|pecas|pe[çc]as|volume\s*total/i;
+// ─── Sinônimos de coluna expandidos (compatível com Sabium, ERPs e carteiras) ─
+const COL_CITY     = /cidade|munic[íi]pio|localidade|destino|praca|pra[çc]a|mun\b|cidade\s*entrega/i;
+const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*(do\s*cliente)?|dest\b|comprador/i;
+const COL_ORDER    = /pedido\s*sabium|n[°º]?\s*pedido|num\s*pedido|numero\s*pedido|nro\s*pedido|cod\s*pedido|pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero\s*(do\s*pedido)?|chave|doc/i;
+const COL_VOLUME   = /volume\s*c[uú]bico|cubagem|volume|m3|m[³]|cbm|m\^3/i;
+const COL_WEIGHT   = /peso|peso\s*bruto|kg\b|peso\s*total/i;
+const COL_BOXES    = /quantidade|qtd|qtde|pecas|pe[çc]as|caixas|volumes|volume\s*total|total\s*item/i;
 const COL_ADDRESS  = /endere[cç]o|logradouro|rua|bairro/i;
 const COL_UF       = /^(uf|sigla\s*uf|estado|sigla)$/i;
-const COL_PRODUCTS = /produto|mercadoria|itens|item|descri[cç][aã]o/i;
+const COL_PRODUCTS = /c[oó]digo|cod\s*produto|c[oó]d\s*produto|produto|mercadoria|itens|item|descri[cç][aã]o/i;
 const COL_STATUS   = /situa[cç][aã]o|status|situacao|fase/i;
 
 // Situações que devem ser EXCLUÍDAS se houver coluna de status
@@ -125,41 +125,62 @@ function normalizeCsvRow(
 function parseSheetData(raw: unknown[][]): OrderRow[] {
   if (!raw || raw.length < 2) return [];
 
-  // Encontra a linha de cabeçalho (pode não ser a linha 0 se houver títulos no topo)
+  // Encontra a linha de cabeçalho por pontuação (score) ponderada
   let headerRowIdx = -1;
   let headers: string[] = [];
-  let iCity = -1;
-  let iClient = -1;
-  let iOrder = -1;
+  let bestScore = -1;
 
-  for (let r = 0; r < Math.min(raw.length, 12); r++) {
-    const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h).toLowerCase());
-    const cCity = matchCol(candidateRow, COL_CITY);
-    const cClient = matchCol(candidateRow, COL_CLIENT);
-    const cOrder = matchCol(candidateRow, COL_ORDER);
+  for (let r = 0; r < Math.min(raw.length, 35); r++) {
+    const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h));
+    const lowerCols = candidateRow.map(c => c.toLowerCase());
+    const cCity = matchCol(lowerCols, COL_CITY);
+    const cClient = matchCol(lowerCols, COL_CLIENT);
+    const cOrder = matchCol(lowerCols, COL_ORDER);
+    const cVol = matchCol(lowerCols, COL_VOLUME);
+    const cProd = matchCol(lowerCols, COL_PRODUCTS);
+    const cBoxes = matchCol(lowerCols, COL_BOXES);
+    const cStatus = matchCol(lowerCols, COL_STATUS);
+    const cUf = matchCol(lowerCols, COL_UF);
 
-    // Consideramos cabeçalho se encontrar ao menos (cidade E cliente) ou (cidade E pedido) ou (cliente E pedido)
-    const matches = [cCity >= 0, cClient >= 0, cOrder >= 0].filter(Boolean).length;
-    if (matches >= 2 || (cCity >= 0 && candidateRow.length >= 3)) {
+    let score = 0;
+    if (cOrder >= 0) score += 4;
+    if (cCity >= 0) score += 4;
+    if (cClient >= 0) score += 3;
+    if (cVol >= 0) score += 3;
+    if (cProd >= 0) score += 3;
+    if (cBoxes >= 0) score += 2;
+    if (cStatus >= 0) score += 2;
+    if (cUf >= 0) score += 2;
+
+    if (score > bestScore && score >= 4) {
+      bestScore = score;
       headerRowIdx = r;
-      headers = candidateRow;
-      iCity = cCity;
-      iClient = cClient;
-      iOrder = cOrder;
-      break;
+      headers = lowerCols;
     }
   }
 
-  // Fallback: usa primeira linha não-vazia como cabeçalho se não encontrou cabeçalho óbvio
+  // Fallback se score ponderado não atingiu 4: procura linha com ao menos 1 coluna chave
+  if (headerRowIdx === -1) {
+    for (let r = 0; r < Math.min(raw.length, 15); r++) {
+      const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h).toLowerCase());
+      const cCity = matchCol(candidateRow, COL_CITY);
+      const cClient = matchCol(candidateRow, COL_CLIENT);
+      const cOrder = matchCol(candidateRow, COL_ORDER);
+      if (cCity >= 0 || cOrder >= 0 || cClient >= 0) {
+        headerRowIdx = r;
+        headers = candidateRow;
+        break;
+      }
+    }
+  }
+
+  // Fallback 2: usa primeira linha não-vazia como cabeçalho
   if (headerRowIdx === -1) {
     for (let r = 0; r < Math.min(raw.length, 5); r++) {
       const candidateRow = (raw[r] as unknown[] || []).map(h => toStr(h).toLowerCase());
       if (candidateRow.filter(Boolean).length >= 2) {
         headerRowIdx = r;
         headers = candidateRow;
-        iCity = matchCol(headers, COL_CITY);
-        iClient = matchCol(headers, COL_CLIENT);
-        iOrder = matchCol(headers, COL_ORDER);
         break;
       }
     }
@@ -167,6 +188,9 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
 
   if (headerRowIdx === -1) return [];
 
+  const iCity     = matchCol(headers, COL_CITY);
+  const iClient   = matchCol(headers, COL_CLIENT);
+  const iOrder    = matchCol(headers, COL_ORDER);
   const iVolume   = matchCol(headers, COL_VOLUME);
   const iWeight   = matchCol(headers, COL_WEIGHT);
   const iBoxes    = matchCol(headers, COL_BOXES);
@@ -175,7 +199,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
   const iProducts = matchCol(headers, COL_PRODUCTS);
   const iStatus   = matchCol(headers, COL_STATUS);
 
-  const rows: OrderRow[] = [];
+  const rawLines: OrderRow[] = [];
 
   for (let r = headerRowIdx + 1; r < raw.length; r++) {
     let row = raw[r] as unknown[];
@@ -193,7 +217,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
 
     const city   = iCity   >= 0 ? toStr(row[iCity])   : '';
     const client = iClient >= 0 ? toStr(row[iClient]) : '';
-    const order  = iOrder  >= 0 ? toStr(row[iOrder])  : `L${r}`;
+    let order    = iOrder  >= 0 ? toStr(row[iOrder])  : '';
     const vol    = iVolume >= 0 ? toFloat(row[iVolume]) : 0;
     const wt     = iWeight >= 0 ? toFloat(row[iWeight]) : 0;
     const bx     = iBoxes  >= 0 ? toFloat(row[iBoxes])  : 0;
@@ -201,7 +225,14 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     const uf     = iUf     >= 0 ? toStr(row[iUf])     : undefined;
     const prod   = iProducts >= 0 ? toStr(row[iProducts]) : undefined;
 
-    // Precisa ter pelo menos algum dado mínimo (cidade OU cliente OU pedido)
+    // Normalização de número de pedido (ex: 219667.0 -> 219667)
+    if (order) {
+      order = order.replace(/\.0+$/, '').trim();
+    } else {
+      order = `L${r}`;
+    }
+
+    // Precisa ter pelo menos algum dado mínimo (cidade OU cliente OU pedido com valor/volume)
     if (!city && !client && (!order || order.startsWith("L"))) continue;
 
     // Se não tiver cidade, mas tiver UF ou endereço ou cliente, usa cliente como ponto de parada
@@ -218,9 +249,9 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
 
     const safeBoxes = bx >= 1 ? Math.round(bx) : 1;
     const safeVol = vol > 0 ? vol : 0.5;
-    const safeWt = wt > 0 ? wt : 50;
+    const safeWt = wt > 0 ? wt : (safeVol > 0 ? safeVol * 150 : 50);
 
-    rows.push({
+    rawLines.push({
       city: safeCity,
       client: client || "Cliente Geral",
       clientName: client || "Cliente Geral",
@@ -235,7 +266,54 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     });
   }
 
-  return rows;
+  // ─── Consolidação / Agregação por Pedido (ERP Sabium / Linhas de Produto) ───
+  // Em planilhas de carteira Sabium, cada linha é um produto do mesmo pedido.
+  // Consolidamos os volumes, caixas, peso e lista de produtos por orderId.
+  const aggregatedOrders = new Map<string, OrderRow>();
+  const productDedupeByOrder = new Map<string, Set<string>>();
+
+  for (const line of rawLines) {
+    // Se o pedido for gerado por fallback (L1, L2, etc.), não agrupa com outros
+    const isFallbackId = line.orderId.startsWith("L");
+    const groupKey = isFallbackId ? `LINE_${line.orderId}_${Math.random()}` : line.orderId;
+
+    if (!aggregatedOrders.has(groupKey)) {
+      aggregatedOrders.set(groupKey, {
+        ...line,
+        products: line.products || "",
+        extra: { ...line.extra },
+      });
+      productDedupeByOrder.set(groupKey, new Set(line.products ? [line.products] : []));
+    } else {
+      const existing = aggregatedOrders.get(groupKey)!;
+      // Soma métricas operacionais
+      existing.volumeM3 = Math.round((existing.volumeM3 + line.volumeM3) * 1000) / 1000;
+      existing.weightKg = Math.round((existing.weightKg + line.weightKg) * 100) / 100;
+      existing.boxes += line.boxes;
+
+      // Completa dados ausentes
+      if ((!existing.client || existing.client === "Cliente Geral") && line.client && line.client !== "Cliente Geral") {
+        existing.client = line.client;
+        existing.clientName = line.client;
+      }
+      if ((!existing.city || existing.city === "Cidade a definir") && line.city && line.city !== "Cidade a definir") {
+        existing.city = line.city;
+      }
+      if (!existing.uf && line.uf) existing.uf = line.uf;
+      if (!existing.address && line.address) existing.address = line.address;
+
+      // Agrega produtos distintos
+      if (line.products) {
+        const prodSet = productDedupeByOrder.get(groupKey)!;
+        if (!prodSet.has(line.products)) {
+          prodSet.add(line.products);
+          existing.products = existing.products ? `${existing.products}, ${line.products}` : line.products;
+        }
+      }
+    }
+  }
+
+  return Array.from(aggregatedOrders.values());
 }
 
 /**
