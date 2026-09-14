@@ -2123,8 +2123,6 @@ function Overview({
         </section>
       </div>
 
-      <OperationsHub userRole={userRole} drivers={drivers} />
-
       {/* Task 1: Mapa ao vivo para o Organizador */}
       <section className="panel live-fleet-panel">
         <div className="panel-title">
