@@ -8,8 +8,8 @@ import {
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
-  ExternalLink,
   Loader2,
+  MapPin,
   Package,
   RefreshCw,
   Send,
@@ -280,14 +280,18 @@ function ReviewStep({
   result,
   filename,
   routeDate,
+  engineConfig,
   onBack,
   onDispatched,
+  onOpenInPlanner,
 }: {
   result: EngineResult;
   filename: string;
   routeDate: string;
+  engineConfig?: EngineConfig | null;
   onBack: () => void;
   onDispatched: (routeIds: string[]) => void;
+  onOpenInPlanner?: (route: SuggestedRoute, config?: EngineConfig | null) => void;
 }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -377,6 +381,32 @@ function ReviewStep({
                   <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>{route.totalOrders} pedidos · {route.stops.length} paradas · {fmt(route.totalVolumeM3)} m³</p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {onOpenInPlanner && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenInPlanner(route, engineConfig);
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        padding: "5px 10px",
+                        borderRadius: 8,
+                        background: "rgba(16,185,129,0.12)",
+                        color: "var(--green)",
+                        border: "1px solid rgba(16,185,129,0.3)",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                      title="Abrir esta rota diretamente no mapa interativo para conferir e editar paradas"
+                    >
+                      <MapPin size={13} />
+                      <span>Revisar no Mapa</span>
+                    </button>
+                  )}
                   {route.warning && <Badge text="⚠ Alto" color="amber" />}
                   {asgn.driverId && <Badge text="✓ Atribuído" color="green" />}
                   <OccupancyBar pct={route.occupancyPct} warning={route.warning} />
@@ -387,6 +417,31 @@ function ReviewStep({
               {/* Expanded */}
               {isOpen && (
                 <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--line)" }}>
+                  {/* Quick action bar inside card */}
+                  {onOpenInPlanner && (
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenInPlanner(route, engineConfig)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "7px 14px",
+                          borderRadius: 9,
+                          background: "var(--green)",
+                          color: "#fff",
+                          border: "none",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <MapPin size={14} /> Abrir e Revisar no Mapa Interativo
+                      </button>
+                    </div>
+                  )}
+
                   {/* LIFO order */}
                   <div style={{ marginTop: 14, marginBottom: 14 }}>
                     <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
@@ -493,8 +548,13 @@ function SuccessStep({ routeIds, onNew }: { routeIds: string[]; onNew: () => voi
 
 type Step = "upload" | "config" | "review" | "done";
 
-export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
-  const [viewMode, setViewMode] = useState<"original" | "wizard">("original");
+export default function RoteirizadorPage({
+  onBack,
+  onOpenInPlanner,
+}: {
+  onBack?: () => void;
+  onOpenInPlanner?: (route: SuggestedRoute, config?: EngineConfig | null) => void;
+}) {
   const [step, setStep] = useState<Step>("upload");
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [filename, setFilename] = useState("");
@@ -519,66 +579,6 @@ export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
   ];
   const stepIdx = steps.findIndex(s => s.key === step);
 
-  if (viewMode === "original") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 80px)", background: "var(--paper)", overflow: "hidden" }}>
-        {/* Barra superior com botão Voltar e alternador */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", borderBottom: "1px solid var(--line)", background: "var(--card)", flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="button secondary compact"
-                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, height: 34 }}
-              >
-                <ArrowLeft size={15} /> Voltar ao Painel
-              </button>
-            )}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <FileSpreadsheet size={20} color="#10b981" />
-              <b style={{ fontSize: 15, color: "var(--ink)" }}>Roteirizador de Entregas (Oficial)</b>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setViewMode("wizard")}
-              className="button secondary compact"
-              style={{ fontSize: 12, height: 34 }}
-              title="Alternar para o assistente de upload em 4 etapas"
-            >
-              📋 Assistente de Planilhas
-            </button>
-            <a
-              href="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="button primary compact"
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, height: 34, background: "#0284c7", border: "none", textDecoration: "none" }}
-            >
-              <ExternalLink size={14} /> Abrir em Nova Guia
-            </a>
-          </div>
-        </div>
-
-        {/* Iframe embutido ocupando 100% da tela */}
-        <iframe
-          src="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
-          title="Roteirizador de Entregas Funcional"
-          style={{
-            flex: 1,
-            width: "100%",
-            height: "100%",
-            border: "none",
-            background: "#07111f",
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: "100dvh", background: "var(--paper)", color: "var(--ink)" }}>
       {/* Header */}
@@ -594,14 +594,6 @@ export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
             <b style={{ fontSize: 16, letterSpacing: "-.02em" }}>Roteirizador Automático</b>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setViewMode("original")}
-              className="button secondary compact"
-              style={{ fontSize: 12, height: 32 }}
-            >
-              🚀 Roteirizador Original
-            </button>
             {step !== "done" && (
               <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12 }}>
                 <X size={13} /> Reiniciar
@@ -640,8 +632,10 @@ export default function RoteirizadorPage({ onBack }: { onBack?: () => void }) {
             result={engineResult}
             filename={filename}
             routeDate={engineConfig?.routeDate ?? new Date().toISOString().slice(0, 10)}
+            engineConfig={engineConfig}
             onBack={() => setStep("config")}
             onDispatched={(ids) => { setDispatchedIds(ids); setStep("done"); }}
+            onOpenInPlanner={onOpenInPlanner}
           />
         )}
         {step === "done" && (

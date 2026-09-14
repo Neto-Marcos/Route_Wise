@@ -59,6 +59,7 @@ import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
 import { printElement } from "@/lib/print-document";
 import RoteirizadorPage from "./roteirizador-page";
+import type { SuggestedRoute, EngineConfig } from "@/lib/route-engine";
 import { SSWTrackingView } from "./ssw-tracking-view";
 
 type DispatcherUser = {
@@ -1616,10 +1617,44 @@ function Dispatcher({
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
+  const [importedPlannerData, setImportedPlannerData] = useState<{
+    stops: Stop[];
+    name?: string;
+    date?: string;
+  } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
     setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
   }, []);
+
+  const handleOpenRouteInPlanner = (suggested: SuggestedRoute, engineConfig?: EngineConfig | null) => {
+    const originStop: Stop = {
+      id: crypto.randomUUID(),
+      name: engineConfig?.originName ? `Origem (${engineConfig.originName})` : "Origem (CD Base)",
+      address: "Base Operacional de Distribuição",
+      lat: engineConfig?.originLat ?? -7.2306,
+      lng: engineConfig?.originLng ?? -35.8811,
+      is_origin: true,
+    };
+
+    const deliveryStops: Stop[] = (suggested.stops || []).map((s) => ({
+      id: crypto.randomUUID(),
+      name: s.clientName ? `${s.clientName} - ${s.city}` : s.city,
+      address: s.address || s.city,
+      lat: s.lat,
+      lng: s.lng,
+      boxes: s.boxes,
+      volume_m3: s.volumeM3,
+      is_origin: false,
+    }));
+
+    setImportedPlannerData({
+      stops: [originStop, ...deliveryStops],
+      name: suggested.name || "Rota Importada",
+      date: engineConfig?.routeDate || new Date().toISOString().slice(0, 10),
+    });
+    setTab("planner");
+  };
 
   const load = useCallback(
     () =>
@@ -1879,7 +1914,14 @@ function Dispatcher({
           </div>
         </header>
         {message && <p className="form-error">{message}</p>}
-        {tab === "planner" && <RoutePlannerView onDone={load} />}
+        {tab === "planner" && (
+          <RoutePlannerView
+            onDone={load}
+            initialStops={importedPlannerData?.stops}
+            initialRouteName={importedPlannerData?.name}
+            initialRouteDate={importedPlannerData?.date}
+          />
+        )}
         {tab === "overview" && (
           <Overview
             routes={routes}
@@ -1917,7 +1959,10 @@ function Dispatcher({
           />
         )}
         {tab === "roteirizador" && (
-          <RoteirizadorPage onBack={() => setTab(userRole === "admin" ? "overview" : "roteirizador")} />
+          <RoteirizadorPage
+            onBack={() => setTab(userRole === "admin" ? "overview" : "roteirizador")}
+            onOpenInPlanner={handleOpenRouteInPlanner}
+          />
         )}
         {tab === "ssw" && (
           <SSWTrackingView onBack={() => setTab(userRole === "admin" ? "overview" : "ssw")} />
@@ -2955,13 +3000,19 @@ function RoutePlannerView({
   onDone,
   onSwitchToDispatcher,
   onSwitchToDriver,
+  initialStops,
+  initialRouteName,
+  initialRouteDate,
 }: {
   onClose?: () => void;
   onDone?: () => void;
   onSwitchToDispatcher?: () => void;
   onSwitchToDriver?: () => void;
+  initialStops?: Stop[];
+  initialRouteName?: string;
+  initialRouteDate?: string;
 }) {
-  const [stops, setStops] = useState<Stop[]>([]);
+  const [stops, setStops] = useState<Stop[]>(initialStops || []);
   const [mobileShowMap, setMobileShowMap] = useState(false);
   const [queryText, setQueryText] = useState("");
   const [results, setResults] = useState<Stop[]>([]);
@@ -2974,8 +3025,8 @@ function RoutePlannerView({
   const [circular, setCircular] = useState(false);
   const [showStations, setShowStations] = useState(true);
   const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">("distance");
-  const [routeName, setRouteName] = useState("");
-  const [routeDate, setRouteDate] = useState(new Date().toLocaleDateString("en-CA"));
+  const [routeName, setRouteName] = useState(initialRouteName || "");
+  const [routeDate, setRouteDate] = useState(initialRouteDate || new Date().toLocaleDateString("en-CA"));
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -2983,6 +3034,14 @@ function RoutePlannerView({
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const optimizeRef = useRef<() => void>(() => {});
   const lastOptimizedCoordsRef = useRef<string>("");
+
+  useEffect(() => {
+    if (initialStops && initialStops.length > 0) {
+      setStops(initialStops);
+      if (initialRouteName) setRouteName(initialRouteName);
+      if (initialRouteDate) setRouteDate(initialRouteDate);
+    }
+  }, [initialStops, initialRouteName, initialRouteDate]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -3935,6 +3994,9 @@ function RouteMap({ stops, geometry, visible, showStations = true }: { stops: St
         stationsLayerRef.current = null;
         leafletRef.current = null;
         setMapReady(false);
+      }
+      if (mapElement.current && (mapElement.current as any)._leaflet_id) {
+        delete (mapElement.current as any)._leaflet_id;
       }
     };
   }, []);

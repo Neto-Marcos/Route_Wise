@@ -210,6 +210,9 @@ export function DriverLiveMap({
         mapInstance.current.remove();
         mapInstance.current = null;
       }
+      if ((mapElement.current as any)._leaflet_id) {
+        delete (mapElement.current as any)._leaflet_id;
+      }
 
       const initialCenter: [number, number] = currentLocation
         ? [currentLocation.lat, currentLocation.lng]
@@ -357,10 +360,13 @@ export function DriverLiveMap({
       cancelled = true;
       if (mapInstance.current) {
         mapInstance.current.remove();
-      mapInstance.current = null;
-      stationsLayerGroup.current = null;
-      restLayerGroup.current = null;
-      setMapReady(false);
+        mapInstance.current = null;
+        stationsLayerGroup.current = null;
+        restLayerGroup.current = null;
+        setMapReady(false);
+      }
+      if (mapElement.current && (mapElement.current as any)._leaflet_id) {
+        delete (mapElement.current as any)._leaflet_id;
       }
     };
   }, [stops, nextStop?.id]);

@@ -35,7 +35,13 @@ export function LiveFleetMap({
 
     import("leaflet").then((L) => {
       if (cancelled || !mapElement.current) return;
-      if (mapInstance.current) return;
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+      if ((mapElement.current as any)._leaflet_id) {
+        delete (mapElement.current as any)._leaflet_id;
+      }
 
       const map = L.map(mapElement.current, { zoomControl: true }).setView(
         [-15.78, -47.93],
@@ -61,6 +67,9 @@ export function LiveFleetMap({
         mapInstance.current.remove();
         mapInstance.current = null;
         markersLayer.current = null;
+      }
+      if (mapElement.current && (mapElement.current as any)._leaflet_id) {
+        delete (mapElement.current as any)._leaflet_id;
       }
       if (typeof window !== "undefined") {
         delete (window as any).__selectRoute;
