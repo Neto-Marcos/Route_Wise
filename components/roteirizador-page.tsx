@@ -88,6 +88,31 @@ function estimateRouteHours(stops: number, distKm: number, speedKmh: number, ser
   return `${h}h${String(m).padStart(2, "0")}`;
 }
 
+function RoutePointMap({ route, selectedStop }: { route: SuggestedRoute; selectedStop: SuggestedRoute["stops"][number] | null }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (!mounted || !containerRef.current) return;
+      mapRef.current?.remove();
+      const focus = selectedStop ?? route.stops[0];
+      if (!focus || !Number.isFinite(focus.lat) || !Number.isFinite(focus.lng)) return;
+      const map = L.map(containerRef.current, { zoomControl: true }).setView([focus.lat, focus.lng], 10);
+      mapRef.current = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+      route.stops.forEach((stop) => {
+        const active = stop.position === focus.position;
+        L.circleMarker([stop.lat, stop.lng], { radius: active ? 12 : 7, color: active ? "#f59e0b" : "#38bdf8", fillColor: active ? "#f59e0b" : "#38bdf8", fillOpacity: .92, weight: 3 }).addTo(map)
+          .bindPopup(`<strong>${stop.position}ª entrega · ${stop.city}</strong><br/>${stop.clientName || "Cliente"}`);
+      });
+    })();
+    return () => { mounted = false; mapRef.current?.remove(); mapRef.current = null; };
+  }, [route, selectedStop]);
+  return <div ref={containerRef} style={{ height: 280, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(56,189,248,.25)", marginBottom: 12 }} />;
+}
+
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -512,6 +537,7 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [assignments, setAssignments] = useState<Record<number, { driverId: string; vehicleId: string }>>({});
   const [detailRoute, setDetailRoute] = useState<SuggestedRoute | null>(null);
+  const [selectedStop, setSelectedStop] = useState<SuggestedRoute["stops"][number] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -612,7 +638,7 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
                   onMouseLeave={e => { if (!isDetail) e.currentTarget.style.background = "transparent"; }}
                 >
                   <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
-                    <button onClick={() => setDetailRoute(isDetail ? null : route)} style={{ background: "none", border: "none", cursor: "pointer", color: "#38bdf8", fontWeight: 700, fontSize: 12, padding: 0, textDecoration: "underline" }}>
+                    <button onClick={() => { setDetailRoute(isDetail ? null : route); setSelectedStop(isDetail ? null : route.stops[0] ?? null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#38bdf8", fontWeight: 700, fontSize: 12, padding: 0, textDecoration: "underline" }}>
                       Dedicada {route.index}
                     </button>
                   </td>
@@ -700,9 +726,11 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
           <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.3)", textTransform: "uppercase", letterSpacing: ".1em" }}>
             📦 Ordem de Carregamento (LIFO — última entrega = primeira a carregar)
           </p>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(255,255,255,.55)" }}>Clique em uma cidade abaixo para localizá-la no mapa.</p>
+          <RoutePointMap route={detailRoute} selectedStop={selectedStop} />
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
             {[...detailRoute.stops].sort((a, b) => a.loadingSequence - b.loadingSequence).map(stop => (
-              <div key={stop.position} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)" }}>
+              <div role="button" tabIndex={0} key={stop.position} onClick={() => setSelectedStop(stop)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedStop(stop); }} style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, background: selectedStop?.position === stop.position ? "rgba(245,158,11,.12)" : "rgba(255,255,255,.03)", border: selectedStop?.position === stop.position ? "1px solid rgba(245,158,11,.5)" : "1px solid rgba(255,255,255,.06)", cursor: "pointer", color: "inherit" }}>
                 <span style={{ display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: "50%", background: "rgba(56,189,248,.15)", color: "#38bdf8", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{stop.loadingSequence}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#e2e8f0" }}>{stop.city}</p>
