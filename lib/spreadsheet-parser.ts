@@ -40,9 +40,9 @@ export interface OrderRow {
 
 // ─── Sinônimos de coluna expandidos (compatível com Sabium, ERPs e carteiras) ─
 const COL_CITY     = /cidade|munic[íi]pio|localidade|destino|praca|pra[çc]a|mun\b|cidade\s*entrega/i;
-const COL_CLIENT   = /cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*(do\s*cliente)?|dest\b|comprador/i;
+const COL_CLIENT   = /^nome$|cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*(do\s*cliente)?|dest\b|comprador/i;
 const COL_ORDER    = /pedido\s*sabium|n[°º]?\s*pedido|num\s*pedido|numero\s*pedido|nro\s*pedido|cod\s*pedido|pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero\s*(do\s*pedido)?|chave|doc/i;
-const COL_VOLUME   = /volume\s*c[uú]bico|cubagem|volume|m3|m[³]|cbm|m\^3/i;
+const COL_VOLUME   = /volume\s*c[uú]bico|volume\s*cubico|cubagem|volume|m3|m[³]|cbm|m\^3/i;
 const COL_WEIGHT   = /peso|peso\s*bruto|kg\b|peso\s*total/i;
 const COL_BOXES    = /quantidade|qtd|qtde|pecas|pe[çc]as|caixas|volumes|volume\s*total|total\s*item/i;
 const COL_ADDRESS  = /endere[cç]o|logradouro|rua|bairro/i;
@@ -328,11 +328,24 @@ export async function parseSpreadsheet(buffer: ArrayBuffer, filename?: string): 
     : await import('xlsx');
 
   const uint8 = new Uint8Array(buffer);
+  // .xlsx / .xlsm são ZIP (PK = 0x50 0x4B)
   const isZip = uint8.length >= 4 && uint8[0] === 0x50 && uint8[1] === 0x4B;
+  // .xls BIFF8 são Compound File Binary (CFB = 0xD0 0xCF 0x11 0xE0)
+  const isCfb = uint8.length >= 4 && uint8[0] === 0xD0 && uint8[1] === 0xCF;
+  // .xlsb (Binary Workbook) também detectado como ZIP
+  const isBinary = isZip || isCfb ||
+    (!!filename && /\.(xlsx|xls|xlsm|xlsb|xlam)$/i.test(filename));
 
   let workbook: import('xlsx').WorkBook;
-  if (isZip) {
-    workbook = XLSX.read(uint8, { type: 'array', cellDates: true });
+  if (isBinary) {
+    // SheetJS lida nativamente com XLS, XLSX, XLSB via type:'array'
+    try {
+      workbook = XLSX.read(uint8, { type: 'array', cellDates: true });
+    } catch {
+      // Último recurso: tenta como base64
+      const b64 = btoa(uint8.reduce((d, b) => d + String.fromCharCode(b), ''));
+      workbook = XLSX.read(b64, { type: 'base64', cellDates: true });
+    }
   } else {
     // Arquivo de texto (.csv, .tsv, etc.): decodifica como UTF-8 estrito
     let text = new TextDecoder("utf-8").decode(uint8);
