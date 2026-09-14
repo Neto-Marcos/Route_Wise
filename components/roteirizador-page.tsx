@@ -1,29 +1,51 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
+  ExternalLink,
   FileSpreadsheet,
   Loader2,
   MapPin,
   Package,
   RefreshCw,
+  RotateCcw,
   Send,
   Truck,
   Upload,
   X,
 } from "lucide-react";
 import type { SuggestedRoute, EngineResult, EngineConfig } from "@/lib/route-engine";
-import type { OrderRow } from "@/lib/spreadsheet-parser";
+import { parseSpreadsheet, type OrderRow } from "@/lib/spreadsheet-parser";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const VEHICLE_PRESETS: Record<string, { label: string; maxVol: number; maxWt: number; maxDel: number }> = {
+  tresquartos: { label: "3/4 — 40 m³", maxVol: 40, maxWt: 8000, maxDel: 8 },
+  toco: { label: "Toco — 50 m³", maxVol: 50, maxWt: 12000, maxDel: 10 },
+  truck: { label: "Truck — 70 m³", maxVol: 70, maxWt: 15000, maxDel: 12 },
+  carreta: { label: "Carreta — 95 m³", maxVol: 95, maxWt: 27000, maxDel: 15 },
+  bitrem: { label: "Bitrem — 140 m³", maxVol: 140, maxWt: 40000, maxDel: 20 },
+  custom: { label: "Personalizado", maxVol: 90, maxWt: 20000, maxDel: 12 },
+};
+
+const NE_STATES = ["AL", "AP", "BA", "CE", "MA", "PA", "PB", "PE", "PI", "RN", "SE", "TO"];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Driver { id: string; name: string; phone?: string; active?: boolean; }
 interface Vehicle { id: string; name: string; plate: string; capacity_m3?: number; active?: boolean; }
+type FreightFilter = "Todos" | "CIF" | "FOB";
+
+interface RouteViability {
+  label: "Viável" | "Atenção" | "Inviável";
+  color: string;
+  bg: string;
+  border: string;
+  reasons: string[];
+}
 
 // ─── Util ─────────────────────────────────────────────────────────────────────
 
@@ -34,551 +56,700 @@ async function api<T = unknown>(url: string, opts?: RequestInit): Promise<T> {
   return data as T;
 }
 
+function fmtBRL(n: number) {
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 function fmt(n: number, dec = 2) {
   return n.toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
-// ─── Subcomponents ───────────────────────────────────────────────────────────
+function getFreightType(row: OrderRow): string {
+  const raw = row.extra?.["tipo frete"] ?? row.extra?.["tipo_frete"] ?? row.extra?.["frete"] ?? "";
+  return String(raw).trim().toUpperCase();
+}
 
-function OccupancyBar({ pct, warning }: { pct: number; warning?: string }) {
-  const color = pct >= 90 ? "var(--red)" : pct >= 75 ? "var(--amber)" : "var(--green)";
+function getRowValue(row: OrderRow): number {
+  const raw = row.extra?.["total item"] ?? row.extra?.["total_item"] ?? row.extra?.["valor"] ?? row.extra?.["vlr total"] ?? "0";
+  const s = String(raw).replace(/[^\d,.-]/g, "").replace(",", ".");
+  return parseFloat(s) || 0;
+}
+
+function filterByFreight(rows: OrderRow[], filter: FreightFilter): OrderRow[] {
+  if (filter === "Todos") return rows;
+  return rows.filter(r => { const ft = getFreightType(r); return ft === filter || ft.startsWith(filter); });
+}
+
+function estimateRouteHours(stops: number, distKm: number, speedKmh: number, serviceMin: number): string {
+  const driveH = distKm / speedKmh;
+  const serviceH = (stops * serviceMin) / 60;
+  const total = driveH + serviceH;
+  const h = Math.floor(total);
+  const m = Math.round((total - h) * 60);
+  return `${h}h${String(m).padStart(2, "0")}`;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function estimateDistanceKm(stops: SuggestedRoute["stops"], originLat: number, originLng: number): number {
+  let dist = 0;
+  let prevLat = originLat;
+  let prevLng = originLng;
+  for (const s of stops) {
+    if (s.lat && s.lng) {
+      dist += haversineKm(prevLat, prevLng, s.lat, s.lng);
+      prevLat = s.lat;
+      prevLng = s.lng;
+    }
+  }
+  return Math.round(dist);
+}
+
+function getRouteRegion(route: SuggestedRoute): string {
+  const states = new Set<string>();
+  for (const stop of route.stops) {
+    for (const order of stop.orders) {
+      if (order.uf) states.add(order.uf.trim().toUpperCase());
+    }
+    const m = stop.city.match(/\/([A-Z]{2})$/);
+    if (m) states.add(m[1]);
+  }
+  return Array.from(states).join(" / ") || "—";
+}
+
+function getRouteOrderIds(route: SuggestedRoute): string[] {
+  const ids = new Set<string>();
+  for (const stop of route.stops) {
+    for (const o of stop.orders) ids.add(o.orderId);
+  }
+  return Array.from(ids);
+}
+
+function getRouteValue(route: SuggestedRoute): number {
+  let total = 0;
+  for (const stop of route.stops) {
+    for (const o of stop.orders) total += getRowValue(o);
+  }
+  return total;
+}
+
+/**
+ * Avaliação automática de viabilidade da rota.
+ * Critérios:
+ * - Ocupação < 30% → Inviável (muito vazia)
+ * - Ocupação > 98% → Atenção (sobre-carregada)
+ * - Custo % sobre valor > 8% → Inviável (frete caro demais)
+ * - Custo % sobre valor entre 5-8% → Atenção
+ * - KM > 3000 → Inviável (distância excessiva)
+ * - Menos de 2 paradas → Atenção
+ * - Volume < 10 m³ → Inviável (dedicação muito baixa)
+ */
+function assessViability(
+  route: SuggestedRoute,
+  distKm: number,
+  value: number,
+  costPct: number,
+  minVolDed: number,
+): RouteViability {
+  const reasons: string[] = [];
+  let score = 100;
+
+  if (route.occupancyPct < 30) {
+    reasons.push(`Ocupação ${route.occupancyPct}% abaixo do mínimo`);
+    score -= 50;
+  } else if (route.occupancyPct > 98) {
+    reasons.push("Sobre-carregada (>98% capacidade)");
+    score -= 20;
+  }
+
+  if (route.totalVolumeM3 < minVolDed && minVolDed > 0) {
+    reasons.push(`Volume ${fmt(route.totalVolumeM3)} m³ abaixo do mínimo dedicado ${minVolDed} m³`);
+    score -= 30;
+  }
+
+  if (value > 0) {
+    const actualCostPct = (costPct / 100) * value;
+    const freightRatio = (actualCostPct / value) * 100;
+    if (freightRatio > 8) {
+      reasons.push(`Custo do frete ${freightRatio.toFixed(1)}% sobre valor (>8%)`);
+      score -= 40;
+    } else if (freightRatio > 5) {
+      reasons.push(`Custo do frete ${freightRatio.toFixed(1)}% sobre valor (5-8%)`);
+      score -= 15;
+    }
+  }
+
+  if (distKm > 3000) {
+    reasons.push(`Distância ${distKm.toLocaleString("pt-BR")} km excessiva (>3000 km)`);
+    score -= 40;
+  } else if (distKm > 1500) {
+    reasons.push(`Distância ${distKm.toLocaleString("pt-BR")} km elevada`);
+    score -= 10;
+  }
+
+  if (route.stops.length < 2) {
+    reasons.push("Apenas 1 parada (considere rota dedicada simples)");
+    score -= 15;
+  }
+
+  if (score >= 75) {
+    return { label: "Viável", color: "#10b981", bg: "rgba(16,185,129,.12)", border: "rgba(16,185,129,.25)", reasons: reasons.length ? reasons : ["Rota dentro dos parâmetros configurados"] };
+  } else if (score >= 40) {
+    return { label: "Atenção", color: "#f59e0b", bg: "rgba(245,158,11,.12)", border: "rgba(245,158,11,.25)", reasons };
+  } else {
+    return { label: "Inviável", color: "#ef4444", bg: "rgba(239,68,68,.12)", border: "rgba(239,68,68,.25)", reasons };
+  }
+}
+
+function gmapsUrl(route: SuggestedRoute, originName: string): string {
+  const origin = encodeURIComponent(originName + ", Brasil");
+  const stops = route.stops;
+  if (!stops.length) return "#";
+  const dest = encodeURIComponent(stops[stops.length - 1]?.city + ", Brasil");
+  const waypoints = stops.slice(0, -1).map(s => encodeURIComponent(s.city + ", Brasil")).join("|");
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${waypoints ? `&waypoints=${waypoints}` : ""}`;
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const S = {
+  card: { background: "var(--card)", border: "1px solid var(--line)", borderRadius: 14, padding: "16px 20px" } as React.CSSProperties,
+  label: { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: ".08em", display: "block", marginBottom: 5 },
+  input: { background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 9, padding: "9px 12px", fontSize: 13, width: "100%", boxSizing: "border-box" as const },
+  select: { background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 9, padding: "9px 12px", fontSize: 13, width: "100%", cursor: "pointer" },
+  btnPrimary: { display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 20px", borderRadius: 10, border: "none", background: "var(--green)", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" } as React.CSSProperties,
+  btnSecondary: { display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", fontWeight: 600, fontSize: 13, cursor: "pointer" } as React.CSSProperties,
+} as const;
+
+// ─── OccupancyBar ─────────────────────────────────────────────────────────────
+
+function OccupancyBar({ pct }: { pct: number }) {
+  const color = pct >= 90 ? "#ef4444" : pct >= 75 ? "#f59e0b" : "#38bdf8";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{ flex: 1, height: 8, background: "var(--line)", borderRadius: 999, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: color, borderRadius: 999, transition: "width .4s ease" }} />
+    <div style={{ minWidth: 100 }}>
+      <div style={{ height: 6, background: "rgba(255,255,255,.1)", borderRadius: 999, overflow: "hidden", marginBottom: 3 }}>
+        <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: color, borderRadius: 999 }} />
       </div>
-      <span style={{ fontSize: 12, fontWeight: 700, color, minWidth: 36, textAlign: "right" }}>{pct}%</span>
-      {warning && <AlertTriangle size={14} color="var(--amber)" />}
+      <span style={{ fontSize: 11, fontWeight: 700, color }}>{pct}%</span>
     </div>
   );
 }
 
-function Badge({ text, color = "muted" }: { text: string; color?: "green" | "amber" | "red" | "muted" | "blue" }) {
-  const map = { green: "#10b981", amber: "#f59e0b", red: "#ef4444", muted: "#64748b", blue: "#3b82f6" };
-  const c = map[color];
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 999, border: `1px solid ${c}55`, background: `${c}18`, color: c, fontSize: 11, fontWeight: 700 }}>
-      {text}
-    </span>
-  );
-}
+// ─── Step 1: Upload ───────────────────────────────────────────────────────────
 
-// ─── Step 1: Upload ─────────────────────────────────────────────────────────
-
-function UploadStep({
-  onParsed,
-}: {
-  onParsed: (rows: OrderRow[], filename: string) => void;
-}) {
+function UploadStep({ onParsed }: { onParsed: (rows: OrderRow[], filename: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const process = useCallback(async (file: File) => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/routerizador/parse", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Erro ao processar arquivo");
-      onParsed(data.rows as OrderRow[], file.name);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      let rows: OrderRow[] = [];
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/routerizador/parse", { method: "POST", body: form });
+        if (res.ok) { const data = await res.json(); rows = data.rows ?? []; }
+      } catch { /* fall through */ }
+      if (!rows.length) {
+        const buf = await file.arrayBuffer();
+        rows = await parseSpreadsheet(buf, file.name);
+      }
+      if (!rows.length) throw new Error("Nenhum pedido encontrado. Verifique se a planilha tem colunas: Cidade, Cliente, Pedido, Volume.");
+      onParsed(rows, file.name);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
   }, [onParsed]);
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragging(false);
     const file = e.dataTransfer.files[0];
     if (file) process(file);
-  };
+  }, [process]);
 
   return (
-    <section style={{ maxWidth: 540, margin: "0 auto", padding: "32px 0" }}>
-      <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 64, height: 64, borderRadius: 18, background: "rgba(16,185,129,.14)", color: "var(--green)", marginBottom: 16 }}>
-          <FileSpreadsheet size={32} />
-        </div>
-        <h2 style={{ margin: "0 0 8px", fontSize: 22, letterSpacing: "-.02em" }}>Importar Carteira de Pedidos</h2>
-        <p style={{ color: "var(--muted)", fontSize: 14, margin: 0, lineHeight: 1.55 }}>
-          Faça upload da sua planilha <strong>.xlsx</strong> ou <strong>.csv</strong>, ou arquivo NOTFIS EDI (<strong>.txt</strong>, <strong>.not</strong>, <strong>.edi</strong>).<br />
-          O sistema detecta automaticamente colunas ou posições EDI de cidade, cubagem, peso e cliente.
-        </p>
-      </div>
-
+    <div style={{ maxWidth: 560, margin: "60px auto" }}>
       <div
-        role="button"
-        tabIndex={0}
-        onClick={() => fileRef.current?.click()}
-        onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        onKeyDown={(e) => e.key === "Enter" && fileRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragging ? "var(--green)" : "var(--line)"}`,
-          borderRadius: 18,
-          padding: "48px 32px",
-          textAlign: "center",
-          cursor: "pointer",
-          background: dragging ? "rgba(16,185,129,.05)" : "var(--card)",
-          transition: "all .2s ease",
-          outline: "none",
-        }}
+        onClick={() => fileRef.current?.click()}
+        style={{ border: `2px dashed ${dragging ? "var(--green)" : "var(--line)"}`, borderRadius: 18, padding: "52px 32px", textAlign: "center", cursor: "pointer", background: dragging ? "rgba(16,185,129,.06)" : "var(--card)", transition: "all .2s" }}
       >
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.xlsm" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); }} />
         {loading ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, color: "var(--muted)", pointerEvents: "none" }}>
-            <Loader2 size={32} className="spin" style={{ animation: "spin 1s linear infinite" }} />
-            <span style={{ fontSize: 14 }}>Processando arquivo...</span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <Loader2 size={40} color="var(--green)" style={{ animation: "spin 1s linear infinite" }} />
+            <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>Lendo planilha...</p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, pointerEvents: "none" }}>
-            <Upload size={28} color="var(--muted)" />
-            <div>
-              <p style={{ margin: "0 0 4px", fontWeight: 700, color: "var(--ink)" }}>Clique ou arraste o arquivo aqui</p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Suporta .xlsx, .csv e NOTFIS EDI (.txt / .not / .edi)</p>
+          <>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(16,185,129,.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <Upload size={28} color="var(--green)" />
             </div>
-          </div>
+            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 16 }}>Importar Planilha Sabium</p>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>Arraste ou clique · .xlsx, .xls, .csv</p>
+          </>
         )}
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.txt,.not,.edi" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) process(f); e.target.value = ""; }} />
       </div>
-
       {error && (
-        <div style={{ marginTop: 16, padding: "12px 16px", borderRadius: 12, background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", color: "var(--red)", fontSize: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          {error}
+        <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 12, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <AlertTriangle size={16} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ margin: 0, color: "#ef4444", fontSize: 13 }}>{error}</p>
         </div>
       )}
-
-      <div style={{ marginTop: 24, padding: 16, borderRadius: 14, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
-        <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Formatos e colunas suportadas</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {["NOTFIS Proceda (EDI)", "Cidade / Município", "Cliente / Destinatário", "Pedido / NF", "Cubagem (m³)", "Peso (kg)", "Caixas / Volumes"].map(col => (
-            <span key={col} style={{ padding: "4px 10px", borderRadius: 8, background: col.includes("NOTFIS") ? "rgba(16,185,129,.15)" : "var(--card)", border: `1px solid ${col.includes("NOTFIS") ? "rgba(16,185,129,.3)" : "var(--line)"}`, fontSize: 12, color: col.includes("NOTFIS") ? "var(--green)" : "var(--ink)", fontWeight: col.includes("NOTFIS") ? 700 : 400 }}>{col}</span>
-          ))}
-        </div>
-      </div>
-    </section>
+    </div>
   );
 }
 
-// ─── Step 2: Config & Preview ────────────────────────────────────────────────
+// ─── Step 2: Config ───────────────────────────────────────────────────────────
 
-function ConfigStep({
-  rows,
-  filename,
-  onGenerate,
-  onBack,
-}: {
+function ConfigStep({ rows, filename, onBack, onGenerate }: {
   rows: OrderRow[];
   filename: string;
-  onGenerate: (result: EngineResult, config: EngineConfig) => void;
   onBack: () => void;
+  onGenerate: (result: EngineResult, config: EngineConfig, vehicle: string, svcMin: number, speedKmh: number, costMin: number, costMax: number, minVol: number, ff: FreightFilter) => void;
 }) {
-  const [maxVol, setMaxVol] = useState(30);
-  const [maxWt, setMaxWt] = useState(10000);
-  const [radius, setRadius] = useState(80);
-  const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [freightFilter, setFreightFilter] = useState<FreightFilter>("Todos");
+  const [preset, setPreset] = useState("carreta");
+  const [maxVol, setMaxVol] = useState(95);
+  const [maxWt, setMaxWt] = useState(27000);
+  const [maxDel, setMaxDel] = useState(15);
+  const [minVolDed, setMinVolDed] = useState(20);
+  const [costPctMin, setCostPctMin] = useState(3);
+  const [costPctMax, setCostPctMax] = useState(5);
+  const [speedKmh, setSpeedKmh] = useState(52);
+  const [serviceMin, setServiceMin] = useState(40);
+  const [maxHours, setMaxHours] = useState(84);
+  const [period, setPeriod] = useState("0");
+  const [states, setStates] = useState<Set<string>>(new Set(["Todos"]));
+  const [prioritizeOld, setPrioritizeOld] = useState(true);
+  const [searchOnline, setSearchOnline] = useState(true);
+  const [returnOrigin, setReturnOrigin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [configOpen, setConfigOpen] = useState(true);
 
-  const byCity = new Map<string, number>();
-  for (const r of rows) {
-    byCity.set(r.city, (byCity.get(r.city) ?? 0) + 1);
-  }
-  const totalVol = rows.reduce((s, r) => s + r.volumeM3, 0);
-  const totalWt  = rows.reduce((s, r) => s + r.weightKg, 0);
-
-  const generate = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const config: Partial<EngineConfig> = { maxVolumeM3: maxVol, maxWeightKg: maxWt, clusterRadiusKm: radius, routeDate };
-      const result = await api<EngineResult>("/api/routerizador/generate", {
-        method: "POST",
-        body: JSON.stringify({ rows, config }),
-      });
-      onGenerate(result, { ...config, originName: "Filial", originLat: -7.2306, originLng: -35.8811 } as EngineConfig);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+  const applyPreset = (key: string) => {
+    setPreset(key);
+    if (key !== "custom") { const p = VEHICLE_PRESETS[key]; setMaxVol(p.maxVol); setMaxWt(p.maxWt); setMaxDel(p.maxDel); }
   };
 
+  const toggleState = (uf: string) => {
+    setStates(prev => {
+      const next = new Set(prev);
+      if (uf === "Todos") return new Set(["Todos"]);
+      next.delete("Todos");
+      if (next.has(uf)) next.delete(uf); else next.add(uf);
+      return next.size === 0 ? new Set(["Todos"]) : next;
+    });
+  };
+
+  const filtered = filterByFreight(rows, freightFilter);
+  const cifCount = rows.filter(r => getFreightType(r) === "CIF").length;
+  const fobCount = rows.filter(r => getFreightType(r) === "FOB").length;
+  const uniqueCities = new Set(filtered.map(r => r.city)).size;
+  const totalVol = filtered.reduce((s, r) => s + r.volumeM3, 0);
+
+  const generate = async () => {
+    setLoading(true); setError("");
+    try {
+      const routeDate = new Date().toISOString().slice(0, 10);
+      const fullConfig: EngineConfig = {
+        maxVolumeM3: maxVol,
+        maxWeightKg: maxWt,
+        clusterRadiusKm: 80,
+        routeDate,
+        originName: "Campina Grande/PB",
+        originLat: -7.2306,
+        originLng: -35.8811,
+      };
+      const result = await api<EngineResult>("/api/routerizador/generate", { method: "POST", body: JSON.stringify({ rows: filtered, config: fullConfig }) });
+      onGenerate(result, fullConfig, preset, serviceMin, speedKmh, costPctMin, costPctMax, minVolDed, freightFilter);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const reset = () => { applyPreset("carreta"); setMinVolDed(20); setCostPctMin(3); setCostPctMax(5); setSpeedKmh(52); setServiceMin(40); setMaxHours(84); setPeriod("0"); setStates(new Set(["Todos"])); setPrioritizeOld(true); setSearchOnline(true); setReturnOrigin(false); };
+
   return (
-    <section>
-      {/* Summary */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
-        {[
-          { label: "Pedidos", value: rows.length, unit: "" },
-          { label: "Cidades", value: byCity.size, unit: "" },
-          { label: "Volume Total", value: fmt(totalVol), unit: "m³" },
-          { label: "Peso Total", value: fmt(totalWt, 0), unit: "kg" },
-        ].map(({ label, value, unit }) => (
-          <div key={label} style={{ padding: "14px 16px", borderRadius: 14, background: "var(--card)", border: "1px solid var(--line)" }}>
-            <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>{label}</p>
-            <p style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-.03em" }}>{value} <span style={{ fontSize: 13, color: "var(--muted)" }}>{unit}</span></p>
-          </div>
-        ))}
+    <div>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button onClick={onBack} style={S.btnSecondary}><ArrowLeft size={15} /> Voltar</button>
+        <span style={{ fontSize: 13, color: "var(--muted)" }}>
+          📄 <strong style={{ color: "var(--ink)" }}>{filename}</strong> — <strong>{rows.length}</strong> pedidos · <strong>{new Set(rows.map(r => r.city)).size}</strong> cidades ·
+          <strong style={{ color: "#10b981" }}> CIF: {cifCount}</strong> · <strong style={{ color: "#f59e0b" }}> FOB: {fobCount}</strong>
+        </span>
+      </div>
+
+      {/* CIF/FOB filter */}
+      <div style={{ ...S.card, marginBottom: 14 }}>
+        <p style={{ margin: "0 0 10px", fontWeight: 700, fontSize: 13 }}>🚛 Filtro de Tipo de Frete</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {(["Todos", "CIF", "FOB"] as FreightFilter[]).map(f => {
+            const active = freightFilter === f;
+            const clr = f === "CIF" ? "#10b981" : f === "FOB" ? "#f59e0b" : "var(--green)";
+            return (
+              <button key={f} onClick={() => setFreightFilter(f)} style={{ padding: "7px 18px", borderRadius: 8, border: `1px solid ${active ? clr : "var(--line)"}`, background: active ? `${clr}22` : "transparent", color: active ? clr : "var(--muted)", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                {f === "Todos" ? `Todos (${rows.length})` : f === "CIF" ? `CIF (${cifCount})` : `FOB (${fobCount})`}
+              </button>
+            );
+          })}
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>
+            {filtered.length} pedidos · {uniqueCities} cidades · {fmt(totalVol)} m³
+          </span>
+        </div>
       </div>
 
       {/* Config */}
-      <div style={{ padding: 20, borderRadius: 16, background: "var(--card)", border: "1px solid var(--line)", marginBottom: 20 }}>
-        <p style={{ margin: "0 0 14px", fontWeight: 700, fontSize: 14 }}>⚙️ Configuração do Veículo</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Capacidade máx. m³</span>
-            <input type="number" min={1} max={200} value={maxVol} onChange={(e) => setMaxVol(Number(e.target.value))}
-              style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Capacidade máx. kg</span>
-            <input type="number" min={100} max={100000} value={maxWt} onChange={(e) => setMaxWt(Number(e.target.value))}
-              style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Raio de agrupamento (km)</span>
-            <input type="number" min={10} max={500} value={radius} onChange={(e) => setRadius(Number(e.target.value))}
-              style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>Data da entrega</span>
-            <input type="date" value={routeDate} onChange={(e) => setRouteDate(e.target.value)}
-              style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
-          </label>
-        </div>
-      </div>
-
-      <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
-        Arquivo: <strong style={{ color: "var(--ink)" }}>{filename}</strong> · {rows.length} pedidos em {byCity.size} cidades
-      </p>
-      {error && <p style={{ color: "var(--red)", fontSize: 13, marginBottom: 8 }}>⚠ {error}</p>}
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 12, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>
-          <ArrowLeft size={16} /> Voltar
+      <div style={{ ...S.card, marginBottom: 14 }}>
+        <button onClick={() => setConfigOpen(o => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink)", fontWeight: 700, fontSize: 13, padding: 0, display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+          <span style={{ opacity: .5, fontSize: 10 }}>{configOpen ? "▼" : "▶"}</span>
+          Configuração do veículo, período e otimização
         </button>
-        <button onClick={generate} disabled={loading} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 12, border: "none", background: "var(--green)", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 14, opacity: loading ? .7 : 1 }}>
-          {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={16} />}
-          {loading ? "Gerando rotas..." : "Gerar Rotas Automáticas"}
-        </button>
+        {configOpen && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12, marginBottom: 12 }}>
+              <label><span style={S.label}>Veículo</span><select style={S.select} value={preset} onChange={e => applyPreset(e.target.value)}>{Object.entries(VEHICLE_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
+              <label><span style={S.label}>Período da Carteira</span><select style={S.select} value={period} onChange={e => setPeriod(e.target.value)}><option value="0">Todos os registros</option><option value="30">Últimos 30 dias</option><option value="60">Últimos 60 dias</option><option value="90">Últimos 90 dias</option></select></label>
+              <label><span style={S.label}>Mínimo dedicado (m³)</span><input type="number" min={0} step={0.5} value={minVolDed} onChange={e => setMinVolDed(Number(e.target.value))} style={S.input} /></label>
+              <label><span style={S.label}>Capacidade máxima (m³)</span><input type="number" min={1} step={0.5} value={maxVol} onChange={e => { setMaxVol(Number(e.target.value)); setPreset("custom"); }} style={S.input} /></label>
+              <label><span style={S.label}>Máximo de entregas</span><input type="number" min={1} max={30} value={maxDel} onChange={e => { setMaxDel(Number(e.target.value)); setPreset("custom"); }} style={S.input} /></label>
+              <label><span style={S.label}>Custo mínimo sobre a rota (%)</span><input type="number" min={0} max={100} step={0.1} value={costPctMin} onChange={e => setCostPctMin(Number(e.target.value))} style={S.input} /></label>
+              <label><span style={S.label}>Custo máximo sobre a rota (%)</span><input type="number" min={0} max={100} step={0.1} value={costPctMax} onChange={e => setCostPctMax(Number(e.target.value))} style={S.input} /></label>
+              <label><span style={S.label}>Velocidade média (km/h)</span><input type="number" min={20} max={120} value={speedKmh} onChange={e => setSpeedKmh(Number(e.target.value))} style={S.input} /></label>
+              <label><span style={S.label}>Descarga por entrega (min)</span><input type="number" min={0} max={300} step={5} value={serviceMin} onChange={e => setServiceMin(Number(e.target.value))} style={S.input} /></label>
+              <label><span style={S.label}>Duração máxima planejada (h)</span><input type="number" min={1} max={200} step={0.5} value={maxHours} onChange={e => setMaxHours(Number(e.target.value))} style={S.input} /></label>
+            </div>
+            {/* States */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={S.label}>Estados incluídos no cálculo</span>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>{states.has("Todos") ? "Todos os estados" : Array.from(states).join(", ")}</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["Todos", ...NE_STATES].map(uf => {
+                  const checked = states.has(uf) || (uf !== "Todos" && states.has("Todos"));
+                  const isAll = uf === "Todos";
+                  return (
+                    <label key={uf} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 7, border: `1px solid ${checked ? "rgba(16,185,129,.4)" : "var(--line)"}`, background: checked ? "rgba(16,185,129,.08)" : "transparent", cursor: "pointer", fontSize: 12, fontWeight: isAll ? 700 : 600, color: checked ? "var(--ink)" : "var(--muted)" }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleState(uf)} style={{ accentColor: "var(--green)" }} />
+                      {uf}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Options */}
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+              {[
+                { label: "Priorizar registros mais antigos", val: prioritizeOld, set: setPrioritizeOld },
+                { label: "Buscar coordenadas online quando não cadastrada", val: searchOnline, set: setSearchOnline },
+                { label: "Incluir retorno a Campina Grande/PB", val: returnOrigin, set: setReturnOrigin },
+              ].map(({ label, val, set }) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
+                  <input type="checkbox" checked={val} onChange={e => set(e.target.checked)} style={{ accentColor: "var(--green)" }} />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <button style={{ ...S.btnPrimary, opacity: loading || !filtered.length ? .65 : 1 }} onClick={generate} disabled={loading || !filtered.length}>
+                {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={15} />}
+                {loading ? "Gerando rotas..." : "Aplicar configuração"}
+              </button>
+              <button style={S.btnSecondary} onClick={reset}><RotateCcw size={14} /> Restaurar padrão</button>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                {filtered.length === 0 ? "⚠ Nenhum pedido após filtro" : `Configuração aplicada. ${filtered.length} pedidos disponíveis.`}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
-    </section>
+      {error && <div style={{ padding: "12px 16px", borderRadius: 12, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444", fontSize: 13, marginTop: 8 }}>⚠ {error}</div>}
+    </div>
   );
 }
 
-// ─── Step 3: Review ─────────────────────────────────────────────────────────
+// ─── Step 3: Results Table ────────────────────────────────────────────────────
 
-function ReviewStep({
-  result,
-  filename,
-  routeDate,
-  engineConfig,
-  onBack,
-  onDispatched,
-  onOpenInPlanner,
-}: {
-  result: EngineResult;
-  filename: string;
-  routeDate: string;
-  engineConfig?: EngineConfig | null;
-  onBack: () => void;
-  onDispatched: (routeIds: string[]) => void;
+function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMin, speedKmh, costPctMin, costPctMax, minVolDed, freightFilter, onBack, onDispatched, onOpenInPlanner }: {
+  result: EngineResult; filename: string; engineConfig: EngineConfig;
+  vehiclePreset: string; serviceMin: number; speedKmh: number;
+  costPctMin: number; costPctMax: number; minVolDed: number;
+  freightFilter: FreightFilter;
+  onBack: () => void; onDispatched: (ids: string[]) => void;
   onOpenInPlanner?: (route: SuggestedRoute, config?: EngineConfig | null) => void;
 }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [assignments, setAssignments] = useState<Record<number, { driverId: string; vehicleId: string }>>({});
-  const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+  const [detailRoute, setDetailRoute] = useState<SuggestedRoute | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState("");
 
-  // Load drivers + vehicles
-  useState(() => {
+  useEffect(() => {
     Promise.all([
       api<Driver[]>("/api/drivers").catch(() => [] as Driver[]),
       api<Vehicle[]>("/api/vehicles").catch(() => [] as Vehicle[]),
-    ]).then(([d, v]) => {
-      setDrivers(d.filter(x => x.active !== false));
-      setVehicles(v.filter(x => x.active !== false));
-    }).finally(() => setLoadingData(false));
-  });
-
-  const toggle = (idx: number) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.has(idx) ? next.delete(idx) : next.add(idx);
-      return next;
-    });
-  };
-
-  const assign = (routeIdx: number, field: "driverId" | "vehicleId", val: string) => {
-    setAssignments(prev => ({ ...prev, [routeIdx]: { ...prev[routeIdx], [field]: val } }));
-  };
+    ]).then(([d, v]) => { setDrivers(d.filter(x => x.active !== false)); setVehicles(v.filter(x => x.active !== false)); });
+  }, []);
 
   const dispatch = async () => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const routes = result.routes.map((suggested) => ({
-        suggested,
-        driverId: assignments[suggested.index]?.driverId ?? "",
-        vehicleId: assignments[suggested.index]?.vehicleId ?? "",
-      }));
-      const res = await api<{ routeIds: string[] }>("/api/routerizador/dispatch", {
-        method: "POST",
-        body: JSON.stringify({ routes, routeDate, importFilename: filename }),
-      });
+      const routes = result.routes.map(s => ({ suggested: s, driverId: assignments[s.index]?.driverId ?? "", vehicleId: assignments[s.index]?.vehicleId ?? "" }));
+      const res = await api<{ routeIds: string[] }>("/api/routerizador/dispatch", { method: "POST", body: JSON.stringify({ routes, routeDate: engineConfig.routeDate, importFilename: filename }) });
       onDispatched(res.routeIds);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
   };
 
   const assignedCount = result.routes.filter(r => assignments[r.index]?.driverId).length;
+  const totalValue = result.routes.reduce((s, r) => s + getRouteValue(r), 0);
+  const presetLabel = VEHICLE_PRESETS[vehiclePreset]?.label ?? vehiclePreset;
+
+  const TH = ({ children, minW }: { children: React.ReactNode; minW?: number }) => (
+    <th style={{ padding: "9px 10px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.4)", textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,.07)", background: "#0b1120", position: "sticky", top: 0, zIndex: 2, minWidth: minW, textAlign: "left" }}>
+      {children}
+    </th>
+  );
 
   return (
-    <section>
+    <div>
       {/* Stats bar */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
+        <button onClick={onBack} style={S.btnSecondary}><ArrowLeft size={14} /> Reconfigurar</button>
         {[
-          { label: "Rotas Geradas", value: result.stats.totalRoutes, color: "var(--ink)" },
-          { label: "Pedidos", value: result.stats.totalOrders, color: "var(--ink)" },
-          { label: "Volume Total", value: `${fmt(result.stats.totalVolumeM3)} m³`, color: "var(--ink)" },
-          { label: "Ocupação Média", value: `${result.stats.avgOccupancyPct}%`, color: result.stats.avgOccupancyPct > 85 ? "var(--red)" : "var(--green)" },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ padding: "12px 14px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--line)" }}>
-            <p style={{ margin: "0 0 3px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>{label}</p>
-            <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color }}>{value}</p>
+          { l: "Rotas", v: result.stats.totalRoutes },
+          { l: "Pedidos", v: result.stats.totalOrders },
+          { l: "Volume", v: `${fmt(result.stats.totalVolumeM3)} m³` },
+          { l: "Ocupação média", v: `${result.stats.avgOccupancyPct}%` },
+          { l: "Valor total", v: fmtBRL(totalValue) },
+          { l: "Veículo", v: presetLabel },
+          { l: "Frete", v: freightFilter },
+        ].map(({ l, v }) => (
+          <div key={l} style={{ padding: "6px 12px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--line)", fontSize: 12 }}>
+            <span style={{ color: "var(--muted)" }}>{l}: </span><strong>{v}</strong>
           </div>
         ))}
       </div>
 
-      {/* Route cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-        {result.routes.map((route) => {
-          const asgn = assignments[route.index] ?? {};
-          const isOpen = expanded.has(route.index - 1);
-          return (
-            <div key={route.index} style={{ borderRadius: 16, border: "1px solid var(--line)", background: "var(--card)", overflow: "hidden" }}>
-              {/* Header */}
-              <div
-                style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
-                onClick={() => {
-                  if (onOpenInPlanner) {
-                    onOpenInPlanner(route, engineConfig);
-                  } else {
-                    toggle(route.index - 1);
-                  }
-                }}
-              >
-                <span style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: "50%", background: "rgba(16,185,129,.15)", color: "var(--green)", fontWeight: 900, fontSize: 14, flexShrink: 0 }}>
-                  {route.index}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{route.name}</p>
-                  <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>{route.totalOrders} pedidos · {route.stops.length} paradas · {fmt(route.totalVolumeM3)} m³</p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {onOpenInPlanner && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenInPlanner(route, engineConfig);
-                      }}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 5,
-                        padding: "5px 10px",
-                        borderRadius: 8,
-                        background: "rgba(16,185,129,0.12)",
-                        color: "var(--green)",
-                        border: "1px solid rgba(16,185,129,0.3)",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                      title="Abrir esta rota diretamente no mapa interativo para conferir e editar paradas"
-                    >
-                      <MapPin size={13} />
-                      <span>Revisar no Mapa</span>
-                    </button>
-                  )}
-                  {route.warning && <Badge text="⚠ Alto" color="amber" />}
-                  {asgn.driverId && <Badge text="✓ Atribuído" color="green" />}
-                  <OccupancyBar pct={route.occupancyPct} warning={route.warning} />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle(route.index - 1);
-                    }}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      padding: "4px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                    title={isOpen ? "Recolher detalhes" : "Ver manifesto e atribuição"}
-                  >
-                    {isOpen ? <ChevronUp size={16} color="var(--muted)" /> : <ChevronDown size={16} color="var(--muted)" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Expanded */}
-              {isOpen && (
-                <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--line)" }}>
-                  {/* Quick action bar inside card */}
-                  {onOpenInPlanner && (
-                    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-                      <button
-                        type="button"
-                        onClick={() => onOpenInPlanner(route, engineConfig)}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "7px 14px",
-                          borderRadius: 9,
-                          background: "var(--green)",
-                          color: "#fff",
-                          border: "none",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <MapPin size={14} /> Abrir e Revisar no Mapa Interativo
-                      </button>
-                    </div>
-                  )}
-
-                  {/* LIFO order */}
-                  <div style={{ marginTop: 14, marginBottom: 14 }}>
-                    <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-                      📦 Ordem de Carregamento (LIFO — última entrega = carregada primeiro)
-                    </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {[...route.stops].sort((a, b) => a.loadingSequence - b.loadingSequence).map((stop) => (
-                        <div key={stop.position} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
-                          <span style={{ display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: "50%", background: "var(--navy)", color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                            {stop.loadingSequence}
-                          </span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>{stop.city}</p>
-                            <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--muted)" }}>
-                              {stop.clientName || "—"} · {fmt(stop.volumeM3)} m³ · {stop.boxes} cx
-                            </p>
-                            <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--muted)" }}>
-                              Pedidos: {stop.orders.map(o => o.orderId).join(", ")}
-                            </p>
-                          </div>
-                          <Badge text={`Entrega ${stop.position}`} color="muted" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Driver + Vehicle assignment */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em", display: "flex", alignItems: "center", gap: 4 }}>
-                        <Truck size={12} /> Motorista
-                      </span>
-                      <select value={asgn.driverId ?? ""} onChange={(e) => assign(route.index, "driverId", e.target.value)}
-                        style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px" }}>
-                        <option value="">— Selecionar motorista —</option>
-                        {loadingData ? <option disabled>Carregando...</option> : drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                      </select>
-                    </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".08em", display: "flex", alignItems: "center", gap: 4 }}>
-                        <Package size={12} /> Veículo
-                      </span>
-                      <select value={asgn.vehicleId ?? ""} onChange={(e) => assign(route.index, "vehicleId", e.target.value)}
-                        style={{ background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px" }}>
-                        <option value="">— Selecionar veículo —</option>
-                        {loadingData ? <option disabled>Carregando...</option> : vehicles.map(v => <option key={v.id} value={v.id}>{v.name} · {v.plate}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Unassigned */}
       {result.unassigned.length > 0 && (
-        <div style={{ padding: 14, borderRadius: 13, background: "rgba(239,68,68,.07)", border: "1px dashed rgba(239,68,68,.35)", marginBottom: 16 }}>
-          <p style={{ margin: "0 0 6px", fontWeight: 700, color: "var(--red)", fontSize: 13 }}>⚠ {result.unassigned.length} pedidos sem coordenadas conhecidas</p>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Estes pedidos não foram incluídos nas rotas pois a cidade não foi reconhecida no dicionário geográfico.</p>
+        <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,.07)", border: "1px dashed rgba(239,68,68,.3)", marginBottom: 14, fontSize: 13 }}>
+          <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {result.unassigned.length} pedidos não roteirizados</span>
+          <span style={{ color: "var(--muted)", marginLeft: 6 }}>— cidade não reconhecida no dicionário geográfico.</span>
         </div>
       )}
 
-      {error && <p style={{ color: "var(--red)", fontSize: 13, marginBottom: 8 }}>⚠ {error}</p>}
+      {/* Table */}
+      <div style={{ borderRadius: 14, overflow: "auto", border: "1px solid rgba(255,255,255,.07)", marginBottom: 16, maxHeight: "62vh" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", background: "#0b1120", color: "#e2e8f0", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <TH minW={80}>Rota</TH>
+              <TH minW={150}>Ações</TH>
+              <TH minW={80}>Região/Eixo</TH>
+              <TH minW={200}>Sequência sugerida</TH>
+              <TH minW={70}>Entregas</TH>
+              <TH minW={65}>Pedidos</TH>
+              <TH minW={65}>M³</TH>
+              <TH minW={120}>Ocupação</TH>
+              <TH minW={115}>Valor</TH>
+              <TH minW={100}>Custo base</TH>
+              <TH minW={100}>KM planejado</TH>
+              <TH minW={90}>Tempo oper.</TH>
+              <TH minW={110}>Custo {costPctMin}%</TH>
+              <TH minW={110}>Custo {costPctMax}%</TH>
+              <TH minW={100}>Nº Pedidos</TH>
+              <TH minW={130}>Viabilidade</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {result.routes.map((route) => {
+              const region = getRouteRegion(route);
+              const orderIds = getRouteOrderIds(route);
+              const value = getRouteValue(route);
+              const distKm = estimateDistanceKm(route.stops, engineConfig.originLat, engineConfig.originLng);
+              const tempoStr = estimateRouteHours(route.stops.length, distKm, speedKmh, serviceMin);
+              const cost3 = value * (costPctMin / 100);
+              const cost5 = value * (costPctMax / 100);
+              const viability = assessViability(route, distKm, value, cost5, minVolDed);
+              const asgn = assignments[route.index] ?? {};
+              const isDetail = detailRoute?.index === route.index;
+
+              return (
+                <tr key={route.index}
+                  style={{ borderBottom: "1px solid rgba(255,255,255,.05)", background: isDetail ? "rgba(56,189,248,.05)" : "transparent", cursor: "default" }}
+                  onMouseEnter={e => { if (!isDetail) e.currentTarget.style.background = "rgba(255,255,255,.02)"; }}
+                  onMouseLeave={e => { if (!isDetail) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
+                    <button onClick={() => setDetailRoute(isDetail ? null : route)} style={{ background: "none", border: "none", cursor: "pointer", color: "#38bdf8", fontWeight: 700, fontSize: 12, padding: 0, textDecoration: "underline" }}>
+                      Dedicada {route.index}
+                    </button>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <a href={gmapsUrl(route, engineConfig.originName)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, background: "rgba(16,185,129,.18)", color: "#10b981", border: "1px solid rgba(16,185,129,.3)", fontSize: 11, fontWeight: 700, textDecoration: "none" }}>
+                        <ExternalLink size={11} /> Google Maps
+                      </a>
+                      {onOpenInPlanner && (
+                        <button onClick={() => onOpenInPlanner(route, engineConfig)} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, background: "rgba(56,189,248,.12)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.25)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          <MapPin size={11} /> Detalhes/mapa
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", color: "rgba(255,255,255,.5)", fontSize: 11 }}>{region}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
+                    <div style={{ fontSize: 11 }}>
+                      <div style={{ color: "rgba(255,255,255,.35)", fontSize: 10 }}>{engineConfig.originName} →</div>
+                      {route.stops.map((stop, i) => (
+                        <div key={i} style={{ fontWeight: 700 }}>
+                          {stop.city.replace(/, [A-Z]{2}$/, "").toUpperCase()}{i < route.stops.length - 1 ? " →" : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", textAlign: "center", fontWeight: 700 }}>{route.stops.length}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", textAlign: "center", fontWeight: 700 }}>{route.totalOrders}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", textAlign: "right", fontWeight: 600 }}>{fmt(route.totalVolumeM3)}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top" }}><OccupancyBar pct={route.occupancyPct} /></td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontWeight: 700, whiteSpace: "nowrap" }}>
+                    {value > 0 ? fmtBRL(value) : <span style={{ color: "rgba(255,255,255,.2)" }}>—</span>}
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11, color: "rgba(255,255,255,.3)" }}>
+                    <div>—</div><div style={{ fontSize: 10 }}>Carteira</div><div style={{ fontSize: 10 }}>Estimativa local</div>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
+                    <div style={{ fontWeight: 700 }}>{distKm > 0 ? `${distKm.toLocaleString("pt-BR")} km` : "—"}</div>
+                    <div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>Estimativa local</div>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontWeight: 700 }}>{tempoStr}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
+                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost3)}</div><div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>{costPctMin}% do valor</div></> : "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
+                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost5)}</div><div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>{costPctMax}% do valor</div></> : "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 10, color: "rgba(255,255,255,.55)", lineHeight: 1.7 }}>
+                    {orderIds.slice(0, 10).map(id => <div key={id}>{id}</div>)}
+                    {orderIds.length > 10 && <div style={{ color: "rgba(255,255,255,.3)" }}>+{orderIds.length - 10} mais</div>}
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
+                    <div title={viability.reasons.join(" | ")} style={{ display: "inline-block", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: viability.bg, color: viability.color, border: `1px solid ${viability.border}`, cursor: "help", whiteSpace: "nowrap" }}>
+                      {viability.label === "Viável" ? "✅" : viability.label === "Atenção" ? "⚠️" : "❌"} {viability.label}
+                    </div>
+                    {asgn.driverId && <div style={{ marginTop: 4, fontSize: 10, color: "#10b981" }}>✓ Atribuído</div>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detail panel */}
+      {detailRoute && (
+        <div style={{ marginBottom: 16, padding: "16px 20px", borderRadius: 14, border: "1px solid rgba(56,189,248,.2)", background: "#0b1120" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: "50%", background: "rgba(16,185,129,.15)", color: "#10b981", fontWeight: 900, fontSize: 14 }}>{detailRoute.index}</span>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, color: "#e2e8f0", fontSize: 14 }}>{detailRoute.name}</p>
+                <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,.4)" }}>{detailRoute.totalOrders} pedidos · {detailRoute.stops.length} paradas · {fmt(detailRoute.totalVolumeM3)} m³</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {onOpenInPlanner && (
+                <button onClick={() => onOpenInPlanner(detailRoute, engineConfig)} style={{ ...S.btnPrimary, fontSize: 12, padding: "7px 14px" }}>
+                  <MapPin size={13} /> Abrir e Revisar no Mapa
+                </button>
+              )}
+              <button onClick={() => setDetailRoute(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,.35)", padding: 4 }}><X size={18} /></button>
+            </div>
+          </div>
+          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.3)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+            📦 Ordem de Carregamento (LIFO — última entrega = primeira a carregar)
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            {[...detailRoute.stops].sort((a, b) => a.loadingSequence - b.loadingSequence).map(stop => (
+              <div key={stop.position} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)" }}>
+                <span style={{ display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: "50%", background: "rgba(56,189,248,.15)", color: "#38bdf8", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{stop.loadingSequence}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#e2e8f0" }}>{stop.city}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "rgba(255,255,255,.4)" }}>{stop.clientName || "—"} · {fmt(stop.volumeM3)} m³ · {stop.boxes} cx</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "rgba(255,255,255,.3)" }}>Pedidos: {stop.orders.map(o => o.orderId).join(", ")}</p>
+                </div>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,.3)", fontWeight: 600 }}>Entrega {stop.position}</span>
+              </div>
+            ))}
+          </div>
+          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.3)", textTransform: "uppercase", letterSpacing: ".1em" }}>Atribuição</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label>
+              <span style={{ ...S.label, color: "rgba(255,255,255,.35)" }}><Truck size={11} style={{ display: "inline", marginRight: 4 }} />Motorista</span>
+              <select value={assignments[detailRoute.index]?.driverId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], driverId: e.target.value } }))} style={{ ...S.select, background: "rgba(255,255,255,.05)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,.1)" }}>
+                <option value="">— Selecionar motorista —</option>
+                {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span style={{ ...S.label, color: "rgba(255,255,255,.35)" }}><Package size={11} style={{ display: "inline", marginRight: 4 }} />Veículo</span>
+              <select value={assignments[detailRoute.index]?.vehicleId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], vehicleId: e.target.value } }))} style={{ ...S.select, background: "rgba(255,255,255,.05)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,.1)" }}>
+                <option value="">— Selecionar veículo —</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.name} · {v.plate}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {error && <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444", fontSize: 13, marginBottom: 12 }}>⚠ {error}</div>}
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 12, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>
-          <ArrowLeft size={16} /> Reconfigurar
-        </button>
-        <button onClick={dispatch} disabled={loading || assignedCount === 0} style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", borderRadius: 12, border: "none", background: assignedCount === 0 ? "var(--line)" : "var(--green)", color: assignedCount === 0 ? "var(--muted)" : "#fff", cursor: assignedCount === 0 ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 14 }}>
-          {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
+        <button onClick={dispatch} disabled={loading || assignedCount === 0} style={{ ...S.btnPrimary, background: assignedCount === 0 ? "var(--line)" : "var(--green)", color: assignedCount === 0 ? "var(--muted)" : "#fff", cursor: assignedCount === 0 ? "not-allowed" : "pointer", opacity: loading ? .7 : 1 }}>
+          {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />}
           {loading ? "Salvando rotas..." : `Despachar ${assignedCount} de ${result.routes.length} rotas`}
         </button>
-        {assignedCount === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>Atribua ao menos um motorista para despachar</span>}
+        {assignedCount === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>Clique em "Dedicada N" para atribuir motorista + veículo</span>}
       </div>
-    </section>
+    </div>
   );
 }
 
-// ─── Step 4: Success ─────────────────────────────────────────────────────────
+// ─── Step 4: Success ──────────────────────────────────────────────────────────
 
 function SuccessStep({ routeIds, onNew }: { routeIds: string[]; onNew: () => void }) {
   return (
-    <section style={{ maxWidth: 480, margin: "0 auto", padding: "48px 0", textAlign: "center" }}>
+    <section style={{ maxWidth: 480, margin: "60px auto", textAlign: "center" }}>
       <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 72, height: 72, borderRadius: "50%", background: "rgba(16,185,129,.15)", color: "var(--green)", marginBottom: 20 }}>
         <CheckCircle2 size={36} />
       </div>
       <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>Rotas despachadas com sucesso!</h2>
       <p style={{ color: "var(--muted)", margin: "0 0 24px", lineHeight: 1.55 }}>
-        <strong style={{ color: "var(--ink)" }}>{routeIds.length} rotas</strong> foram criadas e atribuídas aos motoristas.<br />
+        <strong style={{ color: "var(--ink)" }}>{routeIds.length} rotas</strong> criadas e atribuídas aos motoristas.<br />
         Eles já podem acessar as viagens no aplicativo.
       </p>
-      <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-        <button onClick={onNew} style={{ padding: "10px 20px", borderRadius: 12, border: "none", background: "var(--green)", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
-          Nova Importação
-        </button>
-      </div>
+      <button onClick={onNew} style={S.btnPrimary}>Nova Importação</button>
     </section>
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 type Step = "upload" | "config" | "review" | "done";
 
-export default function RoteirizadorPage({
-  onBack,
-  onOpenInPlanner,
-}: {
+export default function RoteirizadorPage({ onBack, onOpenInPlanner }: {
   onBack?: () => void;
   onOpenInPlanner?: (route: SuggestedRoute, config?: EngineConfig | null) => void;
 }) {
@@ -587,113 +758,68 @@ export default function RoteirizadorPage({
   const [filename, setFilename] = useState("");
   const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
   const [engineConfig, setEngineConfig] = useState<EngineConfig | null>(null);
+  const [vehiclePreset, setVehiclePreset] = useState("carreta");
+  const [serviceMin, setServiceMin] = useState(40);
+  const [speedKmh, setSpeedKmh] = useState(52);
+  const [costPctMin, setCostPctMin] = useState(3);
+  const [costPctMax, setCostPctMax] = useState(5);
+  const [minVolDed, setMinVolDed] = useState(20);
+  const [freightFilter, setFreightFilter] = useState<FreightFilter>("Todos");
   const [dispatchedIds, setDispatchedIds] = useState<string[]>([]);
 
-  const reset = () => {
-    setStep("upload");
-    setRows([]);
-    setFilename("");
-    setEngineResult(null);
-    setEngineConfig(null);
-    setDispatchedIds([]);
-  };
+  const reset = () => { setStep("upload"); setRows([]); setFilename(""); setEngineResult(null); setEngineConfig(null); setDispatchedIds([]); setFreightFilter("Todos"); };
 
   const steps = [
     { key: "upload", label: "1. Upload" },
     { key: "config", label: "2. Configurar" },
-    { key: "review", label: "3. Revisar" },
+    { key: "review", label: "3. Rotas" },
     { key: "done", label: "4. Concluído" },
   ];
   const stepIdx = steps.findIndex(s => s.key === step);
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--paper)", color: "var(--ink)" }}>
-      {/* Header */}
       <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", padding: "0 24px" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", gap: 16, height: 60 }}>
-          {onBack && (
-            <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 13 }}>
-              <ArrowLeft size={15} /> Voltar
-            </button>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <FileSpreadsheet size={20} color="var(--green)" />
-            <b style={{ fontSize: 16, letterSpacing: "-.02em" }}>Roteirizador Automático</b>
+        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", gap: 14, height: 58 }}>
+          {onBack && <button onClick={onBack} style={S.btnSecondary}><ArrowLeft size={14} /> Voltar</button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <FileSpreadsheet size={18} color="var(--green)" />
+            <b style={{ fontSize: 15, letterSpacing: "-.02em" }}>Roteirizador Automático</b>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-            <a
-              href="/ROTEIRIZADOR_ENTREGAS_FUNCIONAL.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                borderRadius: 10,
-                border: "1px solid var(--line)",
-                background: "var(--card-subtle)",
-                color: "var(--ink)",
-                textDecoration: "none",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-              title="Abrir versão alternativa completa do roteirizador em nova aba"
-            >
-              🚀 Roteirizador Avançado (Nova Guia)
-            </a>
-            {step !== "done" && (
-              <button onClick={reset} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12 }}>
-                <X size={13} /> Reiniciar
-              </button>
-            )}
+          <div style={{ marginLeft: "auto" }}>
+            {step !== "done" && <button onClick={reset} style={S.btnSecondary}><X size={12} /> Reiniciar</button>}
           </div>
         </div>
       </header>
-
-      {/* Progress */}
       <div style={{ borderBottom: "1px solid var(--line)", background: "var(--card-subtle)", padding: "0 24px" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", gap: 4 }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex" }}>
           {steps.map((s, i) => (
-            <div key={s.key} style={{ padding: "10px 14px", fontSize: 12, fontWeight: 700, color: i <= stepIdx ? "var(--green)" : "var(--muted)", borderBottom: i === stepIdx ? "2px solid var(--green)" : "2px solid transparent", transition: "all .2s" }}>
+            <div key={s.key} style={{ padding: "9px 14px", fontSize: 12, fontWeight: 700, color: i <= stepIdx ? "var(--green)" : "var(--muted)", borderBottom: i === stepIdx ? "2px solid var(--green)" : "2px solid transparent", transition: "all .2s" }}>
               {s.label}
             </div>
           ))}
         </div>
       </div>
-
-      {/* Content */}
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px" }}>
-        {step === "upload" && (
-          <UploadStep onParsed={(r, f) => { setRows(r); setFilename(f); setStep("config"); }} />
-        )}
+      <main style={{ maxWidth: 1400, margin: "0 auto", padding: "24px" }}>
+        {step === "upload" && <UploadStep onParsed={(r, f) => { setRows(r); setFilename(f); setStep("config"); }} />}
         {step === "config" && (
-          <ConfigStep
-            rows={rows}
-            filename={filename}
-            onBack={() => setStep("upload")}
-            onGenerate={(result, config) => { setEngineResult(result); setEngineConfig(config); setStep("review"); }}
-          />
+          <ConfigStep rows={rows} filename={filename} onBack={() => setStep("upload")}
+            onGenerate={(result, config, vehicle, svcMin, speed, cMin, cMax, minVol, ff) => {
+              setEngineResult(result); setEngineConfig(config); setVehiclePreset(vehicle);
+              setServiceMin(svcMin); setSpeedKmh(speed); setCostPctMin(cMin); setCostPctMax(cMax); setMinVolDed(minVol); setFreightFilter(ff); setStep("review");
+            }} />
         )}
-        {step === "review" && engineResult && (
-          <ReviewStep
-            result={engineResult}
-            filename={filename}
-            routeDate={engineConfig?.routeDate ?? new Date().toISOString().slice(0, 10)}
-            engineConfig={engineConfig}
-            onBack={() => setStep("config")}
+        {step === "review" && engineResult && engineConfig && (
+          <ResultsTable result={engineResult} filename={filename} engineConfig={engineConfig}
+            vehiclePreset={vehiclePreset} serviceMin={serviceMin} speedKmh={speedKmh}
+            costPctMin={costPctMin} costPctMax={costPctMax} minVolDed={minVolDed}
+            freightFilter={freightFilter} onBack={() => setStep("config")}
             onDispatched={(ids) => { setDispatchedIds(ids); setStep("done"); }}
-            onOpenInPlanner={onOpenInPlanner}
-          />
+            onOpenInPlanner={onOpenInPlanner} />
         )}
-        {step === "done" && (
-          <SuccessStep routeIds={dispatchedIds} onNew={reset} />
-        )}
+        {step === "done" && <SuccessStep routeIds={dispatchedIds} onNew={reset} />}
       </main>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
