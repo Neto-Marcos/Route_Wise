@@ -1618,6 +1618,7 @@ function Dispatcher({
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
   const [importedPlannerData, setImportedPlannerData] = useState<{
+    id: string;
     stops: Stop[];
     name?: string;
     date?: string;
@@ -1649,6 +1650,7 @@ function Dispatcher({
     }));
 
     setImportedPlannerData({
+      id: crypto.randomUUID(),
       stops: [originStop, ...deliveryStops],
       name: suggested.name || "Rota Importada",
       date: engineConfig?.routeDate || new Date().toISOString().slice(0, 10),
@@ -1916,6 +1918,7 @@ function Dispatcher({
         {message && <p className="form-error">{message}</p>}
         {tab === "planner" && (
           <RoutePlannerView
+            key={importedPlannerData?.id || "planner-default"}
             onDone={load}
             initialStops={importedPlannerData?.stops}
             initialRouteName={importedPlannerData?.name}

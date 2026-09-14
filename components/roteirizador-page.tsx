@@ -372,7 +372,16 @@ function ReviewStep({
           return (
             <div key={route.index} style={{ borderRadius: 16, border: "1px solid var(--line)", background: "var(--card)", overflow: "hidden" }}>
               {/* Header */}
-              <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => toggle(route.index - 1)}>
+              <div
+                style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+                onClick={() => {
+                  if (onOpenInPlanner) {
+                    onOpenInPlanner(route, engineConfig);
+                  } else {
+                    toggle(route.index - 1);
+                  }
+                }}
+              >
                 <span style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: "50%", background: "rgba(16,185,129,.15)", color: "var(--green)", fontWeight: 900, fontSize: 14, flexShrink: 0 }}>
                   {route.index}
                 </span>
@@ -410,7 +419,25 @@ function ReviewStep({
                   {route.warning && <Badge text="⚠ Alto" color="amber" />}
                   {asgn.driverId && <Badge text="✓ Atribuído" color="green" />}
                   <OccupancyBar pct={route.occupancyPct} warning={route.warning} />
-                  {isOpen ? <ChevronUp size={16} color="var(--muted)" /> : <ChevronDown size={16} color="var(--muted)" />}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle(route.index - 1);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: "4px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    title={isOpen ? "Recolher detalhes" : "Ver manifesto e atribuição"}
+                  >
+                    {isOpen ? <ChevronUp size={16} color="var(--muted)" /> : <ChevronDown size={16} color="var(--muted)" />}
+                  </button>
                 </div>
               </div>
 
