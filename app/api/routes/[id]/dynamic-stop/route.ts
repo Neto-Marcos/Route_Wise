@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 /**
  * POST /api/routes/[id]/dynamic-stop
- * Dia 14: Re-roteirização Dinâmica com viagem em andamento
+ * Edição operacional antes da partida. Depois de iniciada, a rota é imutável.
  */
 export async function POST(
   req: NextRequest,
@@ -14,32 +15,28 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await req.json();
-    const { action, stopId, newStop } = body;
+    const { action, stopId } = body;
+    const session = await getSession("dispatcher");
+    if (!session) return NextResponse.json({ error: "Sessão de operador necessária." }, { status: 401 });
 
-    if (action === "cancel" && stopId) {
-      // Cancela parada em tempo real
-      await query(
-        `UPDATE route_stops SET status = 'cancelled' WHERE id = $1 AND route_id = $2`,
-        [stopId, id]
-      );
-      return NextResponse.json({ success: true, message: "Parada cancelada na rota ativa." });
+    const route = await query<{ status: string }>(
+      "SELECT status FROM routes WHERE id=$1 AND company_id=$2 LIMIT 1", [id, session.companyId],
+    );
+    if (!route.rows.length) return NextResponse.json({ error: "Rota não encontrada." }, { status: 404 });
+    if (!["draft", "assigned"].includes(route.rows[0].status)) {
+      return NextResponse.json({ error: "Esta rota já iniciou e não pode mais ser alterada." }, { status: 409 });
     }
 
-    if (action === "add" && newStop) {
-      // Adiciona nova parada urgente na rota ativa
-      const maxPos = await query(
-        `SELECT COALESCE(MAX(position), 0) as max_pos FROM route_stops WHERE route_id = $1`,
-        [id]
+    if (action === "remove" && stopId) {
+      const deleted = await query(
+        "DELETE FROM route_stops WHERE id=$1 AND route_id=$2 AND is_origin=false RETURNING id", [stopId, id],
       );
-      const nextPos = (maxPos.rows[0]?.max_pos || 0) + 1;
-
+      if (!deleted.rows.length) return NextResponse.json({ error: "Parada inválida ou origem não pode ser removida." }, { status: 400 });
       await query(
-        `INSERT INTO route_stops (route_id, position, name, address, lat, lng, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
-        [id, nextPos, newStop.name, newStop.address, newStop.lat, newStop.lng]
+        `WITH ordered AS (SELECT id, row_number() OVER (ORDER BY position) AS next_position FROM route_stops WHERE route_id=$1)
+         UPDATE route_stops s SET position=ordered.next_position-1 FROM ordered WHERE s.id=ordered.id`, [id],
       );
-
-      return NextResponse.json({ success: true, message: "Nova parada urgente inserida na viagem." });
+      return NextResponse.json({ success: true, message: "Cidade removida. A rota foi reordenada para carregamento." });
     }
 
     return NextResponse.json({ error: "Ação inválida." }, { status: 400 });

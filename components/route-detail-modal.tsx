@@ -94,6 +94,7 @@ export function RouteDetailModal({
     title: string;
     subtitle?: string;
   } | null>(null);
+  const [editingStop, setEditingStop] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -109,6 +110,19 @@ export function RouteDetailModal({
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [routeId]);
+
+  const removeStop = async (stopId: string, city: string) => {
+    if (!route || !["draft", "assigned"].includes(route.status)) return;
+    if (!window.confirm(`Remover ${city} desta rota antes do carregamento?`)) return;
+    setEditingStop(stopId);
+    try {
+      const response = await fetch(`/api/routes/${routeId}/dynamic-stop`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove", stopId }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Não foi possível remover a cidade.");
+      setRoute((current) => current ? { ...current, stops: current.stops?.filter(stop => stop.id !== stopId) } : current);
+    } catch (e) { setError((e as Error).message); }
+    finally { setEditingStop(null); }
+  };
 
   if (loading) {
     return (
@@ -310,6 +324,7 @@ export function RouteDetailModal({
                 const isOrigin = stop.is_origin || index === 0;
                 const isDelivered = stop.status === "delivered";
                 const event = route.delivery_events?.find((e) => e.stop_id === stop.id);
+                const canEdit = !isOrigin && ["draft", "assigned"].includes(route.status);
 
                 return (
                   <div key={stop.id || index} className={`detail-stop-row ${isDelivered ? "delivered" : ""}`}>
@@ -353,6 +368,11 @@ export function RouteDetailModal({
                           >
                             <ExternalLink size={12} /> Rastreio SSW
                           </button>
+                          {canEdit && (
+                            <button type="button" className="button secondary compact" style={{ fontSize: 11, padding: "3px 8px", color: "#dc2626" }} disabled={editingStop === stop.id} onClick={() => removeStop(stop.id, stop.name)}>
+                              {editingStop === stop.id ? "Removendo…" : "Remover cidade"}
+                            </button>
+                          )}
                         </div>
                       )}
 
