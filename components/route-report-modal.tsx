@@ -1,5 +1,5 @@
 "use client";
-import { Printer, X } from "lucide-react";
+import { Navigation, Printer, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
 import { printElement } from "@/lib/print-document";
 
@@ -48,6 +48,10 @@ export function RouteReportModal({
   };
 
   const duration = calculateDuration();
+  const mapStops = route.stops?.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng))) || [];
+  const googleMapsUrl = mapStops.length > 1
+    ? `https://www.google.com/maps/dir/${mapStops.map((stop) => `${stop.lat},${stop.lng}`).join("/")}`
+    : null;
 
   const printDocument = () => printElement("printable-report", `Relatório - ${route.name}`)
     .catch((error) => window.alert(error.message));
@@ -68,6 +72,7 @@ export function RouteReportModal({
             <button type="button" className="button primary compact" onClick={printDocument}>
               <Printer size={15} /> Imprimir / Salvar PDF
             </button>
+            {googleMapsUrl && <a className="button secondary compact" href={googleMapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={15} /> Google Maps</a>}
           </div>
         </div>
 
@@ -178,6 +183,7 @@ export function RouteReportModal({
                   <th>Tipo</th>
                   <th>Nome do Local / Cliente</th>
                   <th>Endereço</th>
+                  <th>Pedidos</th>
                   <th style={{ width: "80px" }}>Situação</th>
                   <th style={{ width: "70px" }}>Horário</th>
                   <th>Observação / Comprovante</th>
@@ -195,6 +201,7 @@ export function RouteReportModal({
                       <td>{isOrigin ? "Origem" : "Entrega"}</td>
                       <td><b>{stop.name}</b></td>
                       <td className="addr-cell">{stop.address}</td>
+                      <td>{stop.order_ids?.length ? stop.order_ids.join(", ") : "--"}</td>
                       <td>
                         <span className={`report-status-badge ${isOrigin ? "origin" : isDelivered ? "delivered" : "pending"}`}>
                           {isOrigin ? "Saída" : isDelivered ? "Entregue" : "Pendente"}

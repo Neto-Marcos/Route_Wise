@@ -11,6 +11,7 @@ import {
   FileText,
   Gauge,
   MapPin,
+  Navigation,
   Printer,
   Truck,
   UserRound,
@@ -46,6 +47,7 @@ export type DetailedRoute = {
     delivered_at?: string;
     boxes?: number;
     volume_m3?: number;
+    order_ids?: string[] | null;
   }>;
   odometer?: Array<{
     phase: "start" | "finish";
@@ -210,6 +212,10 @@ export function RouteDetailModal({
   const completedStops = deliveryStops.filter((s) => s.status === "delivered");
   const totalDeliveries = deliveryStops.length > 0 ? deliveryStops.length : Number(route.deliveries || 0);
   const deliveredCount = deliveryStops.length > 0 ? completedStops.length : Number(route.delivered || 0);
+  const mapStops = route.stops?.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng))) || [];
+  const googleMapsUrl = mapStops.length > 1
+    ? `https://www.google.com/maps/dir/${mapStops.map((stop) => `${stop.lat},${stop.lng}`).join("/")}`
+    : null;
 
   const formatTime = (ts?: string) => {
     if (!ts) return "--:--";
@@ -258,6 +264,11 @@ export function RouteDetailModal({
             </p>
           </div>
           <div className="detail-header-actions">
+            {googleMapsUrl && (
+              <a className="button secondary compact" href={googleMapsUrl} target="_blank" rel="noopener noreferrer" title="Abrir rota pronta no Google Maps">
+                <Navigation size={15} /> Google Maps
+              </a>
+            )}
             {route.status === "completed" && onPrintReport && (
               <button
                 type="button"
