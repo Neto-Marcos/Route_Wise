@@ -101,6 +101,8 @@ type Stop = {
   status?: "pending" | "delivered";
   boxes?: number;
   volume_m3?: number;
+  /** Números dos pedidos importados da planilha para esta entrega. */
+  order_ids?: string[];
 };
 type Station = {
   id_rede: string;
@@ -1651,6 +1653,7 @@ function Dispatcher({
       lng: s.lng,
       boxes: s.boxes,
       volume_m3: s.volumeM3,
+      order_ids: Array.from(new Set(s.orders.map((order) => order.orderId).filter(Boolean))),
       is_origin: false,
     }));
 
@@ -3826,6 +3829,7 @@ function RoutePlannerView({
             <tr style={{ background: "#f1f5f9", textAlign: "left", fontSize: "11px", color: "#475569" }}>
               <th style={{ padding: "8px 10px", width: "45px" }}>Parada</th>
               <th style={{ padding: "8px 10px" }}>Destino / Cliente</th>
+              <th style={{ padding: "8px 10px", width: "115px" }}>Nº pedido(s)</th>
               <th style={{ padding: "8px 10px" }}>Endereço Completo</th>
               <th style={{ padding: "8px 10px", width: "70px", textAlign: "center" }}>Volumes</th>
               <th style={{ padding: "8px 10px", width: "70px", textAlign: "center" }}>Cubagem</th>
@@ -3839,6 +3843,9 @@ function RoutePlannerView({
                 </td>
                 <td style={{ padding: "8px 10px", fontWeight: "700" }}>
                   {index === 0 ? "Origem — " : ""}{stop.name}
+                </td>
+                <td style={{ padding: "8px 10px", fontSize: "11px", fontWeight: "700", overflowWrap: "anywhere" }}>
+                  {stop.order_ids?.length ? stop.order_ids.join(", ") : "--"}
                 </td>
                 <td style={{ padding: "8px 10px", color: "#475569" }}>{stop.address}</td>
                 <td style={{ padding: "8px 10px", textAlign: "center" }}>
