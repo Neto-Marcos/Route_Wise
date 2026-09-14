@@ -246,7 +246,8 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     const uf = (o.uf ?? '').trim().toUpperCase();
     const key = `${uf}|${city}`;
     if (!byCity.has(key)) {
-      byCity.set(key, { city, uf, orders: [], coords: getCityCoords(o.city) });
+      const suppliedCoords = Number.isFinite(o.lat) && Number.isFinite(o.lng) ? [o.lat!, o.lng!] as [number, number] : null;
+      byCity.set(key, { city, uf, orders: [], coords: suppliedCoords ?? getCityCoords(o.city) });
     }
     byCity.get(key)!.orders.push(o);
   }
@@ -373,7 +374,8 @@ function buildRoute(
   const stops: SuggestedStop[] = [];
 
   for (const [city, cityOrders] of stopMap.entries()) {
-    const coords = getCityCoords(city) ?? group.coords;
+    const suppliedCoords = cityOrders.find((order) => Number.isFinite(order.lat) && Number.isFinite(order.lng));
+    const coords = suppliedCoords ? [suppliedCoords.lat!, suppliedCoords.lng!] as [number, number] : getCityCoords(city) ?? group.coords;
     const vol    = cityOrders.reduce((s, o) => s + o.volumeM3, 0);
     const wt     = cityOrders.reduce((s, o) => s + o.weightKg,  0);
     const bx     = cityOrders.reduce((s, o) => s + o.boxes,     0);

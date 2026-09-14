@@ -56,7 +56,7 @@ export function DashboardAnalytics({
   onOpenHeatmap,
 }: {
   userRole?: string;
-  onOpenHeatmap?: () => void;
+  onOpenHeatmap?: (points: Array<[number, number, number]>) => void;
 }) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,7 +140,7 @@ export function DashboardAnalytics({
               className="button secondary compact"
               onClick={() => {
                 haptics.tap();
-                onOpenHeatmap();
+                onOpenHeatmap(data.heatPoints);
               }}
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, height: 34 }}
             >

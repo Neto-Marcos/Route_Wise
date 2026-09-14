@@ -38,6 +38,9 @@ export interface OrderRow {
   freightType?: "CIF" | "FOB" | "";
   closedAt?: string;
   totalValue?: number;
+  /** Coordenadas confirmadas por base local ou geocodificação. */
+  lat?: number;
+  lng?: number;
   /** Qualquer campo extra da planilha */
   extra: Record<string, string>;
 }

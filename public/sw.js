@@ -39,6 +39,23 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
+// Web Push: o clique leva o usuário diretamente à operação relacionada.
+self.addEventListener("push", (event) => {
+  const payload = event.data ? event.data.json() : {};
+  event.waitUntil(self.registration.showNotification(payload.title || "RouteWise", {
+    body: payload.body || "Há uma atualização operacional.",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { url: payload.url || "/" },
+    vibrate: [80, 40, 80],
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data?.url || "/"));
+});
+
 // ─── Background Sync ────────────────────────────────────────────────────────
 self.addEventListener("sync", (event) => {
   if (event.tag === "rw-background-sync" || event.tag === "routewise-offline-sync") {

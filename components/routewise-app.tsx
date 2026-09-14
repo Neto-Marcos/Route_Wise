@@ -61,6 +61,9 @@ import { printElement } from "@/lib/print-document";
 import RoteirizadorPage from "./roteirizador-page";
 import type { SuggestedRoute, EngineConfig } from "@/lib/route-engine";
 import { SSWTrackingView } from "./ssw-tracking-view";
+import { DashboardAnalytics } from "./dashboard-analytics";
+import { CityHeatmapModal } from "./city-heatmap-modal";
+import { OperationsHub } from "./operations-hub";
 
 type DispatcherUser = {
   id: string;
@@ -1598,7 +1601,7 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw">(
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">(
     "overview",
   );
   const [routes, setRoutes] = useState<RouteData[]>([]);
@@ -1624,6 +1627,8 @@ function Dispatcher({
     date?: string;
   } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [heatPoints, setHeatPoints] = useState<Array<[number, number, number]>>([]);
   useEffect(() => {
     setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
   }, []);
@@ -1757,6 +1762,7 @@ function Dispatcher({
     ["vehicles", "Veículos", <Truck key="v" />],
     ["dispatchers", "Equipe / Acessos", <ShieldCheck key="g" />],
     ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
+    ["operations", "Central operacional", <Zap key="ops" />],
   ];
 
   const allowedNavItems = allNavItems.filter(([id]) => {
@@ -1765,7 +1771,7 @@ function Dispatcher({
       return ["roteirizador", "planner", "routes", "vehicles", "people"].includes(id);
     }
     if (userRole === "office") {
-      return ["ssw"].includes(id);
+      return ["ssw", "operations"].includes(id);
     }
     return true;
   });
@@ -1858,6 +1864,8 @@ function Dispatcher({
                         ? "Roteirizador Automático"
                         : tab === "ssw"
                           ? "Rastreamento pelo DANFE (SSW e Correios)"
+                          : tab === "operations"
+                            ? "Central operacional"
                           : "Equipe e Níveis de Acesso"}
             </h1>
           </div>
@@ -1934,6 +1942,9 @@ function Dispatcher({
             onPrintReport={(r) => openReport(r.id)}
             onAssignRoute={(r) => setAssigningRoute(r)}
             onOpenTab={(t) => setTab(t as any)}
+            userRole={userRole}
+            drivers={drivers}
+            onOpenHeatmap={(points) => { setHeatPoints(points); setShowHeatmap(true); }}
           />
         )}{" "}
         {tab === "routes" && (
@@ -1970,6 +1981,7 @@ function Dispatcher({
         {tab === "ssw" && (
           <SSWTrackingView onBack={() => setTab(userRole === "admin" ? "overview" : "ssw")} />
         )}
+        {tab === "operations" && <OperationsHub userRole={userRole} drivers={drivers} />}
       </main>
 
       {showChangePassword && (
@@ -2024,6 +2036,7 @@ function Dispatcher({
           }}
         />
       )}
+      {showHeatmap && <CityHeatmapModal points={heatPoints} onClose={() => setShowHeatmap(false)} />}
 
     </div>
   );
@@ -2036,6 +2049,9 @@ function Overview({
   onPrintReport,
   onAssignRoute,
   onOpenTab,
+  userRole,
+  drivers,
+  onOpenHeatmap,
 }: {
   routes: RouteData[];
   active: RouteData[];
@@ -2044,11 +2060,15 @@ function Overview({
   onPrintReport: (route: RouteData) => void;
   onAssignRoute?: (route: RouteData) => void;
   onOpenTab?: (tab: string) => void;
+  userRole: string;
+  drivers: Driver[];
+  onOpenHeatmap: (points: Array<[number, number, number]>) => void;
 }) {
   const delivered = routes.reduce((n, r) => n + Number(r.delivered || 0), 0);
   const todayLocal = new Date().toLocaleDateString("en-CA");
   return (
     <>
+      <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
       <section className="metrics">
         <Metric
           label="Rotas hoje"
@@ -2102,6 +2122,8 @@ function Overview({
           </div>
         </section>
       </div>
+
+      <OperationsHub userRole={userRole} drivers={drivers} />
 
       {/* Task 1: Mapa ao vivo para o Organizador */}
       <section className="panel live-fleet-panel">

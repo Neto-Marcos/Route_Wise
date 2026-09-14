@@ -348,6 +348,16 @@ textarea:focus {
   font-weight: 780;
   cursor: pointer;
 }
+.button, .panel, .metric {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background-color .18s ease;
+}
+.button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 7px 18px rgba(15, 23, 42, .12); }
+.button:active:not(:disabled) { transform: scale(.98); }
+.panel:hover { border-color: rgba(37, 99, 235, .28); }
+@media (prefers-reduced-motion: reduce) {
+  .button, .panel, .metric { transition: none !important; }
+  .button:hover:not(:disabled), .button:active:not(:disabled) { transform: none; }
+}
 .button svg {
   width: 17px;
 }

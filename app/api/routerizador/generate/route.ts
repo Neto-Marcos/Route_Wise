@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateRoutes, type EngineConfig } from '@/lib/route-engine';
 import type { OrderRow } from '@/lib/spreadsheet-parser';
+import { resolveOrderCoordinates } from '@/lib/city-geocoding';
 
 export const runtime = 'nodejs';
 
@@ -46,6 +47,10 @@ export async function POST(req: NextRequest) {
       maxHours:        body.config?.maxHours        ?? 72,
     };
 
+    // A cidade/UF da planilha é a fonte de verdade. Antes de montar a rota,
+    // confirma coordenadas no cache cartográfico e consulta o mapa apenas para
+    // cidades ainda desconhecidas.
+    await resolveOrderCoordinates(eligibleRows);
     const result = generateRoutes(eligibleRows, config);
     return NextResponse.json(result);
   } catch (err) {
