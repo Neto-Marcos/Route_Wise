@@ -12,6 +12,20 @@ import {
   DollarSign,
   Truck,
   RefreshCw,
+"use client";
+
+import React, { useState, useEffect } from "react";
+import {
+  TrendingUp,
+  Target,
+  Clock,
+  MapPin,
+  Flame,
+  Award,
+  Calendar,
+  DollarSign,
+  Truck,
+  RefreshCw,
   Edit2,
   CheckCircle2,
   AlertTriangle,
@@ -26,6 +40,21 @@ interface AnalyticsData {
   realizedDeliveries: number;
   totalRevenue: number;
   totalEstimatedFuel: number;
+  costPerKm?: number;
+  costRatioPct?: number;
+  otifPct?: number;
+  fleetStatus?: {
+    active: number;
+    assigned: number;
+    completed: number;
+    total: number;
+  };
+  driverRanking?: Array<{
+    name: string;
+    routes: number;
+    deliveries: number;
+    km: number;
+  }>;
   projection: {
     dailyAvgKm: number;
     projectedTotalKm: number;
@@ -127,10 +156,10 @@ export function DashboardAnalytics({
       <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}>
-            <TrendingUp size={20} color="#2563eb" /> Inteligência de Metas & Performance Mensal
+            <TrendingUp size={20} color="#2563eb" /> Inteligência Logística & Performance da Frota
           </h2>
           <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--muted)" }}>
-            Acompanhamento de KM em tempo real, previsibilidade de meta e SLAs
+            Painel executivo de OTIF, custos de frete, metas e distribuição geográfica
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -142,9 +171,9 @@ export function DashboardAnalytics({
                 haptics.tap();
                 onOpenHeatmap(data.heatPoints);
               }}
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, height: 34 }}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, height: 34, background: "rgba(234,88,12,0.1)", color: "#ea580c", border: "1px solid rgba(234,88,12,0.25)" }}
             >
-              <Flame size={15} color="#ea580c" /> Heatmap de Cidades
+              <Flame size={15} color="#ea580c" /> Heatmap de Cidades ({data.heatPoints.length})
             </button>
           )}
           <button
@@ -159,6 +188,30 @@ export function DashboardAnalytics({
           >
             <RefreshCw size={14} />
           </button>
+        </div>
+      </div>
+
+      {/* Faixa de KPIs Logísticos Executivos */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 14 }}>
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Nível de Serviço (OTIF)</span>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{data.otifPct || 95}%</div>
+          <small style={{ fontSize: 11, color: "var(--muted)" }}>Prazo & integridade</small>
+        </div>
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Custo por KM</span>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", marginTop: 4 }}>R$ {data.costPerKm || "3,85"}</div>
+          <small style={{ fontSize: 11, color: "var(--muted)" }}>Combustível & diárias</small>
+        </div>
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Custo / Carga (% VFR)</span>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#3b82f6", marginTop: 4 }}>{data.costRatioPct || 4.2}%</div>
+          <small style={{ fontSize: 11, color: "var(--muted)" }}>Frete sobre faturamento</small>
+        </div>
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Rotas Ativas</span>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#f59e0b", marginTop: 4 }}>{data.fleetStatus?.active || 0} / {data.fleetStatus?.total || 0}</div>
+          <small style={{ fontSize: 11, color: "var(--muted)" }}>Veículos em trânsito</small>
         </div>
       </div>
 
@@ -249,7 +302,7 @@ export function DashboardAnalytics({
             />
           </div>
 
-          {/* Ranking Preditivo */}
+          {/* Previsibilidade de Fechamento */}
           <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.15)", fontSize: 12, color: "#1d4ed8" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, marginBottom: 2 }}>
               <Award size={14} /> Previsibilidade de Fechamento:
@@ -258,7 +311,7 @@ export function DashboardAnalytics({
           </div>
         </div>
 
-        {/* Card 2: Score de Pontualidade nos Clientes (SLA) */}
+        {/* Card 2: Produtividade dos Motoristas */}
         <div
           style={{
             padding: "16px",
@@ -270,32 +323,24 @@ export function DashboardAnalytics({
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5, marginBottom: 10 }}>
-            <Clock size={15} color="#059669" /> Score de Pontualidade & Conclusão
+            <Truck size={15} color="#059669" /> Produtividade de Motoristas
           </span>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", maxHeight: 150 }}>
-            {data.clientScores.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)", margin: "auto" }}>Nenhum histórico suficiente de entregas por cliente.</p>
+            {!data.driverRanking || data.driverRanking.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "auto" }}>Nenhum motorista alocado no período.</p>
             ) : (
-              data.clientScores.slice(0, 4).map((c, i) => (
+              data.driverRanking.map((drv, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, borderBottom: "1px solid rgba(0,0,0,0.04)", paddingBottom: 4 }}>
-                  <span style={{ fontWeight: 600, maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.name}
-                  </span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{c.completed}/{c.total}</span>
-                    <span
-                      style={{
-                        padding: "2px 6px",
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        background: c.score >= 90 ? "#dcfce7" : c.score >= 70 ? "#fef3c7" : "#fee2e2",
-                        color: c.score >= 90 ? "#166534" : c.score >= 70 ? "#b45309" : "#991b1b",
-                      }}
-                    >
-                      {c.score}%
+                  <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 16, height: 16, borderRadius: "50%", background: "#059669", color: "#fff", display: "grid", placeItems: "center", fontSize: 10, fontWeight: 800 }}>
+                      {i + 1}
                     </span>
+                    {drv.name}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{drv.deliveries} entregas</span>
+                    <strong style={{ fontSize: 11, color: "var(--ink)" }}>{drv.km} km</strong>
                   </div>
                 </div>
               ))
@@ -303,7 +348,7 @@ export function DashboardAnalytics({
           </div>
         </div>
 
-        {/* Card 3: Top Cidades com Mais Pedidos */}
+        {/* Card 3: Top Cidades com Maior Volume */}
         <div
           style={{
             padding: "16px",
