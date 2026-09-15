@@ -12,20 +12,6 @@ import {
   DollarSign,
   Truck,
   RefreshCw,
-"use client";
-
-import React, { useState, useEffect } from "react";
-import {
-  TrendingUp,
-  Target,
-  Clock,
-  MapPin,
-  Flame,
-  Award,
-  Calendar,
-  DollarSign,
-  Truck,
-  RefreshCw,
   Edit2,
   CheckCircle2,
   AlertTriangle,

@@ -76,6 +76,13 @@ export function RouteReportModal({
               <Printer size={15} /> Imprimir / Salvar PDF
             </button>
             {googleMapsUrl && <a className="button secondary compact" href={googleMapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={15} /> Google Maps</a>}
+          </div>
+        </div>
+
+        {/* Printable Document Paper */}
+        <div className="printable-report-paper" id="printable-report">
+          {/* Header */}
+          <header className="report-doc-header">
             <div className="report-logo">
               <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
               <b>Criar Rota</b>
