@@ -4768,6 +4768,24 @@ textarea:focus {
   }
 }
 
+/* Alguns PWAs no iOS reportam uma viewport lógica maior após restauração.
+   O painel administrativo continua sendo uma experiência móvel em telas táteis,
+   sem deixar a grade lateral reduzir a área útil do conteúdo. */
+@media (hover: none) and (pointer: coarse) and (max-width: 1024px) {
+  .workspace.managed-workspace {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: none !important;
+  }
+
+  .workspace.managed-workspace > .dashboard {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+}
+
 /* Compact payment inbox: only pending requests stay in the operational view. */
 .payment-pending-row {
   appearance: none;
