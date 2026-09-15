@@ -1,5 +1,5 @@
 "use client";
-import { Navigation, Printer, X } from "lucide-react";
+import { FileSpreadsheet, Navigation, Printer, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
 import { printElement } from "@/lib/print-document";
 
@@ -63,23 +63,19 @@ export function RouteReportModal({
         <div className="report-floating-toolbar no-print">
           <div className="toolbar-info">
             <b>Relatório de Rota (Romaneio)</b>
-            <small>Pronto para impressão ou exportação em PDF</small>
+            <small>Pronto para impressão ou exportação em PDF / Excel</small>
           </div>
           <div className="toolbar-buttons">
             <button type="button" className="button secondary compact" onClick={onClose}>
               <X size={15} /> Fechar
             </button>
+            <a className="button secondary compact" href="/api/reports/export?format=xlsx" download>
+              <FileSpreadsheet size={15} /> Baixar Excel (.xlsx)
+            </a>
             <button type="button" className="button primary compact" onClick={printDocument}>
               <Printer size={15} /> Imprimir / Salvar PDF
             </button>
             {googleMapsUrl && <a className="button secondary compact" href={googleMapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={15} /> Google Maps</a>}
-          </div>
-        </div>
-
-        {/* Printable Document Paper */}
-        <div className="printable-report-paper" id="printable-report">
-          {/* Header */}
-          <header className="report-doc-header">
             <div className="report-logo">
               <img className="brand-mark" src="/icon.svg" width={40} height={40} alt="" aria-hidden="true" />
               <b>Criar Rota</b>
