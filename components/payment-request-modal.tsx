@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle2, Clock, Copy, DollarSign, ImageIcon, XCircle } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 
@@ -49,18 +50,18 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId }: { onCl
     return <span style={{ color: "#059669" }}><CheckCircle2 size={13} /> {request.status === "paid" ? "Pago" : "Aprovado"}</span>;
   };
 
-  return <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: "16px" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+  const content = <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: "max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px))" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div style={{ width: "100%", maxWidth: "640px", maxHeight: "85vh", background: "var(--card, #fff)", borderRadius: "18px", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 25px -5px rgba(0,0,0,.2)" }}>
       <header style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: "8px" }}><DollarSign size={20} color="#059669" /><b style={{ fontSize: "16px", color: "var(--ink)" }}>{isAdmin ? "Solicitações de pagamento" : "Solicitar pagamento"}</b></div><button type="button" className="button secondary compact" onClick={onClose} style={{ width: "32px", height: "32px", padding: 0 }}>✕</button></header>
       <div style={{ padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "18px" }}>
-        <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "12px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)" }}>
+        {!isAdmin && <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "12px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)" }}>
           <b style={{ fontSize: "13px", color: "var(--ink)" }}>Nova solicitação</b>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}><label style={{ fontSize: "12px", fontWeight: 600 }}>Categoria:<select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}><option value="adiantamento">Adiantamento</option><option value="combustivel">Combustível</option><option value="pedagio">Pedágio</option><option value="diaria">Diária</option><option value="reembolso">Reembolso / Manutenção</option></select></label><label style={{ fontSize: "12px", fontWeight: 600 }}>Valor (R$):<input type="number" step="0.01" required placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inputStyle, fontWeight: 700 }} /></label></div>
           <label style={{ fontSize: "12px", fontWeight: 600 }}>Motivo / descrição:<input type="text" required placeholder="Ex: alimentação durante a rota" value={description} onChange={(e) => setDescription(e.target.value)} style={inputStyle} /></label>
           <div style={{ padding: "10px", border: "1px dashed #65bfa4", borderRadius: "9px", display: "flex", flexDirection: "column", gap: "8px" }}><b style={{ fontSize: "12px", color: "var(--ink)" }}>Dados para receber via Pix</b><label style={{ fontSize: "12px", fontWeight: 600 }}>Chave Pix (opcional):<input type="text" placeholder="CPF, e-mail, telefone ou chave aleatória" value={pixKey} onChange={(e) => setPixKey(e.target.value)} style={inputStyle} /></label><label style={{ fontSize: "12px", fontWeight: 600 }}>QR Code do Pix (opcional):<input type="file" accept="image/*" onChange={(e) => setPixQrFile(e.target.files?.[0] || null)} style={{ width: "100%", marginTop: "4px" }} />{pixQrFile && <small>{pixQrFile.name}</small>}</label></div>
           <label style={{ fontSize: "12px", fontWeight: 600 }}>Comprovante da despesa (opcional):<input type="file" accept="image/*" onChange={(e) => setExpenseFile(e.target.files?.[0] || null)} style={{ width: "100%", marginTop: "4px" }} />{expenseFile && <small>{expenseFile.name}</small>}</label>
           <button type="submit" disabled={sending} className="button primary" style={{ background: "#059669", borderColor: "#059669", height: "38px" }}>{sending ? "Enviando..." : "Enviar solicitação ao ADM"}</button>
-        </form>
+        </form>}
         {msg && <p style={{ margin: 0, fontSize: "12px", color: /erro|anexe|não foi/i.test(msg) ? "#dc2626" : "#059669", fontWeight: 600 }}>{msg}</p>}
         <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}><b style={{ fontSize: "13px", color: "var(--ink)" }}>Histórico de solicitações</b>{loading ? <p>Carregando...</p> : requests.length === 0 ? <p>Nenhuma solicitação registrada.</p> : requests.map((request) => <article key={request.id} style={{ padding: "12px", borderRadius: "10px", border: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: "9px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}><div><strong style={{ color: "var(--ink)" }}>R$ {Number(request.amount).toFixed(2).replace(".", ",")}</strong> <span style={{ fontSize: "11px", textTransform: "uppercase" }}>{request.category}</span><div style={{ fontSize: "12px", color: "var(--ink)" }}>{request.description}</div><small>{request.driver_name ? `Motorista: ${request.driver_name} • ` : ""}{new Date(request.created_at).toLocaleDateString("pt-BR")}</small></div><span style={{ fontSize: "11px", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "4px" }}>{status(request)}</span></div>
@@ -71,4 +72,5 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId }: { onCl
       </div>
     </div>
   </div>;
+  return typeof document === "undefined" ? null : createPortal(content, document.body);
 }
