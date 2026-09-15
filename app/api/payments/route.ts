@@ -104,10 +104,16 @@ export async function GET(request: Request) {
     `;
     const params: any[] = [companyId];
 
-    // Se for motorista, só vê as próprias solicitações
+    // Motorista só vê as próprias solicitações; ADM pode filtrar por motorista.
     if (!session && driverSession?.driverId) {
       sql += ` AND p.driver_id = $2`;
       params.push(driverSession.driverId);
+    } else if (session) {
+      const driverId = new URL(request.url).searchParams.get("driver_id");
+      if (driverId) {
+        sql += ` AND p.driver_id = $2`;
+        params.push(driverId);
+      }
     }
 
     sql += ` ORDER BY p.created_at DESC LIMIT 50`;

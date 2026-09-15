@@ -8,7 +8,7 @@ import { haptics } from "@/lib/haptics";
 type Payment = { id: string; amount: number; category: string; description: string; status: "pending" | "approved" | "rejected" | "paid"; created_at: string; driver_name?: string; receipt_url?: string | null; pix_key?: string | null; pix_qr_url?: string | null; payment_receipt_url?: string | null };
 const inputStyle = { width: "100%", height: "36px", marginTop: "4px", borderRadius: "8px", border: "1px solid var(--line)", padding: "0 8px", background: "var(--card)", color: "var(--ink)" };
 
-export function PaymentRequestModal({ onClose, userRole, activeRouteId }: { onClose: () => void; userRole?: string; activeRouteId?: string }) {
+export function PaymentRequestModal({ onClose, userRole, activeRouteId, driverId, driverName }: { onClose: () => void; userRole?: string; activeRouteId?: string; driverId?: string; driverName?: string }) {
   const [requests, setRequests] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [amount, setAmount] = useState(""); const [description, setDescription] = useState(""); const [category, setCategory] = useState("adiantamento"); const [pixKey, setPixKey] = useState("");
@@ -16,7 +16,7 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId }: { onCl
   const [sending, setSending] = useState(false); const [reviewingId, setReviewingId] = useState<string | null>(null); const [msg, setMsg] = useState("");
   const isAdmin = userRole === "admin" || userRole === "superadmin";
 
-  const loadRequests = async () => { setLoading(true); try { const res = await fetch("/api/payments"); if (res.ok) setRequests(await res.json()); } catch (error) { console.error(error); } finally { setLoading(false); } };
+  const loadRequests = async () => { setLoading(true); try { const suffix = driverId ? `?driver_id=${encodeURIComponent(driverId)}` : ""; const res = await fetch(`/api/payments${suffix}`); if (res.ok) setRequests(await res.json()); } catch (error) { console.error(error); } finally { setLoading(false); } };
   useEffect(() => { loadRequests(); }, []);
   const upload = async (file: File, kind: string) => { const body = new FormData(); body.append("file", file); body.append("kind", kind); const res = await fetch("/api/uploads/direct", { method: "POST", body }); if (!res.ok) throw new Error("Não foi possível enviar a imagem."); return (await res.json()).url as string; };
 
@@ -52,7 +52,7 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId }: { onCl
 
   const content = <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: "max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px))" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div style={{ width: "100%", maxWidth: "640px", maxHeight: "85vh", background: "var(--card, #fff)", borderRadius: "18px", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 25px -5px rgba(0,0,0,.2)" }}>
-      <header style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: "8px" }}><DollarSign size={20} color="#059669" /><b style={{ fontSize: "16px", color: "var(--ink)" }}>{isAdmin ? "Solicitações de pagamento" : "Solicitar pagamento"}</b></div><button type="button" className="button secondary compact" onClick={onClose} style={{ width: "32px", height: "32px", padding: 0 }}>✕</button></header>
+      <header style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: "8px" }}><DollarSign size={20} color="#059669" /><b style={{ fontSize: "16px", color: "var(--ink)" }}>{isAdmin ? (driverName ? `Pagamentos: ${driverName}` : "Solicitações de pagamento") : "Solicitar pagamento"}</b></div><button type="button" className="button secondary compact" onClick={onClose} style={{ width: "32px", height: "32px", padding: 0 }}>✕</button></header>
       <div style={{ padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "18px" }}>
         {!isAdmin && <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "12px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)" }}>
           <b style={{ fontSize: "13px", color: "var(--ink)" }}>Nova solicitação</b>

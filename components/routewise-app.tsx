@@ -209,6 +209,7 @@ export default function RouteWiseApp() {
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [pwaRefreshing, setPwaRefreshing] = useState(false);
   const online = useOnline();
 
   useEffect(() => {
@@ -220,8 +221,12 @@ export default function RouteWiseApp() {
     const refreshFromPull = async () => {
       if (refreshing || !navigator.onLine) return;
       refreshing = true;
+      setPwaRefreshing(true);
       try {
-        await registration?.update();
+        await Promise.all([
+          registration?.update(),
+          new Promise((resolve) => window.setTimeout(resolve, 550)),
+        ]);
       } finally {
         // A navegação é feita depois da checagem: o service worker usa rede
         // primeiro e traz imediatamente a versão mais recente do servidor.
@@ -312,6 +317,8 @@ export default function RouteWiseApp() {
 
   return (
     <div className="app">
+
+      {pwaRefreshing && <div className="pwa-refreshing" role="status" aria-live="polite"><RefreshCw size={19} /> Atualizando RouteWise...</div>}
 
       {installPrompt && (
         <aside className="pwa-install-banner no-print">
@@ -778,7 +785,8 @@ function DriverPicker({
       return;
     }
     setLoading(true);
-    api(`/api/drivers?company=${encodeURIComponent(code)}`)
+    const normalizedCode = code.trim();
+    api(`/api/drivers?company=${encodeURIComponent(normalizedCode)}&refresh=${Date.now()}`, { cache: "no-store" })
       .then((data) => {
         setDrivers(data);
         setError("");
@@ -802,7 +810,7 @@ function DriverPicker({
   }, [companyCode, fetchDrivers]);
 
   const handleCompanyCodeChange = (val: string) => {
-    const formatted = val.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    const formatted = val.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
     setCompanyCode(formatted);
     setSelectedDriver(null);
     setError("");

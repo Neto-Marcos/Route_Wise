@@ -259,8 +259,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const all = sp.get("all") === "true";
       const session = await getSession(requestedRole(req));
       let companyId = session?.companyId;
-      if (!companyId && sp.get("company")) {
-        const company = await query("SELECT id FROM companies WHERE code=upper($1) AND active=true", [sp.get("company")]);
+      const requestedCompanyCode = sp.get("company")?.trim();
+      if (!companyId && requestedCompanyCode) {
+        const company = await query("SELECT id FROM companies WHERE code=upper($1) AND active=true", [requestedCompanyCode]);
         companyId = company.rows[0]?.id;
       }
       if (!companyId) return json({ error: "Informe o código da empresa" }, 400);
@@ -269,7 +270,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         `SELECT id,public_id,name,phone,photo,active,created_at FROM drivers WHERE company_id=$1 ${showAll ? "" : "AND active=true"} ORDER BY active DESC, name ASC`,
         [companyId],
       );
-      return json(rows);
+      return NextResponse.json(rows, { headers: { "Cache-Control": "no-store, max-age=0, must-revalidate" } });
     }
     const session = await getSession(requestedRole(req));
 
