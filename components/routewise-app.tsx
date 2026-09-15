@@ -212,8 +212,42 @@ export default function RouteWiseApp() {
   const online = useOnline();
 
   useEffect(() => {
-    navigator.serviceWorker?.register("/sw.js");
+    let pullStartY: number | null = null;
+    let refreshing = false;
+    let registration: ServiceWorkerRegistration | undefined;
+
+    const checkForUpdate = () => registration?.update().catch(() => {});
+    const refreshFromPull = async () => {
+      if (refreshing || !navigator.onLine) return;
+      refreshing = true;
+      try {
+        await registration?.update();
+      } finally {
+        // A navegação é feita depois da checagem: o service worker usa rede
+        // primeiro e traz imediatamente a versão mais recente do servidor.
+        window.location.reload();
+      }
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      const atTop = window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
+      pullStartY = atTop ? event.touches[0]?.clientY ?? null : null;
+    };
+    const onTouchEnd = (event: TouchEvent) => {
+      const endY = event.changedTouches[0]?.clientY;
+      if (pullStartY !== null && endY && endY - pullStartY > 92) refreshFromPull();
+      pullStartY = null;
+    };
+
+    navigator.serviceWorker?.register("/sw.js", { updateViaCache: "none" }).then((nextRegistration) => {
+      registration = nextRegistration;
+      checkForUpdate();
+    }).catch(() => {});
     if (online) flushQueue().catch(() => {});
+
+    window.addEventListener("focus", checkForUpdate);
+    document.addEventListener("visibilitychange", checkForUpdate);
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
 
     // Check saved dispatcher role in session and verify with server
     if (typeof window !== "undefined") {
@@ -248,7 +282,13 @@ export default function RouteWiseApp() {
       setInstallPrompt(e);
     };
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("focus", checkForUpdate);
+      document.removeEventListener("visibilitychange", checkForUpdate);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
   }, [online]);
 
   const handleThemeChange = (nextTheme: "light" | "dark") => {
