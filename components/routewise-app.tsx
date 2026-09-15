@@ -318,7 +318,7 @@ export default function RouteWiseApp() {
   return (
     <div className="app">
 
-      {pwaRefreshing && <div className="pwa-refreshing" role="status" aria-live="polite"><RefreshCw size={19} /> Atualizando RouteWise...</div>}
+      {pwaRefreshing && <div className="pwa-refreshing" role="status" aria-live="polite"><RefreshCw size={19} /> Atualizando Criar Rota...</div>}
 
       {installPrompt && (
         <aside className="pwa-install-banner no-print">
@@ -391,6 +391,7 @@ export default function RouteWiseApp() {
           <DriverApp
             driver={selectedDriver}
             onExit={() => {
+              api("/api/session/logout", { method: "POST", headers: { "X-RouteWise-Role": "driver" } }).catch(() => {});
               setSelectedDriver(null);
               sessionStorage.removeItem("rw_role");
               sessionStorage.removeItem("rw_user_role");

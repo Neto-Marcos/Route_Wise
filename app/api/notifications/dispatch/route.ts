@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const session = await getSession("dispatcher") ?? await getSession("driver");
     if (!session) return NextResponse.json({ error: "Sessão necessária" }, { status: 401 });
     const messageText = `Olá ${clientName || "Cliente"}! Seu pedido (Parada #${stopId || "1"}) foi atualizado para: ${status}. Acompanhe em tempo real: ${trackingUrl || "https://criarrota.com.br/rastreio"}`;
-    const notificationTitle = title || "RouteWise · Atualização operacional";
+    const notificationTitle = title || "Criar Rota · Atualização operacional";
     const event = await query<{ id: string }>(
       `INSERT INTO notification_events(company_id,event_type,recipient_type,title,body,payload,status)
        VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING id`,

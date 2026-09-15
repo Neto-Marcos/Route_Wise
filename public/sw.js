@@ -42,7 +42,7 @@ self.addEventListener("fetch", (e) => {
 // Web Push: o clique leva o usuário diretamente à operação relacionada.
 self.addEventListener("push", (event) => {
   const payload = event.data ? event.data.json() : {};
-  event.waitUntil(self.registration.showNotification(payload.title || "RouteWise", {
+  event.waitUntil(self.registration.showNotification(payload.title || "Criar Rota", {
     body: payload.body || "Há uma atualização operacional.",
     icon: "/icon-192.png",
     badge: "/icon-192.png",

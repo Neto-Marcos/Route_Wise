@@ -258,11 +258,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const sp = req.nextUrl.searchParams;
       const all = sp.get("all") === "true";
       const session = await getSession(requestedRole(req));
-      let companyId = session?.companyId;
       const requestedCompanyCode = sp.get("company")?.trim();
-      if (!companyId && requestedCompanyCode) {
+      // A tela de motorista é uma descoberta pública: o código digitado deve
+      // prevalecer sobre qualquer cookie antigo de outro motorista no aparelho.
+      let companyId: string | undefined;
+      if (requestedCompanyCode) {
         const company = await query("SELECT id FROM companies WHERE code=upper($1) AND active=true", [requestedCompanyCode]);
         companyId = company.rows[0]?.id;
+      } else {
+        companyId = session?.companyId;
       }
       if (!companyId) return json({ error: "Informe o código da empresa" }, 400);
       const showAll = all && session?.role === "dispatcher";
