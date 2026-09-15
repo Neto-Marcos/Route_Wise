@@ -938,6 +938,18 @@ textarea:focus {
   background: var(--navy);
   color: white;
 }
+/* Ações do motorista ficam sobre o cabeçalho escuro: contraste explícito
+   para não depender das variáveis do tema ou de estilos inline. */
+.driver-shell > header button:not(.avatar-button) {
+  background: #1d2c48 !important;
+  border-color: #59708e !important;
+  color: #f8fafc !important;
+}
+.driver-shell > header button:not(.avatar-button):hover {
+  background: #2b4164 !important;
+  border-color: #93c5fd !important;
+  color: #ffffff !important;
+}
 .avatar-button {
   width: 40px;
   height: 40px;
