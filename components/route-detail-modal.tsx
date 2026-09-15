@@ -7,7 +7,6 @@ import {
   Check,
   CheckCircle2,
   Clock,
-  ExternalLink,
   FileText,
   Gauge,
   MapPin,
@@ -420,25 +419,6 @@ export function RouteDetailModal({
                         <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
                           <button type="button" className="button secondary compact" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => setSelectedStopId(stop.id)}>
                             <MapPin size={12} /> Ver no mapa
-                          </button>
-                          <button
-                            type="button"
-                            className="button secondary compact"
-                            style={{ fontSize: 11, padding: "3px 8px" }}
-                            onClick={() => {
-                              fetch("/api/ssw/rastreio", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ invoiceNumber: stop.name }),
-                              })
-                                .then((r) => r.json())
-                                .then((data) => {
-                                  alert(`📦 Rastreamento SSW — ${stop.name}\nStatus: ${data.status}\nÚltima atualização: ${data.occurrences?.[2]?.occurrenceName || "Em Rota"} (${data.occurrences?.[2]?.city || "Filial"})`);
-                                })
-                                .catch(() => alert("Não foi possível consultar o SSW no momento."));
-                            }}
-                          >
-                            <ExternalLink size={12} /> Rastreio SSW
                           </button>
                           {canEdit && (
                             <button type="button" className="button secondary compact" style={{ fontSize: 11, padding: "3px 8px", color: "#dc2626" }} disabled={editingStop === stop.id} onClick={() => removeStop(stop.id, stop.name)}>
