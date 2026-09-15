@@ -4031,7 +4031,11 @@ textarea:focus {
 }
 @media screen and (max-width: 700px) {
   /* Menu inferior: todas as abas ficam acessíveis por arrasto horizontal. */
-  .managed-workspace .sidebar { height: 78px; padding: 7px 6px; overflow: hidden; }
+  .managed-workspace .sidebar {
+    height: calc(86px + env(safe-area-inset-bottom, 0px));
+    padding: 9px 6px calc(9px + env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+  }
   .managed-workspace .sidebar nav {
     display: flex;
     width: 100%;
@@ -4047,14 +4051,14 @@ textarea:focus {
   .managed-workspace .sidebar nav button {
     flex: 0 0 92px;
     min-width: 92px;
-    height: 64px;
+    height: 68px;
     padding: 6px 4px;
   }
   .managed-workspace .sidebar nav button svg { width: 20px; height: 20px; }
   .managed-workspace .sidebar nav button span { font-size: 10px; line-height: 1.15; }
   .managed-workspace .sidebar-footer-actions { display: none !important; }
-  .managed-workspace > .dashboard { padding-bottom: 96px; }
-  .planning-workspace > .dashboard { padding: 12px 10px 94px; }
+  .managed-workspace > .dashboard { padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
+  .planning-workspace > .dashboard { padding: 12px 10px calc(106px + env(safe-area-inset-bottom, 0px)); }
   .planning-workspace > .dashboard > header { margin-bottom: 12px; }
   .planning-workspace .planner-fullscreen { height: auto; min-height: 0; }
   .planning-workspace .planner-fullscreen .planner-panel { height: auto; overflow: visible; }

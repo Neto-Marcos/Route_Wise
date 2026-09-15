@@ -132,7 +132,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { amount, description, category, route_id, receipt_url } = body;
+    const { amount, description, category, route_id, receipt_url, pix_key, pix_qr_url } = body;
 
     if (!amount || !description) {
       return NextResponse.json({ error: "Valor e descrição são obrigatórios" }, { status: 400 });
@@ -141,8 +141,8 @@ export async function POST(request: Request) {
     const driverId = driverSession?.driverId || body.driver_id || null;
 
     const res = await query(
-      `INSERT INTO payment_requests (company_id, driver_id, route_id, category, amount, description, receipt_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+      `INSERT INTO payment_requests (company_id, driver_id, route_id, category, amount, description, receipt_url, pix_key, pix_qr_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
        RETURNING *`,
       [
         companyId,
@@ -152,6 +152,8 @@ export async function POST(request: Request) {
         Number(amount),
         description.trim(),
         receipt_url || null,
+        String(pix_key || "").trim().slice(0, 255) || null,
+        pix_qr_url || null,
       ]
     );
 
@@ -185,18 +187,27 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, status, admin_notes } = body;
+    const { id, status, admin_notes, payment_receipt_url } = body;
 
     if (!id || !["approved", "rejected", "paid"].includes(status)) {
       return NextResponse.json({ error: "ID e status válido ('approved', 'rejected', 'paid') são obrigatórios" }, { status: 400 });
     }
+    if (status === "paid" && !payment_receipt_url) {
+      return NextResponse.json({ error: "Anexe o comprovante Pix antes de marcar como pago" }, { status: 400 });
+    }
 
     const res = await query(
       `UPDATE payment_requests
-       SET status = $1, admin_notes = $2, reviewed_at = now(), reviewed_by = $3
-       WHERE id = $4 AND company_id = $5
+       SET status = $1,
+           admin_notes = $2,
+           payment_receipt_url = COALESCE($3, payment_receipt_url),
+           reviewed_at = now(),
+           reviewed_by = $4,
+           paid_at = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END,
+           paid_by = CASE WHEN $1 = 'paid' THEN $4 ELSE paid_by END
+       WHERE id = $5 AND company_id = $6
        RETURNING *`,
-      [status, admin_notes || null, session.dispatcherId || null, id, session.companyId]
+      [status, admin_notes || null, payment_receipt_url || null, session.dispatcherId || null, id, session.companyId]
     );
 
     if (res.rows.length === 0) {
