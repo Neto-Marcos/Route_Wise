@@ -413,6 +413,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const data = await body(req);
   try {
     if (p.join("/") === "companies/register") {
+      const session = await getSession(requestedRole(req));
+      if (!session || session.userRole !== "superadmin") {
+        return json({ error: "Apenas o Administrador Supremo pode cadastrar novas empresas e filiais." }, 403);
+      }
       const code = String(data.companyCode || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
       const email = String(data.email || "").trim().toLowerCase();
       const password = String(data.password || "");

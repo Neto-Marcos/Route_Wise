@@ -675,7 +675,7 @@ function Pin({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode] = useState<"login" | "register">("login");
   const [error, setError] = useState("");
 
   const roleTitles: Record<string, { title: string; desc: string }> = {
@@ -751,13 +751,6 @@ function Pin({
 
         <div className="auth-actions">
           <button className="button primary">{mode === "register" ? "Criar empresa e entrar" : "Entrar no sistema"}</button>
-          {targetRole === "admin" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
-              <button type="button" className="button auth-secondary" onClick={() => { setMode(mode === "register" ? "login" : "register"); setError(""); }}>
-                {mode === "register" ? "Já possuo uma empresa" : "Cadastrar nova empresa"}
-              </button>
-            </div>
-          )}
         </div>
         {error && <p className="form-error">{error}</p>}
       </form>
