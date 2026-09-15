@@ -1,6 +1,74 @@
 import { NextResponse } from "next/server";
+import webpush from "web-push";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
+
+export const runtime = "nodejs";
+
+async function notifyAdministratorsOfPaymentRequest({
+  companyId,
+  driverId,
+  amount,
+  category,
+  description,
+}: {
+  companyId: string | undefined;
+  driverId: string | null;
+  amount: number;
+  category: string;
+  description: string;
+}) {
+  if (!companyId) return;
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  if (!publicKey || !privateKey) return;
+
+  const [subscriptions, driver] = await Promise.all([
+    query<{ endpoint: string; p256dh: string; auth: string }>(
+      "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE company_id=$1 AND user_type='dispatcher'",
+      [companyId],
+    ),
+    driverId
+      ? query<{ name: string }>("SELECT name FROM drivers WHERE id=$1", [driverId])
+      : Promise.resolve({ rows: [] as Array<{ name: string }> }),
+  ]);
+  if (!subscriptions.rows.length) return;
+
+  const driverName = driver.rows[0]?.name ?? "Motorista";
+  const formattedAmount = Number(amount).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+  const payload = JSON.stringify({
+    title: "Nova solicitação de pagamento",
+    body: `${driverName} solicitou ${formattedAmount} para ${category}: ${description}`.slice(0, 220),
+    url: "/",
+  });
+
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || "mailto:contato@criarrota.com.br",
+    publicKey,
+    privateKey,
+  );
+  await Promise.all(
+    subscriptions.rows.map(async (subscription) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: subscription.endpoint,
+            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+          },
+          payload,
+        );
+      } catch (error: any) {
+        if (error?.statusCode === 404 || error?.statusCode === 410) {
+          await query("DELETE FROM push_subscriptions WHERE endpoint=$1", [subscription.endpoint]);
+        }
+        console.error("[payments] Não foi possível enviar push ao administrador", error);
+      }
+    }),
+  );
+}
 
 // GET: Lista solicitações de pagamento
 export async function GET(request: Request) {
@@ -76,14 +144,18 @@ export async function POST(request: Request) {
 
     const created = res.rows[0];
 
-    // Disparar Web Push para os administradores da empresa que tenham PWA instalado
+    // Avisar administradores que ativaram alertas push no PWA.
     try {
-      const subs = await query(
-        `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE company_id = $1 AND user_type = 'dispatcher'`,
-        [companyId]
-      );
-      // Aqui as inscrições push recebem o evento silencioso ou via notification trigger
-    } catch {}
+      await notifyAdministratorsOfPaymentRequest({
+        companyId,
+        driverId,
+        amount: Number(amount),
+        category: category || "adiantamento",
+        description: description.trim(),
+      });
+    } catch (notificationError) {
+      console.error("[payments] A solicitação foi salva, mas o alerta não foi enviado", notificationError);
+    }
 
     return NextResponse.json(created);
   } catch (error: any) {

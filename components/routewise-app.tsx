@@ -64,6 +64,7 @@ import { SSWTrackingView } from "./ssw-tracking-view";
 import { DashboardAnalytics } from "./dashboard-analytics";
 import { CityHeatmapModal } from "./city-heatmap-modal";
 import { OperationsHub } from "./operations-hub";
+import { PaymentRequestModal } from "./payment-request-modal";
 
 type DispatcherUser = {
   id: string;
@@ -4264,6 +4265,7 @@ function DriverApp({
   }, [load]);
 
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showPaymentRequest, setShowPaymentRequest] = useState(false);
 
   const todayStr = new Date().toLocaleDateString("en-CA");
 
@@ -4326,6 +4328,15 @@ function DriverApp({
             title="Alterar meu PIN de acesso"
           >
             <KeyRound size={14} /> <span>Alterar PIN</span>
+          </button>
+          <button
+            type="button"
+            className="secondary compact"
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid rgba(5, 150, 105, 0.25)", background: "rgba(5, 150, 105, 0.08)", color: "#047857", cursor: "pointer" }}
+            onClick={() => setShowPaymentRequest(true)}
+            title="Solicitar pagamento, diária ou reembolso"
+          >
+            <Send size={14} /> <span>Solicitar pagamento</span>
           </button>
           <button
             type="button"
@@ -4414,6 +4425,12 @@ function DriverApp({
             setShowChangePassword(false);
             onExit();
           }}
+        />
+      )}
+      {showPaymentRequest && (
+        <PaymentRequestModal
+          userRole="driver"
+          onClose={() => setShowPaymentRequest(false)}
         />
       )}
     </main>
