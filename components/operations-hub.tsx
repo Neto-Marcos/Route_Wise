@@ -102,12 +102,25 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
       <input value={text} onChange={e => setText(e.target.value)} placeholder={messageRecipient ? "Mensagem para o motorista selecionado" : "Mensagem para toda a operação"} />
       <button className="button primary compact"><Send size={15}/>Enviar</button></form></>}
     {(tab === "delivery" || tab === "expense") && <div style={{ display: "grid", gap: 12 }}>{groupedReceipts.map(([driver, items]) => {
-      const driverId = (items as any[])[0]?.driver_id as string | undefined;
+      const driverItems = items as any[];
+      const driverId = driverItems[0]?.driver_id as string | undefined;
+      const pendingPayments = driverItems.filter(item => item.status === "pending");
+      const openDriverPayments = () => {
+        if (!driverId) return;
+        haptics.tap();
+        setPaymentDriverFilter({ id: driverId, name: driver });
+        setShowPaymentReview(true);
+      };
       return <article key={driver} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 12 }}>
-        {tab === "expense" && isAdmin && driverId ? <button type="button" className="button secondary compact" onClick={() => { haptics.tap(); setPaymentDriverFilter({ id: driverId, name: driver }); setShowPaymentReview(true); }} style={{ padding: 0, minHeight: 0, background: "transparent", border: 0, color: "var(--ink)", fontSize: "inherit" }}><strong>{driver}</strong></button> : <strong>{driver}</strong>}
-        {(items as any[]).map(item => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, paddingTop: 8, fontSize: 13 }}><span>{tab === "delivery" ? `${item.route_name} · ${item.stop_name}` : `${item.category} · ${item.description}`}</span>{tab === "delivery" && item.photo_url ? <a href={item.photo_url} target="_blank" rel="noreferrer" className="button secondary compact" style={{ fontSize: 11, textDecoration: "none" }}><ExternalLink size={13} /> Abrir comprovante</a> : <span>{tab === "expense" ? `R$ ${Number(item.amount).toFixed(2)} · ${item.status}` : new Date(item.delivered_at).toLocaleDateString("pt-BR")}</span>}</div>)}
+        {tab === "expense" ? <>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}><strong>{driver}</strong>{isAdmin && driverId && <button type="button" className="button secondary compact" onClick={openDriverPayments} style={{ fontSize: 11 }}><ReceiptText size={13} /> Ver histórico ({driverItems.length})</button>}</div>
+          {pendingPayments.length > 0 ? <div style={{ display: "grid", gap: 6, marginTop: 8 }}>{pendingPayments.map(item => <button key={item.id} type="button" onClick={openDriverPayments} className="payment-pending-row" aria-label={`Abrir solicitação pendente de ${driver}`}><span>{item.category} · {item.description}</span><strong>R$ {Number(item.amount).toFixed(2).replace(".", ",")} · Pendente</strong></button>)}</div> : <p style={{ margin: "9px 0 0", color: "var(--muted)", fontSize: 13 }}>Nenhum pagamento pendente.</p>}
+        </> : <>
+          <strong>{driver}</strong>
+          {driverItems.map(item => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, paddingTop: 8, fontSize: 13 }}><span>{item.route_name} · {item.stop_name}</span>{item.photo_url ? <a href={item.photo_url} target="_blank" rel="noreferrer" className="button secondary compact" style={{ fontSize: 11, textDecoration: "none" }}><ExternalLink size={13} /> Abrir comprovante</a> : <span>{new Date(item.delivered_at).toLocaleDateString("pt-BR")}</span>}</div>)}
+        </>}
       </article>;
-    })}{!groupedReceipts.length && <p style={{ color: "var(--muted)" }}>Nenhum comprovante enviado ainda.</p>}</div>}
+    })}{!groupedReceipts.length && <p style={{ color: "var(--muted)" }}>{tab === "expense" ? "Nenhuma solicitação de pagamento registrada." : "Nenhum comprovante enviado ainda."}</p>}</div>}
     {showPaymentReview && <PaymentRequestModal userRole={userRole} driverId={paymentDriverFilter?.id} driverName={paymentDriverFilter?.name} onClose={() => { setShowPaymentReview(false); setPaymentDriverFilter(null); }} />}
   </section>;
 }
