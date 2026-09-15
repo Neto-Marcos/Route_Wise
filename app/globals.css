@@ -518,6 +518,8 @@ input:focus, select:focus, textarea:focus {
   width: 44px !important;
   height: 42px !important;
 }
+.workspace.sidebar-collapsed .sidebar-nav-group-title { display: none; }
+.workspace.sidebar-collapsed .sidebar-nav-group + .sidebar-nav-group { margin-top: 4px; }
 .sidebar .logo {
   padding: 0 8px;
   margin-bottom: 38px;
@@ -526,6 +528,32 @@ input:focus, select:focus, textarea:focus {
   display: grid;
   gap: 5px;
 }
+.sidebar-nav-group {
+  display: grid;
+  gap: 3px;
+}
+.sidebar-nav-group + .sidebar-nav-group { margin-top: 8px; }
+.sidebar-nav-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 11px;
+  border: 0;
+  background: transparent;
+  color: #657894;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.sidebar-nav-group-title svg { transition: transform .18s ease; }
+.sidebar-nav-group:not(.open) .sidebar-nav-group-title svg { transform: rotate(-90deg); }
+.sidebar-nav-group:not(.open) .sidebar-nav-items { display: none; }
+.sidebar-nav-items { display: grid; gap: 3px; }
 .sidebar nav button,
 .sidebar .exit {
   display: flex;
@@ -4067,6 +4095,10 @@ textarea:focus {
 @media screen and (max-width: 700px) {
   /* iOS amplia automaticamente campos abaixo de 16px; isso impede o zoom ao digitar. */
   input, select, textarea { font-size: 16px !important; }
+  /* No celular a navegação segue reta, em uma única barra horizontal. */
+  .managed-workspace .sidebar-nav-group,
+  .managed-workspace .sidebar-nav-items { display: contents !important; }
+  .managed-workspace .sidebar-nav-group-title { display: none !important; }
   /* Menu inferior: todas as abas ficam acessíveis por arrasto horizontal. */
   .managed-workspace .sidebar {
     height: calc(102px + env(safe-area-inset-bottom, 0px));

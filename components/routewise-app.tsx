@@ -8,6 +8,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock,
@@ -1679,6 +1680,12 @@ function Dispatcher({
     date?: string;
   } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>({
+    "Operação": true,
+    "Rotas": true,
+    "Cadastros": true,
+    "Administração": true,
+  });
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [heatPoints, setHeatPoints] = useState<Array<[number, number, number]>>([]);
   useEffect(() => {
@@ -1828,6 +1835,12 @@ function Dispatcher({
     }
     return true;
   });
+  const navGroups = [
+    { label: "Operação", items: ["overview", "operations"] },
+    { label: "Rotas", items: ["roteirizador", "planner", "routes"] },
+    { label: "Cadastros", items: ["people", "vehicles"] },
+    { label: "Administração", items: ["dispatchers", "ssw"] },
+  ].map((group) => ({ ...group, entries: allowedNavItems.filter(([id]) => group.items.includes(id)) })).filter((group) => group.entries.length > 0);
 
   return (
     <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
@@ -1841,19 +1854,15 @@ function Dispatcher({
           <ChevronRight size={18} style={{ transform: sidebarCollapsed ? undefined : "rotate(180deg)" }} />
           <span>Recolher menu</span>
         </button>
-        <nav>
-          {allowedNavItems.map(([id, label, icon]) => (
-            <button
-              key={id}
-              title={label}
-              aria-label={label}
-              className={tab === id ? "active" : ""}
-              onClick={() => setTab(id)}
-            >
-              {icon}
-              <span>{label}</span>
+        <nav aria-label="Navegação principal">
+          {navGroups.map((group) => <div className={`sidebar-nav-group ${openNavGroups[group.label] ? "open" : ""}`} key={group.label}>
+            <button type="button" className="sidebar-nav-group-title" onClick={() => setOpenNavGroups((current) => ({ ...current, [group.label]: !current[group.label] }))} aria-expanded={openNavGroups[group.label]}>
+              <span>{group.label}</span><ChevronDown size={15} />
             </button>
-          ))}
+            <div className="sidebar-nav-items">
+              {group.entries.map(([id, label, icon]) => <button key={id} title={label} aria-label={label} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{icon}<span>{label}</span></button>)}
+            </div>
+          </div>)}
         </nav>
         <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
           <button
