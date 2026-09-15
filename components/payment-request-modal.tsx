@@ -20,6 +20,7 @@ export function PaymentRequestModal({
   const [category, setCategory] = useState("adiantamento");
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   const isAdmin = userRole === "admin" || userRole === "superadmin";
 
@@ -48,6 +49,15 @@ export function PaymentRequestModal({
     setSending(true);
     setMsg("");
     try {
+      let receipt_url: string | null = null;
+      if (receiptFile) {
+        const upload = new FormData();
+        upload.append("file", receiptFile);
+        upload.append("kind", "payment-receipt");
+        const uploadRes = await fetch("/api/uploads/direct", { method: "POST", body: upload });
+        if (!uploadRes.ok) throw new Error("Não foi possível enviar o comprovante.");
+        receipt_url = (await uploadRes.json()).url;
+      }
       const res = await fetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,12 +66,14 @@ export function PaymentRequestModal({
           description,
           category,
           route_id: activeRouteId || null,
+          receipt_url,
         }),
       });
       if (res.ok) {
         haptics.success();
         setAmount("");
         setDescription("");
+        setReceiptFile(null);
         setMsg("Solicitação enviada com sucesso ao Administrador!");
         loadRequests();
       } else {
@@ -199,6 +211,16 @@ export function PaymentRequestModal({
                 onChange={(e) => setDescription(e.target.value)}
                 style={{ width: "100%", height: "36px", marginTop: "4px", borderRadius: "8px", border: "1px solid var(--line)", padding: "0 8px", background: "var(--card)", color: "var(--ink)" }}
               />
+            </label>
+            <label style={{ fontSize: "12px", fontWeight: 600 }}>
+              Comprovante financeiro (opcional):
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                style={{ width: "100%", marginTop: "4px" }}
+              />
+              {receiptFile && <small style={{ color: "var(--muted)" }}>{receiptFile.name}</small>}
             </label>
 
             <button type="submit" disabled={sending} className="button primary" style={{ marginTop: "4px", background: "#059669", borderColor: "#059669", height: "38px" }}>

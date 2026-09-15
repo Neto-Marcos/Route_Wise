@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { BellRing, CheckCircle2, FileImage, MessageSquare, ReceiptText, Send, Target, WalletCards } from "lucide-react";
 import { haptics } from "@/lib/haptics";
+import { PaymentRequestModal } from "./payment-request-modal";
 
 type Driver = { id: string; name: string };
 type HubTab = "goals" | "chat" | "delivery" | "expense";
@@ -29,6 +30,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   const [error, setError] = useState("");
   const [pushStatus, setPushStatus] = useState("Ative alertas no dispositivo");
   const [goal, setGoal] = useState({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" });
+  const [showPaymentReview, setShowPaymentReview] = useState(false);
   const isAdmin = userRole === "admin" || userRole === "superadmin";
   const month = new Date().toISOString().slice(0, 7);
 
@@ -80,7 +82,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
 
   const tabs: Array<[HubTab, string, React.ReactNode]> = [["goals", "Metas", <Target size={16} key="g" />], ["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
   return <section className="panel" style={{ marginTop: 16, overflow: "hidden" }}>
-    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button></div>
+    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button></div></div>
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
     {error && <p className="form-error">{error}</p>}
     {tab === "goals" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
@@ -90,5 +92,6 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
     </div>}
     {tab === "chat" && <><div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 8 }}>{messages.map(m => <div key={m.id} style={{ padding: "9px 11px", borderRadius: 10, background: m.sender_type === "driver" ? "rgba(14,165,233,.09)" : "var(--card-subtle)" }}><strong style={{ fontSize: 12 }}>{m.sender_name}</strong><div>{m.message}</div><small style={{ color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("pt-BR")}</small></div>)}</div><form onSubmit={sendMessage} style={{ display: "flex", gap: 8, marginTop: 10 }}><input value={text} onChange={e => setText(e.target.value)} placeholder="Mensagem para toda a operação" style={{ flex: 1 }}/><button className="button primary compact"><Send size={15}/>Enviar</button></form></>}
     {(tab === "delivery" || tab === "expense") && <div style={{ display: "grid", gap: 12 }}>{groupedReceipts.map(([driver, items]) => <article key={driver} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 12 }}><strong>{driver}</strong>{(items as any[]).map(item => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, paddingTop: 8, fontSize: 13 }}><span>{tab === "delivery" ? `${item.route_name} · ${item.stop_name}` : `${item.category} · ${item.description}`}</span><span>{tab === "expense" ? `R$ ${Number(item.amount).toFixed(2)} · ${item.status}` : new Date(item.delivered_at).toLocaleDateString("pt-BR")}</span></div>)}</article>)}{!groupedReceipts.length && <p style={{ color: "var(--muted)" }}>Nenhum comprovante enviado ainda.</p>}</div>}
+    {showPaymentReview && <PaymentRequestModal userRole={userRole} onClose={() => setShowPaymentReview(false)} />}
   </section>;
 }
