@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { audit, query } from "@/lib/db";
+import { viewUrl } from "@/lib/storage";
 
 async function sessionForOperation() {
   const dispatcher = await getSession("dispatcher");
@@ -16,10 +17,15 @@ export async function GET(request: NextRequest) {
 
   try {
     if (resource === "messages") {
+      const visibility = session.role === "driver"
+        ? "AND (m.recipient_driver_id IS NULL OR m.recipient_driver_id=$4)"
+        : "";
       const rows = await query(
         `SELECT m.*, EXISTS(SELECT 1 FROM message_reads mr WHERE mr.message_id=m.id AND mr.user_type=$2 AND mr.user_id=$3) AS read
-         FROM operation_messages m WHERE m.company_id=$1 ORDER BY m.created_at DESC LIMIT 100`,
-        [session.companyId, session.role, session.dispatcherId ?? session.driverId ?? ""],
+         FROM operation_messages m WHERE m.company_id=$1 ${visibility} ORDER BY m.created_at DESC LIMIT 100`,
+        session.role === "driver"
+          ? [session.companyId, session.role, session.driverId ?? "", session.driverId ?? ""]
+          : [session.companyId, session.role, session.dispatcherId ?? ""],
       );
       return NextResponse.json(rows.rows.reverse());
     }
@@ -52,7 +58,11 @@ export async function GET(request: NextRequest) {
          LEFT JOIN drivers d ON d.id=r.driver_id JOIN route_stops s ON s.id=e.stop_id
          WHERE r.company_id=$1 ORDER BY e.delivered_at DESC LIMIT 200`, [session.companyId],
       );
-      return NextResponse.json(rows.rows);
+      const receipts = await Promise.all(rows.rows.map(async (row: any) => ({
+        ...row,
+        photo_url: row.photo_key ? await viewUrl(row.photo_key) : null,
+      })));
+      return NextResponse.json(receipts);
     }
     return NextResponse.json({ error: "Recurso inválido" }, { status: 400 });
   } catch (error) {
@@ -65,19 +75,24 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: "Sessão necessária" }, { status: 401 });
   try {
     const body = await request.json();
-    if (body.action === "message") {
+      if (body.action === "message") {
       const text = String(body.message ?? "").trim();
       if (!text) return NextResponse.json({ error: "Mensagem obrigatória" }, { status: 400 });
       const isDriver = session.role === "driver";
+      const recipientDriverId = !isDriver && body.recipient_driver_id ? String(body.recipient_driver_id) : null;
+      if (recipientDriverId) {
+        const recipient = await query("SELECT id FROM drivers WHERE id=$1 AND company_id=$2 AND active=true", [recipientDriverId, session.companyId]);
+        if (!recipient.rows[0]) return NextResponse.json({ error: "Motorista destinatário não encontrado" }, { status: 400 });
+      }
       let senderName = isDriver ? "Motorista" : "Central";
       if (isDriver && session.driverId) {
         const driver = await query<{ name: string }>("SELECT name FROM drivers WHERE id=$1", [session.driverId]);
         senderName = driver.rows[0]?.name ?? senderName;
       }
       const result = await query(
-        `INSERT INTO operation_messages(company_id,sender_type,sender_id,sender_name,message,quick_tag)
-         VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [session.companyId, isDriver ? "driver" : "dispatcher", session.driverId ?? session.dispatcherId ?? "", senderName, text, body.quick_tag ?? null],
+        `INSERT INTO operation_messages(company_id,sender_type,sender_id,sender_name,message,quick_tag,recipient_driver_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [session.companyId, isDriver ? "driver" : "dispatcher", session.driverId ?? session.dispatcherId ?? "", senderName, text, body.quick_tag ?? null, recipientDriverId],
       );
       await audit(session.role, session.driverId ?? session.dispatcherId ?? null, "send", "operation_message", result.rows[0].id, null);
       return NextResponse.json(result.rows[0]);

@@ -1,11 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, FileImage, MessageSquare, ReceiptText, Send, Target, WalletCards } from "lucide-react";
+import { BellRing, CheckCircle2, ExternalLink, FileImage, MessageSquare, ReceiptText, Send, Target, WalletCards } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 import { PaymentRequestModal } from "./payment-request-modal";
 
-type Driver = { id: string; name: string };
+type Driver = { id: string; name: string; active?: boolean };
 type HubTab = "goals" | "chat" | "delivery" | "expense";
 
 const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {
@@ -27,6 +27,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   const [goals, setGoals] = useState<any[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
   const [text, setText] = useState("");
+  const [messageRecipient, setMessageRecipient] = useState("");
   const [error, setError] = useState("");
   const [pushStatus, setPushStatus] = useState("Ative alertas no dispositivo");
   const [goal, setGoal] = useState({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" });
@@ -57,7 +58,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
 
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault(); if (!text.trim()) return;
-    try { haptics.tap(); await api("/api/operations", { method: "POST", body: JSON.stringify({ action: "message", message: text }) }); setText(""); haptics.success(); await load(); }
+    try { haptics.tap(); await api("/api/operations", { method: "POST", body: JSON.stringify({ action: "message", message: text, recipient_driver_id: messageRecipient || null }) }); setText(""); haptics.success(); await load(); }
     catch (e) { haptics.error(); setError((e as Error).message); }
   };
 
@@ -91,12 +92,15 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
       {!goals.length && <p style={{ color: "var(--muted)" }}>Ainda não há metas individuais neste mês.</p>}
       {isAdmin && <form onSubmit={saveGoal} style={{ padding: 14, border: "1px dashed var(--line)", borderRadius: 12, display: "grid", gap: 7 }}><strong>Definir meta do motorista</strong><select required value={goal.driver_id} onChange={e => setGoal({ ...goal, driver_id: e.target.value })}><option value="">Selecione</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><input required type="number" placeholder="Meta KM" value={goal.target_km} onChange={e => setGoal({ ...goal, target_km: e.target.value })}/><input required type="number" placeholder="Meta entregas" value={goal.target_deliveries} onChange={e => setGoal({ ...goal, target_deliveries: e.target.value })}/><button className="button primary compact">Salvar meta</button></form>}
     </div>}
-    {tab === "chat" && <><div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 8 }}>{messages.map(m => <div key={m.id} style={{ padding: "9px 11px", borderRadius: 10, background: m.sender_type === "driver" ? "rgba(14,165,233,.09)" : "var(--card-subtle)" }}><strong style={{ fontSize: 12 }}>{m.sender_name}</strong><div>{m.message}</div><small style={{ color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("pt-BR")}</small></div>)}</div><form onSubmit={sendMessage} style={{ display: "flex", gap: 8, marginTop: 10 }}><input value={text} onChange={e => setText(e.target.value)} placeholder="Mensagem para toda a operação" style={{ flex: 1 }}/><button className="button primary compact"><Send size={15}/>Enviar</button></form></>}
+    {tab === "chat" && <><div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 8 }}>{messages.map(m => <div key={m.id} style={{ padding: "9px 11px", borderRadius: 10, background: m.sender_type === "driver" ? "rgba(14,165,233,.09)" : "var(--card-subtle)" }}><strong style={{ fontSize: 12 }}>{m.sender_name}</strong>{m.recipient_driver_id && isAdmin && <small style={{ marginLeft: 7, color: "#0f9f78", fontWeight: 700 }}>Mensagem privada</small>}<div>{m.message}</div><small style={{ color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("pt-BR")}</small></div>)}</div><form onSubmit={sendMessage} style={{ display: "grid", gridTemplateColumns: isAdmin ? "210px minmax(0,1fr) auto" : "minmax(0,1fr) auto", gap: 8, marginTop: 10 }}>
+      {isAdmin && <select value={messageRecipient} onChange={e => setMessageRecipient(e.target.value)} aria-label="Destinatário da mensagem"><option value="">Toda a operação</option>{drivers.filter(d => d.active !== false).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>}
+      <input value={text} onChange={e => setText(e.target.value)} placeholder={messageRecipient ? "Mensagem para o motorista selecionado" : "Mensagem para toda a operação"} />
+      <button className="button primary compact"><Send size={15}/>Enviar</button></form></>}
     {(tab === "delivery" || tab === "expense") && <div style={{ display: "grid", gap: 12 }}>{groupedReceipts.map(([driver, items]) => {
       const driverId = (items as any[])[0]?.driver_id as string | undefined;
       return <article key={driver} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 12 }}>
         {tab === "expense" && isAdmin && driverId ? <button type="button" className="button secondary compact" onClick={() => { haptics.tap(); setPaymentDriverFilter({ id: driverId, name: driver }); setShowPaymentReview(true); }} style={{ padding: 0, minHeight: 0, background: "transparent", border: 0, color: "var(--ink)", fontSize: "inherit" }}><strong>{driver}</strong></button> : <strong>{driver}</strong>}
-        {(items as any[]).map(item => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, paddingTop: 8, fontSize: 13 }}><span>{tab === "delivery" ? `${item.route_name} · ${item.stop_name}` : `${item.category} · ${item.description}`}</span><span>{tab === "expense" ? `R$ ${Number(item.amount).toFixed(2)} · ${item.status}` : new Date(item.delivered_at).toLocaleDateString("pt-BR")}</span></div>)}
+        {(items as any[]).map(item => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, paddingTop: 8, fontSize: 13 }}><span>{tab === "delivery" ? `${item.route_name} · ${item.stop_name}` : `${item.category} · ${item.description}`}</span>{tab === "delivery" && item.photo_url ? <a href={item.photo_url} target="_blank" rel="noreferrer" className="button secondary compact" style={{ fontSize: 11, textDecoration: "none" }}><ExternalLink size={13} /> Abrir comprovante</a> : <span>{tab === "expense" ? `R$ ${Number(item.amount).toFixed(2)} · ${item.status}` : new Date(item.delivered_at).toLocaleDateString("pt-BR")}</span>}</div>)}
       </article>;
     })}{!groupedReceipts.length && <p style={{ color: "var(--muted)" }}>Nenhum comprovante enviado ainda.</p>}</div>}
     {showPaymentReview && <PaymentRequestModal userRole={userRole} driverId={paymentDriverFilter?.id} driverName={paymentDriverFilter?.name} onClose={() => { setShowPaymentReview(false); setPaymentDriverFilter(null); }} />}
