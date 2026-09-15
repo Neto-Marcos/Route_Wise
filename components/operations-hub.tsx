@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, ExternalLink, FileImage, MessageSquare, ReceiptText, Send, Target, WalletCards } from "lucide-react";
+import { BellRing, CheckCircle2, ExternalLink, FileImage, MessageSquare, ReceiptText, Send, Target, Trash2, WalletCards } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 import { PaymentRequestModal } from "./payment-request-modal";
 
@@ -67,6 +67,11 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
     try { await api("/api/operations", { method: "POST", body: JSON.stringify({ action: "driver_goal", month, ...goal }) }); setGoal({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" }); haptics.success(); await load(); }
     catch (e) { setError((e as Error).message); haptics.error(); }
   };
+  const deleteGoal = async (item: any) => {
+    if (!window.confirm(`Excluir a meta de ${item.driver_name}?`)) return;
+    try { haptics.tap(); await api(`/api/operations?goal_id=${encodeURIComponent(item.id)}`, { method: "DELETE" }); haptics.success(); await load(); }
+    catch (e) { haptics.error(); setError((e as Error).message); }
+  };
 
   const enablePush = async () => {
     try {
@@ -88,7 +93,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
     {error && <p className="form-error">{error}</p>}
     {tab === "goals" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
-      {goals.map((item) => <article key={item.id} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12 }}><strong>{item.driver_name}</strong><p style={{ color: "var(--muted)", fontSize: 13 }}>{Number(item.realized_km).toFixed(0)} / {item.target_km} km · {item.realized_deliveries}/{item.target_deliveries} entregas</p><small>SLA alvo: {item.target_sla}%</small></article>)}
+      {goals.map((item) => <article key={item.id} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12 }}><div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><strong>{item.driver_name}</strong>{isAdmin && <button type="button" className="button secondary compact" onClick={() => deleteGoal(item)} title={`Excluir meta de ${item.driver_name}`} style={{ color: "#dc2626", minWidth: 34, padding: "6px" }}><Trash2 size={15} /></button>}</div><p style={{ color: "var(--muted)", fontSize: 13 }}>{Number(item.realized_km).toFixed(0)} / {item.target_km} km · {item.realized_deliveries}/{item.target_deliveries} entregas</p><small>SLA alvo: {item.target_sla}%</small></article>)}
       {!goals.length && <p style={{ color: "var(--muted)" }}>Ainda não há metas individuais neste mês.</p>}
       {isAdmin && <form onSubmit={saveGoal} style={{ padding: 14, border: "1px dashed var(--line)", borderRadius: 12, display: "grid", gap: 7 }}><strong>Definir meta do motorista</strong><select required value={goal.driver_id} onChange={e => setGoal({ ...goal, driver_id: e.target.value })}><option value="">Selecione</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><input required type="number" placeholder="Meta KM" value={goal.target_km} onChange={e => setGoal({ ...goal, target_km: e.target.value })}/><input required type="number" placeholder="Meta entregas" value={goal.target_deliveries} onChange={e => setGoal({ ...goal, target_deliveries: e.target.value })}/><button className="button primary compact">Salvar meta</button></form>}
     </div>}

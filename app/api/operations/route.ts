@@ -118,3 +118,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Erro operacional" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  const session = await sessionForOperation();
+  if (!session || session.role !== "dispatcher" || !["admin", "superadmin"].includes(session.userRole ?? "")) {
+    return NextResponse.json({ error: "Apenas ADM pode excluir metas" }, { status: 403 });
+  }
+  const goalId = request.nextUrl.searchParams.get("goal_id");
+  if (!goalId) return NextResponse.json({ error: "Meta inválida" }, { status: 400 });
+  try {
+    const result = await query("DELETE FROM driver_goals WHERE id=$1 AND company_id=$2 RETURNING id", [goalId, session.companyId]);
+    if (!result.rows[0]) return NextResponse.json({ error: "Meta não encontrada" }, { status: 404 });
+    await audit("dispatcher", session.dispatcherId ?? null, "delete", "driver_goal", goalId, null);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível excluir a meta" }, { status: 500 });
+  }
+}
