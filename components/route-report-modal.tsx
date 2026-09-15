@@ -209,6 +209,7 @@ export function RouteReportModal({
                         <span className={`report-status-badge ${isOrigin ? "origin" : isDelivered ? "delivered" : "pending"}`}>
                           {isOrigin ? "Saída" : isDelivered ? "Entregue" : "Pendente"}
                         </span>
+                        {event?.occurrence && event.occurrence !== "entregue" && <small> · {event.occurrence.replaceAll("_", " ")}</small>}
                       </td>
                       <td>{formatTime(stop.delivered_at || event?.delivered_at)}</td>
                       <td>

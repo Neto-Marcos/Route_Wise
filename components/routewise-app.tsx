@@ -4910,7 +4910,8 @@ function ProofModal({
         payload.confirmIncomplete = f.get("incomplete") === "on";
       } else if (stop?.id) {
         targetUrl = `/api/routes/${route.id}/deliveries/${stop.id}/complete`;
-        payload.note = `[${f.get("occurrence") || "entregue"}] ${String(f.get("note") || "").trim()}`.trim();
+        payload.occurrence = f.get("occurrence") || "entregue";
+        payload.note = String(f.get("note") || "").trim();
       }
 
       await enqueue({
@@ -5041,7 +5042,8 @@ function ProofModal({
           method: "POST",
           body: JSON.stringify({
             ...common,
-            note: `[${f.get("occurrence") || "entregue"}] ${String(f.get("note") || "").trim()}`.trim(),
+            occurrence: f.get("occurrence") || "entregue",
+            note: String(f.get("note") || "").trim(),
           }),
         });
       }

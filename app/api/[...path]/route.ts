@@ -886,7 +886,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         );
         if (!route.rows[0]) throw new Error("Rota não está ativa");
         await client.query(
-          "INSERT INTO delivery_events(operation_id,route_id,stop_id,photo_key,note,lat,lng) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(operation_id) DO NOTHING",
+          "INSERT INTO delivery_events(operation_id,route_id,stop_id,photo_key,note,lat,lng,occurrence) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(operation_id) DO NOTHING",
           [
             data.operationId,
             p[1],
@@ -895,11 +895,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             data.note || null,
             data.lat,
             data.lng,
+            ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue",
           ],
         );
         await client.query(
-          "UPDATE route_stops SET status='delivered',delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND route_id=$2 AND NOT is_origin",
-          [p[3], p[1]],
+          "UPDATE route_stops SET status='delivered', delivery_outcome=$3, delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND route_id=$2 AND NOT is_origin",
+          [p[3], p[1], ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue"],
         );
         await client.query("COMMIT");
         return json({ ok: true, operationId: data.operationId, photoKey });

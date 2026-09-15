@@ -63,6 +63,7 @@ export type DetailedRoute = {
     photo_key: string;
     photo_url?: string;
     note?: string;
+    occurrence?: string;
     lat: number;
     lng: number;
     delivered_at: string;
@@ -408,6 +409,7 @@ export function RouteDetailModal({
                         </span>
                       </div>
                       <p className="stop-address">{stop.address}</p>
+                      {event?.occurrence && event.occurrence !== "entregue" && <small className="stop-address">Ocorrência: {event.occurrence.replaceAll("_", " ")}</small>}
                       {((stop.boxes !== undefined && stop.boxes > 0) || (stop.volume_m3 !== undefined && stop.volume_m3 > 0)) && (
                         <div className="stop-detail-cubagem-tag">
                           {stop.boxes !== undefined && stop.boxes > 0 && <span>📦 {stop.boxes} {stop.boxes === 1 ? "cx" : "cxs"}</span>}
