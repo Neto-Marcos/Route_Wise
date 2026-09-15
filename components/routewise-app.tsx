@@ -4826,7 +4826,7 @@ function ProofModal({
         payload.confirmIncomplete = f.get("incomplete") === "on";
       } else if (stop?.id) {
         targetUrl = `/api/routes/${route.id}/deliveries/${stop.id}/complete`;
-        payload.note = f.get("note");
+        payload.note = `[${f.get("occurrence") || "entregue"}] ${String(f.get("note") || "").trim()}`.trim();
       }
 
       await enqueue({
@@ -4957,7 +4957,7 @@ function ProofModal({
           method: "POST",
           body: JSON.stringify({
             ...common,
-            note: f.get("note"),
+            note: `[${f.get("occurrence") || "entregue"}] ${String(f.get("note") || "").trim()}`.trim(),
           }),
         });
       }
@@ -5146,6 +5146,13 @@ function ProofModal({
 
         {phase === "delivery" && (
           <label>
+            Ocorrência da entrega
+            <select name="occurrence" defaultValue="entregue">
+              <option value="entregue">Entrega realizada</option>
+              <option value="cliente_ausente">Cliente ausente</option>
+              <option value="endereco_incorreto">Endereço incorreto</option>
+              <option value="recusado">Entrega recusada</option>
+            </select>
             Observação da entrega
             <textarea name="note" rows={3} placeholder="Opcional (Ex.: Recebido por João)" />
           </label>

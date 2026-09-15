@@ -70,6 +70,19 @@ async function notifyAdministratorsOfPaymentRequest({
   );
 }
 
+async function notifyDriverOfPaymentStatus(request: any) {
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  if (!request.driver_id || !publicKey || !privateKey) return;
+  const subscriptions = await query<{ endpoint: string; p256dh: string; auth: string }>(
+    "SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE company_id=$1 AND user_type='driver' AND user_id=$2",
+    [request.company_id, request.driver_id],
+  );
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:contato@criarrota.com.br", publicKey, privateKey);
+  const labels: Record<string, string> = { approved: "aprovada", rejected: "recusada", paid: "marcada como paga" };
+  await Promise.all(subscriptions.rows.map((sub) => webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify({ title: "Pagamento atualizado", body: `Sua solicitação de R$ ${Number(request.amount).toFixed(2).replace('.', ',')} foi ${labels[request.status] || "atualizada"}.`, url: "/" })).catch(() => {})));
+}
+
 // GET: Lista solicitações de pagamento
 export async function GET(request: Request) {
   const session = await getSession("dispatcher");
@@ -190,6 +203,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Solicitação não encontrada" }, { status: 404 });
     }
 
+    try { await notifyDriverOfPaymentStatus(res.rows[0]); } catch (error) { console.error("[payments] Push ao motorista falhou", error); }
     return NextResponse.json(res.rows[0]);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
