@@ -1618,6 +1618,22 @@ input:focus, select:focus, textarea:focus {
 .popup-button:hover {
   background: #2557cc;
 }
+/* O popup do mapa usa HTML do Leaflet fora da árvore React: não pode herdar
+   cores do tema errado quando o aplicativo está no modo escuro. */
+[data-theme="dark"] .fleet-popup,
+.dark .fleet-popup { color: #f8fafc; }
+[data-theme="dark"] .popup-title strong,
+.dark .popup-title strong { color: #f8fafc; }
+[data-theme="dark"] .popup-meta,
+.dark .popup-meta { color: #cbd5e1; }
+[data-theme="dark"] .popup-progress,
+.dark .popup-progress { background: #e8eef7; color: #152238; }
+[data-theme="dark"] .popup-progress b,
+.dark .popup-progress b { color: #07111f; }
+[data-theme="dark"] .popup-button,
+.dark .popup-button { background: #10b981; color: #ffffff; }
+[data-theme="dark"] .popup-button:hover,
+.dark .popup-button:hover { background: #34d399; color: #062b20; }
 
 .driver-map-wrapper {
   position: relative;
