@@ -106,7 +106,7 @@ export async function GET(request: Request) {
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
        WHERE r.company_id = $1 AND s.lat IS NOT NULL AND s.lng IS NOT NULL
-       ORDER BY s.created_at DESC
+       ORDER BY COALESCE(s.delivered_at, r.created_at) DESC
        LIMIT 300`,
       [session.companyId]
     );

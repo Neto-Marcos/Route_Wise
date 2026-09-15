@@ -175,6 +175,7 @@ const api = async (url: string, options?: RequestInit) => {
   if (!res.ok) throw new Error(out.error || "Não foi possível concluir");
   return out;
 };
+const DISPATCHER_OFFLINE_SNAPSHOT = "rw_dispatcher_offline_snapshot_v1";
 function useOnline() {
   const [online, setOnline] = useState(true);
   useEffect(() => {
@@ -269,7 +270,14 @@ export default function RouteWiseApp() {
             sessionStorage.removeItem("rw_user_role");
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          // Não valida sessão sem rede, mas mantém o painel já autenticado
+          // acessível nesta mesma sessão do PWA.
+          if (!navigator.onLine && sessionStorage.getItem("rw_role") === "dispatcher") {
+            setDispatcherAuthed(true);
+            setActivePortal("dispatcher");
+          }
+        });
     }
 
     // Check saved theme
@@ -375,6 +383,7 @@ export default function RouteWiseApp() {
               api("/api/session/logout", { method: "POST" }).catch(() => {});
               sessionStorage.removeItem("rw_role");
               sessionStorage.removeItem("rw_user_role");
+              localStorage.removeItem(DISPATCHER_OFFLINE_SNAPSHOT);
               setDispatcherAuthed(false);
               setActivePortal("home");
             }}
@@ -1738,8 +1747,25 @@ function Dispatcher({
           setVehicles(v);
           if (Array.isArray(disp)) setDispatchers(disp);
           if (sess) setSessionInfo(sess);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(DISPATCHER_OFFLINE_SNAPSHOT, JSON.stringify({ routes: r, drivers: d, vehicles: v, dispatchers: disp, session: sess, savedAt: Date.now() }));
+          }
         })
         .catch((e) => {
+          if (typeof window !== "undefined" && !navigator.onLine) {
+            try {
+              const snapshot = JSON.parse(localStorage.getItem(DISPATCHER_OFFLINE_SNAPSHOT) || "null");
+              if (snapshot?.routes && snapshot?.drivers && snapshot?.vehicles) {
+                setRoutes(snapshot.routes);
+                setDrivers(snapshot.drivers);
+                setVehicles(snapshot.vehicles);
+                if (Array.isArray(snapshot.dispatchers)) setDispatchers(snapshot.dispatchers);
+                if (snapshot.session) setSessionInfo(snapshot.session);
+                setMessage("Você está offline. Exibindo os últimos dados sincronizados neste aparelho.");
+                return;
+              }
+            } catch {}
+          }
           if (String(e.message || "").includes("Sessão necessária")) {
             sessionStorage.removeItem("rw_role");
             onExit();

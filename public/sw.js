@@ -1,11 +1,13 @@
-const CACHE = "routewise-v7";
-const CORE = ["/", "/offline", "/manifest.json", "/icon.svg"];
+const CACHE = "routewise-v8";
+const CORE = ["/", "/offline", "/manifest.json", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(CORE))
+      // Uma falha isolada de ícone não pode impedir que o app inteiro seja
+      // instalado para uso offline.
+      .then((c) => Promise.allSettled(CORE.map((url) => c.add(url))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -24,7 +26,23 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
+  // Dados de API são privados por sessão e ficam no snapshot local do app;
+  // nunca devem ser compartilhados pelo Cache Storage do navegador.
   if (url.pathname.startsWith("/api/")) return;
+
+  const isAppAsset = ["script", "style", "font", "image"].includes(e.request.destination);
+  if (isAppAsset) {
+    e.respondWith(
+      caches.match(e.request).then((cached) => {
+        const update = fetch(e.request).then((response) => {
+          if (response.status === 200) caches.open(CACHE).then((cache) => cache.put(e.request, response.clone()));
+          return response;
+        }).catch(() => null);
+        return cached || update.then((response) => response || caches.match("/offline"));
+      }),
+    );
+    return;
+  }
 
   e.respondWith(
     fetch(e.request)
@@ -35,7 +53,7 @@ self.addEventListener("fetch", (e) => {
         }
         return r;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match("/offline"))),
+      .catch(() => caches.match(e.request).then((r) => r || caches.match("/").then((root) => root || caches.match("/offline")))),
   );
 });
 
