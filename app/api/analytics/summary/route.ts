@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
+const BRAZILIAN_STATES = new Set([
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+  "ACRE", "ALAGOAS", "AMAPA", "AMAZONAS", "BAHIA", "CEARA", "DISTRITO FEDERAL", "ESPIRITO SANTO", "GOIAS", "MARANHAO", "MATO GROSSO", "MATO GROSSO DO SUL", "MINAS GERAIS", "PARA", "PARAIBA", "PARANA", "PERNAMBUCO", "PIAUI", "RIO DE JANEIRO", "RIO GRANDE DO NORTE", "RIO GRANDE DO SUL", "RONDONIA", "RORAIMA", "SANTA CATARINA", "SAO PAULO", "SERGIPE", "TOCANTINS",
+]);
+const normalizePlace = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+const isCityCandidate = (value: string) => {
+  const normalized = normalizePlace(value);
+  return Boolean(value.trim()) && !/^\d+[\d.-]*$/.test(value.trim()) && !/^(BRASIL|BRAZIL|REGIAO\s+\w+|BASE|BASE OPERACIONAL|ORIGEM|DISTRIBUICAO|SEM\s+CIDADE)$/.test(normalized);
+};
+const cityFromStop = (name: string, address: string) => {
+  const nameParts = String(name || "").split(/\s[-–]\s/).map((part) => part.trim()).filter(Boolean);
+  const nameCity = nameParts.length > 1 ? nameParts.at(-1)! : "";
+  if (isCityCandidate(nameCity)) return nameCity;
+
+  const addressParts = String(address || "").split(/[,;/]/).map((part) => part.trim()).filter(Boolean);
+  const stateIndex = addressParts.findIndex((part) => BRAZILIAN_STATES.has(normalizePlace(part)));
+  const addressCity = stateIndex > 0 ? addressParts[stateIndex - 1] : "";
+  return isCityCandidate(addressCity) ? addressCity : null;
+};
+
 export async function GET(request: Request) {
   const session = await getSession("dispatcher");
   if (!session) {
@@ -103,7 +123,7 @@ export async function GET(request: Request) {
 
     // 4. Heatmap de cidades / pontos de parada
     const stopsRes = await query(
-      `SELECT s.address, s.lat, s.lng, s.name, (s.status = 'delivered') as completed, r.name as route_name
+      `SELECT s.address, s.lat, s.lng, s.name, s.is_origin, (s.status = 'delivered') as completed, r.name as route_name
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
        WHERE r.company_id = $1 AND r.status NOT IN ('draft', 'cancelled') AND s.lat IS NOT NULL AND s.lng IS NOT NULL
@@ -119,12 +139,10 @@ export async function GET(request: Request) {
     for (const s of stopsRes.rows) {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
-      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+      const city = !s.is_origin ? cityFromStop(String(s.name || ""), String(s.address || "")) : null;
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && city) {
         heatPoints.push([lat, lng, 0.7]);
-        // Tentar extrair cidade do endereço ou nome
-        const parts = String(s.address || "").split(/[-,\/]/).map((p) => p.trim());
-        const cityCandidate = parts.length >= 2 ? parts[parts.length - 2] : parts[0] || "Outros";
-        const key = cityCandidate.slice(0, 30);
+        const key = city.slice(0, 50);
         if (!cityCountMap[key]) {
           cityCountMap[key] = { count: 0, lat, lng };
         }
