@@ -73,23 +73,31 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
     catch (e) { haptics.error(); setError((e as Error).message); }
   };
 
-  const enablePush = async () => {
+  const syncPushSubscription = async (requestPermission = false) => {
     try {
       if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Este dispositivo não suporta notificações Push.");
       const config = await api<{ publicKey: string | null; enabled: boolean }>("/api/notifications/subscribe");
       if (!config.enabled || !config.publicKey) throw new Error("Push será ativado assim que as chaves VAPID forem configuradas no Railway.");
-      const permission = await Notification.requestPermission();
+      const permission = requestPermission ? await Notification.requestPermission() : Notification.permission;
+      if (permission === "default") { setPushStatus("Ative alertas no dispositivo"); return; }
       if (permission !== "granted") throw new Error("Permissão de notificação não concedida.");
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(config.publicKey) });
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(config.publicKey) });
       await api("/api/notifications/subscribe", { method: "POST", body: JSON.stringify(subscription) });
       setPushStatus("Alertas Push ativos neste dispositivo"); haptics.success();
     } catch (e) { setPushStatus((e as Error).message); haptics.error(); }
   };
+  const enablePush = () => syncPushSubscription(true);
+  const testPush = async () => {
+    try { const result = await api<{ delivered: number }>("/api/notifications/subscribe", { method: "POST", body: JSON.stringify({ action: "test" }) }); setPushStatus(result.delivered ? "Teste enviado para este dispositivo" : "Este dispositivo ainda não está inscrito"); haptics.success(); }
+    catch (e) { setPushStatus((e as Error).message); haptics.error(); }
+  };
+  useEffect(() => { void syncPushSubscription(); }, []);
 
   const tabs: Array<[HubTab, string, React.ReactNode]> = [["goals", "Metas", <Target size={16} key="g" />], ["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
   return <section className="panel" style={{ marginTop: 16, overflow: "hidden" }}>
-    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button></div></div>
+    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button>{pushStatus.includes("ativos") && <button className="button secondary compact" onClick={testPush}>Testar alerta</button>}</div></div>
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
     {error && <p className="form-error">{error}</p>}
     {tab === "goals" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
