@@ -1,12 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, ExternalLink, FileImage, MessageSquare, ReceiptText, Send, Target, Trash2, WalletCards } from "lucide-react";
+import { BellRing, ExternalLink, FileImage, MessageSquare, ReceiptText, Send, WalletCards } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 import { PaymentRequestModal } from "./payment-request-modal";
 
 type Driver = { id: string; name: string; active?: boolean };
-type HubTab = "goals" | "chat" | "delivery" | "expense";
+type HubTab = "chat" | "delivery" | "expense";
 
 const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
@@ -22,29 +22,25 @@ const urlBase64ToUint8Array = (value: string) => {
 };
 
 export function OperationsHub({ userRole, drivers }: { userRole: string; drivers: Driver[] }) {
-  const [tab, setTab] = useState<HubTab>("goals");
+  const [tab, setTab] = useState<HubTab>("chat");
   const [messages, setMessages] = useState<any[]>([]);
-  const [goals, setGoals] = useState<any[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
   const [text, setText] = useState("");
   const [messageRecipient, setMessageRecipient] = useState("");
   const [error, setError] = useState("");
   const [pushStatus, setPushStatus] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted" ? "Verificando alertas deste dispositivo..." : "Ative alertas no dispositivo");
-  const [goal, setGoal] = useState({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" });
   const [showPaymentReview, setShowPaymentReview] = useState(false);
   const [paymentDriverFilter, setPaymentDriverFilter] = useState<{ id: string; name: string } | null>(null);
   const isAdmin = userRole === "admin" || userRole === "superadmin";
-  const month = new Date().toISOString().slice(0, 7);
 
   const load = async () => {
     try {
       setError("");
-      const [nextMessages, nextGoals, nextDelivery] = await Promise.all([
+      const [nextMessages, nextDelivery] = await Promise.all([
         api<any[]>("/api/operations?resource=messages"),
-        api<any[]>(`/api/operations?resource=goals&month=${month}`),
         api<any[]>("/api/operations?resource=receipts&kind=delivery"),
       ]);
-      setMessages(nextMessages); setGoals(nextGoals);
+      setMessages(nextMessages);
       if (tab === "delivery") setReceipts(nextDelivery);
       if (tab === "expense") setReceipts(await api<any[]>("/api/payments"));
     } catch (e) { setError((e as Error).message); }
@@ -59,17 +55,6 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault(); if (!text.trim()) return;
     try { haptics.tap(); await api("/api/operations", { method: "POST", body: JSON.stringify({ action: "message", message: text, recipient_driver_id: messageRecipient || null }) }); setText(""); haptics.success(); await load(); }
-    catch (e) { haptics.error(); setError((e as Error).message); }
-  };
-
-  const saveGoal = async (event: FormEvent) => {
-    event.preventDefault();
-    try { await api("/api/operations", { method: "POST", body: JSON.stringify({ action: "driver_goal", month, ...goal }) }); setGoal({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" }); haptics.success(); await load(); }
-    catch (e) { setError((e as Error).message); haptics.error(); }
-  };
-  const deleteGoal = async (item: any) => {
-    if (!window.confirm(`Excluir a meta de ${item.driver_name}?`)) return;
-    try { haptics.tap(); await api(`/api/operations?goal_id=${encodeURIComponent(item.id)}`, { method: "DELETE" }); haptics.success(); await load(); }
     catch (e) { haptics.error(); setError((e as Error).message); }
   };
 
@@ -95,16 +80,11 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   };
   useEffect(() => { void syncPushSubscription(); }, []);
 
-  const tabs: Array<[HubTab, string, React.ReactNode]> = [["goals", "Metas", <Target size={16} key="g" />], ["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
+  const tabs: Array<[HubTab, string, React.ReactNode]> = [["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
   return <section className="panel" style={{ marginTop: 16, overflow: "hidden" }}>
-    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button>{pushStatus.includes("ativos") && <button className="button secondary compact" onClick={testPush}>Testar alerta</button>}</div></div>
+    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Comunicação, comprovantes e pagamentos em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button>{pushStatus.includes("ativos") && <button className="button secondary compact" onClick={testPush}>Testar alerta</button>}</div></div>
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
     {error && <p className="form-error">{error}</p>}
-    {tab === "goals" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
-      {goals.map((item) => <article key={item.id} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 12 }}><div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><strong>{item.driver_name}</strong>{isAdmin && <button type="button" className="button secondary compact" onClick={() => deleteGoal(item)} title={`Excluir meta de ${item.driver_name}`} style={{ color: "#dc2626", minWidth: 34, padding: "6px" }}><Trash2 size={15} /></button>}</div><p style={{ color: "var(--muted)", fontSize: 13 }}>{Number(item.realized_km).toFixed(0)} / {item.target_km} km · {item.realized_deliveries}/{item.target_deliveries} entregas</p><small>SLA alvo: {item.target_sla}%</small></article>)}
-      {!goals.length && <p style={{ color: "var(--muted)" }}>Ainda não há metas individuais neste mês.</p>}
-      {isAdmin && <form onSubmit={saveGoal} style={{ padding: 14, border: "1px dashed var(--line)", borderRadius: 12, display: "grid", gap: 7 }}><strong>Definir meta do motorista</strong><select required value={goal.driver_id} onChange={e => setGoal({ ...goal, driver_id: e.target.value })}><option value="">Selecione</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><input required type="number" placeholder="Meta KM" value={goal.target_km} onChange={e => setGoal({ ...goal, target_km: e.target.value })}/><input required type="number" placeholder="Meta entregas" value={goal.target_deliveries} onChange={e => setGoal({ ...goal, target_deliveries: e.target.value })}/><button className="button primary compact">Salvar meta</button></form>}
-    </div>}
     {tab === "chat" && <><div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 8 }}>{messages.map(m => <div key={m.id} style={{ padding: "9px 11px", borderRadius: 10, background: m.sender_type === "driver" ? "rgba(14,165,233,.09)" : "var(--card-subtle)" }}><strong style={{ fontSize: 12 }}>{m.sender_name}</strong>{m.recipient_driver_id && isAdmin && <small style={{ marginLeft: 7, color: "#0f9f78", fontWeight: 700 }}>Mensagem privada</small>}<div>{m.message}</div><small style={{ color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("pt-BR")}</small></div>)}</div><form onSubmit={sendMessage} style={{ display: "grid", gridTemplateColumns: isAdmin ? "210px minmax(0,1fr) auto" : "minmax(0,1fr) auto", gap: 8, marginTop: 10 }}>
       {isAdmin && <select value={messageRecipient} onChange={e => setMessageRecipient(e.target.value)} aria-label="Destinatário da mensagem"><option value="">Toda a operação</option>{drivers.filter(d => d.active !== false).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>}
       <input value={text} onChange={e => setText(e.target.value)} placeholder={messageRecipient ? "Mensagem para o motorista selecionado" : "Mensagem para toda a operação"} />
