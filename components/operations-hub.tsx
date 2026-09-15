@@ -42,7 +42,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
       ]);
       setMessages(nextMessages); setGoals(nextGoals);
       if (tab === "delivery") setReceipts(nextDelivery);
-      if (tab === "expense") setReceipts(await api<any[]>("/api/operations?resource=receipts&kind=expense"));
+      if (tab === "expense") setReceipts(await api<any[]>("/api/payments"));
     } catch (e) { setError((e as Error).message); }
   };
 
@@ -78,7 +78,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
     } catch (e) { setPushStatus((e as Error).message); haptics.error(); }
   };
 
-  const tabs: Array<[HubTab, string, React.ReactNode]> = [["goals", "Metas", <Target size={16} key="g" />], ["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Despesas", <ReceiptText size={16} key="e" />]];
+  const tabs: Array<[HubTab, string, React.ReactNode]> = [["goals", "Metas", <Target size={16} key="g" />], ["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
   return <section className="panel" style={{ marginTop: 16, overflow: "hidden" }}>
     <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Metas, comunicação e comprovantes em um só lugar.</p></div><button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button></div>
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
