@@ -26,9 +26,9 @@ interface AnalyticsData {
   realizedDeliveries: number;
   totalRevenue: number;
   totalEstimatedFuel: number;
-  costPerKm?: number;
-  costRatioPct?: number;
-  otifPct?: number;
+  costPerKm?: number | null;
+  costRatioPct?: number | null;
+  otifPct?: number | null;
   fleetStatus?: {
     active: number;
     assigned: number;
@@ -187,22 +187,22 @@ export function DashboardAnalytics({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 14 }}>
         <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Nível de Serviço (OTIF)</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{data.otifPct || 95}%</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{data.otifPct == null ? "--" : `${data.otifPct}%`}</div>
           <small style={{ fontSize: 11, color: "var(--muted)" }}>Prazo & integridade</small>
         </div>
         <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Custo por KM</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", marginTop: 4 }}>R$ {data.costPerKm || "3,85"}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--ink)", marginTop: 4 }}>{data.costPerKm == null ? "--" : `R$ ${data.costPerKm.toFixed(2).replace(".", ",")}`}</div>
           <small style={{ fontSize: 11, color: "var(--muted)" }}>Combustível & diárias</small>
         </div>
         <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Custo / Carga (% VFR)</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#3b82f6", marginTop: 4 }}>{data.costRatioPct || 4.2}%</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#3b82f6", marginTop: 4 }}>{data.costRatioPct == null ? "--" : `${data.costRatioPct}%`}</div>
           <small style={{ fontSize: 11, color: "var(--muted)" }}>Frete sobre faturamento</small>
         </div>
         <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Rotas Ativas</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#f59e0b", marginTop: 4 }}>{data.fleetStatus?.active || 0} / {data.fleetStatus?.total || 0}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#f59e0b", marginTop: 4 }}>{!data.fleetStatus?.total ? "--" : `${data.fleetStatus.active} / ${data.fleetStatus.total}`}</div>
           <small style={{ fontSize: 11, color: "var(--muted)" }}>Veículos em trânsito</small>
         </div>
       </div>

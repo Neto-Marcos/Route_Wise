@@ -66,7 +66,7 @@ export async function GET(request: Request) {
       const deliveries = Number(row.completed_stops) || 0;
       totalKmRealized += km;
       totalDeliveriesRealized += deliveries;
-      totalEstimatedFuel += km * 3.85; // estimativa R$/km
+      totalEstimatedFuel += km * 6; // referência operacional R$/km
 
       const d = String(row.route_date || "").slice(0, 10);
       if (d) {
@@ -179,9 +179,9 @@ export async function GET(request: Request) {
     }));
 
     // 6. Indicadores de Qualidade & Financeiros
-    const otifPct = totalDeliveriesRealized > 0 ? Math.min(100, Math.round((totalDeliveriesRealized / (targetDeliveries || 100)) * 100)) : 95;
-    const costPerKm = totalKmRealized > 0 ? parseFloat((totalEstimatedFuel / totalKmRealized).toFixed(2)) : 3.85;
-    const costRatioPct = totalRevenue > 0 ? parseFloat(((totalEstimatedFuel / totalRevenue) * 100).toFixed(1)) : 4.2;
+    const otifPct = totalDeliveriesRealized > 0 ? Math.min(100, Math.round((totalDeliveriesRealized / (targetDeliveries || 100)) * 100)) : null;
+    const costPerKm = totalKmRealized > 0 ? parseFloat((totalEstimatedFuel / totalKmRealized).toFixed(2)) : 6;
+    const costRatioPct = totalRevenue > 0 ? parseFloat(((totalEstimatedFuel / totalRevenue) * 100).toFixed(1)) : null;
 
     const fleetStatus = {
       active: routesRes.rows.filter((r) => r.status === "active").length,
