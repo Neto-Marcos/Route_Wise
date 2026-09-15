@@ -248,7 +248,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     if (order) {
       order = order.replace(/\.0+$/, '').trim();
     } else {
-      order = `L${r}`;
+      order = `__AUTO_ROW_${r}__`;
     }
 
     // Carteiras Sabium da filial 281: um pedido só pode seguir para rota se
@@ -319,7 +319,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
   for (const line of rawLines) {
     if (ineligibleOrderIds.has(line.orderId)) continue;
     // Se o pedido for gerado por fallback (L1, L2, etc.), não agrupa com outros
-    const isFallbackId = line.orderId.startsWith("L");
+    const isFallbackId = line.orderId.startsWith("__AUTO_ROW_");
     const groupKey = isFallbackId ? `LINE_${line.orderId}_${Math.random()}` : line.orderId;
 
     if (!aggregatedOrders.has(groupKey)) {

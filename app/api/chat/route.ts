@@ -54,12 +54,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "route_id e message são obrigatórios" }, { status: 400 });
     }
 
-    const senderType = session ? "dispatcher" : "driver";
+    let senderType = session ? "dispatcher" : "driver";
     let senderName = "Central";
     let senderId = session?.dispatcherId || "dispatcher";
 
     if (driverSession) {
-      senderType === "driver";
+      senderType = "driver";
       senderId = driverSession.driverId || "driver";
       const d = await query(`SELECT name FROM drivers WHERE id = $1 LIMIT 1`, [senderId]);
       senderName = d.rows[0]?.name || "Motorista";

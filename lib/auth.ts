@@ -5,6 +5,7 @@ const getSecretKey = () => {
   const envSecret = process.env.SESSION_SECRET;
   if (!envSecret && process.env.NODE_ENV === "production") {
     console.warn("CRITICAL SECURITY WARNING: SESSION_SECRET is not set in production. Using fallback secret.");
+    throw new Error("FATAL: SESSION_SECRET must be set in production.");
   }
   return new TextEncoder().encode(envSecret || "routewise-dev-secret-change-me");
 };

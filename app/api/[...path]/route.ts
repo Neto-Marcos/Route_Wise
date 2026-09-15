@@ -659,9 +659,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (targetCompanyId) {
       const chk = await query("SELECT id FROM companies WHERE id=$1 AND active=true", [targetCompanyId]);
       if (!chk.rows[0]) {
-        let fallback = await query("SELECT id FROM companies WHERE active=true ORDER BY created_at ASC LIMIT 1");
-        if (!fallback.rows[0]) return json({ error: "Empresa da sessão não encontrada" }, 401);
-        targetCompanyId = fallback.rows[0].id;
+        return json({ error: "Empresa da sessão inativa ou não encontrada" }, 401);
       }
     }
 

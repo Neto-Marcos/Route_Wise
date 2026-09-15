@@ -243,9 +243,14 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     const city = normCity(o.city);
     const uf = (o.uf ?? '').trim().toUpperCase();
     const key = `${uf}|${city}`;
+    const cityCoords = getCityCoords(o.city);
+    if ((!Number.isFinite(o.lat) || !Number.isFinite(o.lng)) && cityCoords) {
+      o.lat = cityCoords[0];
+      o.lng = cityCoords[1];
+    }
     if (!byCity.has(key)) {
       const suppliedCoords = Number.isFinite(o.lat) && Number.isFinite(o.lng) ? [o.lat!, o.lng!] as [number, number] : null;
-      byCity.set(key, { city, uf, orders: [], coords: suppliedCoords ?? getCityCoords(o.city) });
+      byCity.set(key, { city, uf, orders: [], coords: suppliedCoords ?? cityCoords });
     }
     byCity.get(key)!.orders.push(o);
   }
