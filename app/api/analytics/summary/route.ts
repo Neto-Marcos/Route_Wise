@@ -102,7 +102,7 @@ export async function GET(request: Request) {
 
     // 4. Heatmap de cidades / pontos de parada
     const stopsRes = await query(
-      `SELECT s.address, s.lat, s.lng, s.name, s.completed, r.name as route_name
+      `SELECT s.address, s.lat, s.lng, s.name, (s.status = 'delivered') as completed, r.name as route_name
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
        WHERE r.company_id = $1 AND s.lat IS NOT NULL AND s.lng IS NOT NULL
@@ -173,7 +173,7 @@ export async function GET(request: Request) {
     // 7. Score de pontualidade por cliente / destino (OTIF aproximado)
     const clientScoreRes = await query(
       `SELECT s.name, count(*) as total_stops,
-              sum(case when s.completed = true then 1 else 0 end) as completed_stops
+              sum(case when s.status = 'delivered' then 1 else 0 end) as completed_stops
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
        WHERE r.company_id = $1

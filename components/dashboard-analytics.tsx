@@ -75,21 +75,27 @@ export function DashboardAnalytics({
 }) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [editingTarget, setEditingTarget] = useState(false);
   const [targetKmInput, setTargetKmInput] = useState("");
   const [savingTarget, setSavingTarget] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const res = await fetch("/api/analytics/summary");
       if (res.ok) {
         const json = await res.json();
         setData(json);
         setTargetKmInput(String(json.targetKm || 5000));
+      } else {
+        const error = await res.json().catch(() => ({}));
+        setLoadError(error.error || "Não foi possível carregar os indicadores.");
       }
     } catch (e) {
       console.error(e);
+      setLoadError("Não foi possível conectar aos indicadores.");
     } finally {
       setLoading(false);
     }
@@ -133,7 +139,7 @@ export function DashboardAnalytics({
     );
   }
 
-  if (!data) return null;
+  if (!data) return <section className="panel analytics-panel" style={{ marginBottom: 18 }}><strong>Indicadores logísticos</strong><p className="form-error" style={{ marginTop: 10 }}>{loadError || "Não foi possível carregar os indicadores."}</p><button type="button" className="button secondary compact" onClick={loadData}>Tentar novamente</button></section>;
 
   const pct = Math.min(100, data.projection.pctCurrent || 0);
 
