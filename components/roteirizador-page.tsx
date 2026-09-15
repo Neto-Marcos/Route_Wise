@@ -370,7 +370,6 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const [states, setStates] = useState<Set<string>>(new Set(["Todos"]));
   const [prioritizeOld, setPrioritizeOld] = useState(true);
   const [searchOnline, setSearchOnline] = useState(true);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(true);
