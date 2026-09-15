@@ -29,7 +29,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   const [text, setText] = useState("");
   const [messageRecipient, setMessageRecipient] = useState("");
   const [error, setError] = useState("");
-  const [pushStatus, setPushStatus] = useState("Ative alertas no dispositivo");
+  const [pushStatus, setPushStatus] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted" ? "Verificando alertas deste dispositivo..." : "Ative alertas no dispositivo");
   const [goal, setGoal] = useState({ driver_id: "", target_km: "", target_deliveries: "", target_sla: "95" });
   const [showPaymentReview, setShowPaymentReview] = useState(false);
   const [paymentDriverFilter, setPaymentDriverFilter] = useState<{ id: string; name: string } | null>(null);
