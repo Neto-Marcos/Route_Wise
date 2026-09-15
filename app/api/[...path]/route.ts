@@ -434,22 +434,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
     }
     if (p.join("/") === "session/dispatcher") {
-      if (data.pin && String(data.pin).trim() === "2468") {
-        let { rows } = await query("SELECT u.id,u.company_id,COALESCE(u.role,'admin') as role,c.name company_name FROM dispatchers u JOIN companies c ON c.id=u.company_id WHERE u.active=true AND c.active=true LIMIT 1");
-        if (!rows[0]) {
-          const comp = await query("SELECT id FROM companies WHERE code='LEGADO' OR active=true LIMIT 1");
-          if (comp.rows[0]) {
-            const disp = await query("INSERT INTO dispatchers(company_id,name,email,password_hash,role) VALUES($1,$2,$3,$4,'admin') RETURNING id,role", [comp.rows[0].id, "Administrador Padrão", "admin@routewise.local", await hash("2468", 10)]);
-            rows = [{ id: disp.rows[0].id, company_id: comp.rows[0].id, role: "admin", company_name: "Operação anterior" }];
-          }
-        }
-        if (rows[0]) {
-          const uRole = (rows[0].role || "admin") as UserRole;
-          const res = json({ ok: true, companyName: rows[0].company_name, userRole: uRole });
-          res.cookies.set(sessionCookie(await makeSession({ role: "dispatcher", userRole: uRole, companyId: rows[0].company_id, dispatcherId: rows[0].id }), "dispatcher"));
-          return res;
-        }
-      }
       const companyCode = String(data.companyCode || "").trim().toUpperCase();
       const email = String(data.email || "").trim().toLowerCase();
       const expectedRole = data.expectedRole ? String(data.expectedRole).trim() : null;
@@ -647,6 +631,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return res;
     }
     if (p[0] === "dispatchers" && isDispatcher) {
+      if (session?.userRole !== "admin" && session?.userRole !== "superadmin") {
+        return json({ error: "Apenas administradores podem cadastrar novos usuários" }, 403);
+      }
       const name = String(data.name || "").trim();
       const email = String(data.email || "").trim().toLowerCase();
       const password = String(data.password || "");

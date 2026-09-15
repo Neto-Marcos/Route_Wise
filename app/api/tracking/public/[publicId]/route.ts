@@ -39,7 +39,7 @@ export async function GET(
 
     const locRes = await query(
       `SELECT lat, lng, recorded_at
-       FROM driver_locations
+       FROM location_points
        WHERE route_id = $1
        ORDER BY recorded_at DESC
        LIMIT 1`,

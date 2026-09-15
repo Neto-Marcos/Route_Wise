@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -12,6 +13,11 @@ export const runtime = "nodejs";
  */
 export async function PUT(req: NextRequest) {
   try {
+    const session = (await getSession("dispatcher")) || (await getSession("driver"));
+    if (!session) {
+      return NextResponse.json({ error: "Sessão necessária para upload" }, { status: 401 });
+    }
+
     const key = req.nextUrl.searchParams.get("key");
     if (!key) {
       return NextResponse.json({ error: "Chave do arquivo (key) é obrigatória" }, { status: 400 });
@@ -22,6 +28,10 @@ export async function PUT(req: NextRequest) {
 
     if (buffer.length === 0) {
       return NextResponse.json({ error: "Payload vazio" }, { status: 400 });
+    }
+
+    if (buffer.length > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "Tamanho do arquivo excede o limite de 10MB" }, { status: 400 });
     }
 
     await query(

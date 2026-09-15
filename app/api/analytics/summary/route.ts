@@ -24,12 +24,12 @@ export async function GET(request: Request) {
 
     // 2. Rotas do mês selecionado
     const routesRes = await query(
-      `SELECT r.id, r.name, r.status, r.route_date, r.total_distance_m, r.total_duration_s,
-              r.estimated_fuel_cost, r.total_freight_value,
-              (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.completed = true) as completed_stops,
+      `SELECT r.id, r.name, r.status, r.route_date,
+              COALESCE(r.actual_km, r.estimated_km, 0) as km_val,
+              (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.status = 'delivered') as completed_stops,
               (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id) as total_stops
        FROM routes r
-       WHERE r.company_id = $1 AND r.route_date LIKE $2
+       WHERE r.company_id = $1 AND r.route_date::text LIKE $2
        ORDER BY r.route_date ASC`,
       [session.companyId, `${month}%`]
     );
@@ -41,12 +41,11 @@ export async function GET(request: Request) {
     const dayMap = new Map<string, { km: number; deliveries: number; routes: number }>();
 
     for (const row of routesRes.rows) {
-      const km = (Number(row.total_distance_m) || 0) / 1000;
+      const km = Number(row.km_val) || 0;
       const deliveries = Number(row.completed_stops) || 0;
       totalKmRealized += km;
       totalDeliveriesRealized += deliveries;
-      totalEstimatedFuel += Number(row.estimated_fuel_cost) || 0;
-      totalRevenue += Number(row.total_freight_value) || 0;
+      totalEstimatedFuel += km * 3.85; // estimativa R$/km
 
       const d = String(row.route_date || "").slice(0, 10);
       if (d) {
@@ -141,11 +140,11 @@ export async function GET(request: Request) {
     const driverRankRes = await query(
       `SELECT d.name as driver_name,
               COUNT(DISTINCT r.id) as total_routes,
-              SUM(Number(r.total_distance_m) / 1000) as total_km,
-              SUM((SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.completed = true)) as completed_deliveries
+              SUM(COALESCE(r.actual_km, r.estimated_km, 0)) as total_km,
+              SUM((SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.status = 'delivered')) as completed_deliveries
        FROM routes r
        JOIN drivers d ON d.id = r.driver_id
-       WHERE r.company_id = $1 AND r.route_date LIKE $2
+       WHERE r.company_id = $1 AND r.route_date::text LIKE $2
        GROUP BY d.id, d.name
        ORDER BY completed_deliveries DESC, total_km DESC
        LIMIT 5`,

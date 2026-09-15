@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { query } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,11 @@ function getS3Client() {
  */
 export async function POST(req: NextRequest) {
   try {
+    const session = (await getSession("dispatcher")) || (await getSession("driver"));
+    if (!session) {
+      return NextResponse.json({ error: "Sessão necessária" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { filename, contentType, kind = "pod_photo" } = body;
 

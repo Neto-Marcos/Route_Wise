@@ -50,11 +50,11 @@ async function run() {
   });
 
   // 2. Dispatcher Auth
-  await assert("POST /api/session/dispatcher authenticates with PIN", async () => {
+  await assert("POST /api/session/dispatcher authenticates with credentials", async () => {
     const res = await fetch(`${BASE}/api/session/dispatcher`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin: "2468" }),
+      body: JSON.stringify({ companyCode: "EU", email: "marcos", password: "admin123" }),
     });
     if (res.status !== 200) throw new Error(`Status was ${res.status}`);
     const cookie = res.headers.get("set-cookie");

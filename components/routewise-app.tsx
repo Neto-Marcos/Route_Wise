@@ -3005,7 +3005,6 @@ function DirectAssignModal({
           estimatedKm: routeInfo?.km,
           driverId: selectedDriverId,
           vehicleId: selectedVehicleId,
-          pin: "2468",
         }),
       });
       onDone(res);
@@ -3350,7 +3349,6 @@ function RoutePlannerView({
           circular,
           stops,
           estimatedKm: routeInfo?.km,
-          pin: "2468",
         }),
       });
       setSuccessMessage(`Rota "${name}" salva com sucesso no painel!`);
