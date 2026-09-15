@@ -30,6 +30,7 @@ export async function GET(request: Request) {
               (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id) as total_stops
        FROM routes r
        WHERE r.company_id = $1 AND r.route_date::text LIKE $2
+         AND r.status NOT IN ('draft', 'cancelled')
        ORDER BY r.route_date ASC`,
       [session.companyId, `${month}%`]
     );
@@ -105,7 +106,7 @@ export async function GET(request: Request) {
       `SELECT s.address, s.lat, s.lng, s.name, (s.status = 'delivered') as completed, r.name as route_name
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
-       WHERE r.company_id = $1 AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+       WHERE r.company_id = $1 AND r.status NOT IN ('draft', 'cancelled') AND s.lat IS NOT NULL AND s.lng IS NOT NULL
        ORDER BY COALESCE(s.delivered_at, r.created_at) DESC
        LIMIT 300`,
       [session.companyId]
@@ -145,6 +146,7 @@ export async function GET(request: Request) {
        FROM routes r
        JOIN drivers d ON d.id = r.driver_id
        WHERE r.company_id = $1 AND r.route_date::text LIKE $2
+         AND r.status NOT IN ('draft', 'cancelled')
        GROUP BY d.id, d.name
        ORDER BY completed_deliveries DESC, total_km DESC
        LIMIT 5`,
@@ -176,7 +178,7 @@ export async function GET(request: Request) {
               sum(case when s.status = 'delivered' then 1 else 0 end) as completed_stops
        FROM route_stops s
        JOIN routes r ON r.id = s.route_id
-       WHERE r.company_id = $1
+       WHERE r.company_id = $1 AND r.status NOT IN ('draft', 'cancelled')
        GROUP BY s.name
        HAVING count(*) >= 2
        ORDER BY total_stops DESC

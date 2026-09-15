@@ -2152,8 +2152,12 @@ function Overview({
   drivers: Driver[];
   onOpenHeatmap: (points: Array<[number, number, number]>) => void;
 }) {
-  const delivered = routes.reduce((n, r) => n + Number(r.delivered || 0), 0);
+  const delivered = routes.filter((route) => !["draft", "cancelled"].includes(route.status)).reduce((n, r) => n + Number(r.delivered || 0), 0);
   const todayLocal = new Date().toLocaleDateString("en-CA");
+  const liveRoutes = routes.filter((route) => route.status === "assigned" || route.status === "active");
+  const todayOperationalRoutes = routes.filter((route) =>
+    String(route.route_date || "").slice(0, 10) === todayLocal && !["draft", "cancelled"].includes(route.status),
+  );
   return (
     <>
       <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
@@ -2161,9 +2165,7 @@ function Overview({
         <Metric
           label="Rotas hoje"
           value={
-            routes.filter(
-              (r) => String(r.route_date || "").slice(0, 10) === todayLocal,
-            ).length
+            todayOperationalRoutes.length
           }
           icon={<Navigation />}
         />
@@ -2219,7 +2221,7 @@ function Overview({
             <p>Última posição transmitida por GPS dos motoristas em rota</p>
           </div>
         </div>
-        <LiveFleetMap routes={routes} onSelectRoute={onSelectRoute} />
+        <LiveFleetMap routes={liveRoutes} onSelectRoute={onSelectRoute} />
       </section>
 
       <section className="panel">
@@ -2230,7 +2232,7 @@ function Overview({
           </div>
         </div>
         <RouteTable
-          routes={routes}
+          routes={liveRoutes}
           onSelectRoute={onSelectRoute}
           onPrintReport={onPrintReport}
           onAssignRoute={onAssignRoute}
