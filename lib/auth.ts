@@ -1,7 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
-const secret = () => new TextEncoder().encode(process.env.SESSION_SECRET || "routewise-dev-secret-change-me");
+const getSecretKey = () => {
+  const envSecret = process.env.SESSION_SECRET;
+  if (!envSecret && process.env.NODE_ENV === "production") {
+    console.warn("CRITICAL SECURITY WARNING: SESSION_SECRET is not set in production. Using fallback secret.");
+  }
+  return new TextEncoder().encode(envSecret || "routewise-dev-secret-change-me");
+};
+const secret = () => getSecretKey();
 export type UserRole = "superadmin" | "admin" | "route_creator" | "office" | "driver";
 export type Session = {
   role: "dispatcher" | "driver";
