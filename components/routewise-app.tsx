@@ -66,6 +66,7 @@ import { DashboardAnalytics } from "./dashboard-analytics";
 import { CityHeatmapModal } from "./city-heatmap-modal";
 import { OperationsHub } from "./operations-hub";
 import { PaymentRequestModal } from "./payment-request-modal";
+import { CommercialDashboard } from "./commercial-dashboard";
 
 type DispatcherUser = {
   id: string;
@@ -2169,6 +2170,7 @@ function Overview({
   );
   return (
     <>
+      <CommercialDashboard />
       <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
       <section className="metrics">
         <Metric
