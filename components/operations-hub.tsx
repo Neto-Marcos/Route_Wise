@@ -32,6 +32,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
   const [showPaymentReview, setShowPaymentReview] = useState(false);
   const [paymentDriverFilter, setPaymentDriverFilter] = useState<{ id: string; name: string } | null>(null);
   const isAdmin = userRole === "admin" || userRole === "superadmin";
+  const canManagePayments = isAdmin || userRole === "office";
 
   const load = async () => {
     try {
@@ -82,7 +83,7 @@ export function OperationsHub({ userRole, drivers }: { userRole: string; drivers
 
   const tabs: Array<[HubTab, string, React.ReactNode]> = [["chat", "Chat", <MessageSquare size={16} key="c" />], ["delivery", "Entregas", <FileImage size={16} key="d" />], ["expense", "Pagamentos", <ReceiptText size={16} key="e" />]];
   return <section className="panel" style={{ marginTop: 16, overflow: "hidden" }}>
-    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Comunicação, comprovantes e pagamentos em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{isAdmin && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button>{pushStatus.includes("ativos") && <button className="button secondary compact" onClick={testPush}>Testar alerta</button>}</div></div>
+    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2>Central operacional</h2><p>Comunicação, comprovantes e pagamentos em um só lugar.</p></div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{canManagePayments && <button className="button primary compact" onClick={() => setShowPaymentReview(true)}><WalletCards size={15} /> Aprovar pagamentos</button>}<button className="button secondary compact" onClick={enablePush}><BellRing size={15} /> {pushStatus}</button>{pushStatus.includes("ativos") && <button className="button secondary compact" onClick={testPush}>Testar alerta</button>}</div></div>
     <div style={{ display: "flex", gap: 6, overflowX: "auto", margin: "10px 0 14px" }}>{tabs.map(([id, label, icon]) => <button key={id} onClick={() => { haptics.tap(); setTab(id); }} className={`button compact ${tab === id ? "primary" : "secondary"}`}>{icon}{label}</button>)}</div>
     {error && <p className="form-error">{error}</p>}
     {tab === "chat" && <><div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 8 }}>{messages.map(m => <div key={m.id} style={{ padding: "9px 11px", borderRadius: 10, background: m.sender_type === "driver" ? "rgba(14,165,233,.09)" : "var(--card-subtle)" }}><strong style={{ fontSize: 12 }}>{m.sender_name}</strong>{m.recipient_driver_id && isAdmin && <small style={{ marginLeft: 7, color: "#0f9f78", fontWeight: 700 }}>Mensagem privada</small>}<div>{m.message}</div><small style={{ color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("pt-BR")}</small></div>)}</div><form onSubmit={sendMessage} style={{ display: "grid", gridTemplateColumns: isAdmin ? "210px minmax(0,1fr) auto" : "minmax(0,1fr) auto", gap: 8, marginTop: 10 }}>

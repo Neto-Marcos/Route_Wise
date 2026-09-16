@@ -184,22 +184,22 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH: Administrador aprova, recusa ou marca como pago
+// PATCH: ADM ou escritório aprova, recusa ou marca como pago.
 export async function PATCH(request: Request) {
   const session = await getSession("dispatcher");
-  if (!session || (session.userRole !== "admin" && session.userRole !== "superadmin")) {
-    return NextResponse.json({ error: "Apenas administradores podem avaliar solicitações" }, { status: 403 });
+  if (!session || !["admin", "superadmin", "office"].includes(session.userRole || "")) {
+    return NextResponse.json({ error: "Apenas ADM ou escritório podem avaliar solicitações" }, { status: 403 });
   }
 
   try {
     const body = await request.json();
-    const { id, status, admin_notes, payment_receipt_url } = body;
+    const { id, status, admin_notes, payment_receipt_url, paid_by_name } = body;
 
     if (!id || !["approved", "rejected", "paid"].includes(status)) {
       return NextResponse.json({ error: "ID e status válido ('approved', 'rejected', 'paid') são obrigatórios" }, { status: 400 });
     }
-    if (status === "paid" && !payment_receipt_url) {
-      return NextResponse.json({ error: "Anexe o comprovante Pix antes de marcar como pago" }, { status: 400 });
+    if (status === "paid" && (!payment_receipt_url || !String(paid_by_name || "").trim())) {
+      return NextResponse.json({ error: "Anexe o comprovante Pix e informe quem realizou o pagamento" }, { status: 400 });
     }
 
     const res = await query(
@@ -210,10 +210,11 @@ export async function PATCH(request: Request) {
            reviewed_at = now(),
            reviewed_by = $4,
            paid_at = CASE WHEN $1 = 'paid' THEN now() ELSE paid_at END,
-           paid_by = CASE WHEN $1 = 'paid' THEN $4 ELSE paid_by END
-       WHERE id = $5 AND company_id = $6
+           paid_by = CASE WHEN $1 = 'paid' THEN $4 ELSE paid_by END,
+           paid_by_name = CASE WHEN $1 = 'paid' THEN $5 ELSE paid_by_name END
+       WHERE id = $6 AND company_id = $7
        RETURNING *`,
-      [status, admin_notes || null, payment_receipt_url || null, session.dispatcherId || null, id, session.companyId]
+      [status, admin_notes || null, payment_receipt_url || null, session.dispatcherId || null, String(paid_by_name || "").trim().slice(0, 120) || null, id, session.companyId]
     );
 
     if (res.rows.length === 0) {
