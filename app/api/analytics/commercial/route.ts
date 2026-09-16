@@ -47,7 +47,10 @@ export async function GET() {
     const productCol = indexOf(headers, (h) => h === "produto");
     const departmentCol = indexOf(headers, (h) => h === "departamento");
 
-    type Order = { freight: "CIF" | "FOB" | "OUTRO"; value: number; billed: boolean; allInStock: boolean; lines: number };
+    // Um Pedido Sabium pode ter várias linhas de produto. Cada linha pode ser
+    // faturada em momentos distintos, então os valores financeiros precisam ser
+    // separados por linha antes de consolidar o pedido.
+    type Order = { freight: "CIF" | "FOB" | "OUTRO"; value: number; billedValue: number; pendingValue: number; readyValue: number; blockedValue: number; lines: number };
     const orders = new Map<string, Order>();
     const blockedProducts = new Map<string, { shortage: number; value: number; department: string }>();
     let itemLines = 0, inStockLines = 0, requestedQty = 0, availableQty = 0;
@@ -62,10 +65,15 @@ export async function GET() {
       const billed = Boolean(text(row[billedAtCol])) || number(row[invoiceCol]) > 0;
       const lineInStock = balance >= qty;
       itemLines += 1; requestedQty += qty; availableQty += Math.min(qty, balance); if (lineInStock) inStockLines += 1;
-      const current = orders.get(orderId) || { freight, value: 0, billed: false, allInStock: true, lines: 0 };
+      const current = orders.get(orderId) || { freight, value: 0, billedValue: 0, pendingValue: 0, readyValue: 0, blockedValue: 0, lines: 0 };
       current.value += value;
-      current.billed ||= billed;
-      current.allInStock &&= lineInStock;
+      if (billed) {
+        current.billedValue += value;
+      } else {
+        current.pendingValue += value;
+        if (lineInStock) current.readyValue += value;
+        else current.blockedValue += value;
+      }
       current.lines += 1;
       if (current.freight === "OUTRO" && freight !== "OUTRO") current.freight = freight;
       orders.set(orderId, current);
@@ -82,12 +90,10 @@ export async function GET() {
     const invoiced = blank(), pending = blank(), ready = blank(), blocked = blank();
     for (const order of orders.values()) {
       freight[order.freight].orders += 1; freight[order.freight].value += order.value;
-      const target = order.billed ? invoiced : pending;
-      target.orders += 1; target.value += order.value;
-      if (!order.billed) {
-        const availability = order.allInStock ? ready : blocked;
-        availability.orders += 1; availability.value += order.value;
-      }
+      if (order.billedValue > 0) { invoiced.orders += 1; invoiced.value += order.billedValue; }
+      if (order.pendingValue > 0) { pending.orders += 1; pending.value += order.pendingValue; }
+      if (order.readyValue > 0) { ready.orders += 1; ready.value += order.readyValue; }
+      if (order.blockedValue > 0) { blocked.orders += 1; blocked.value += order.blockedValue; }
     }
     const round = (value: number) => Math.round(value * 100) / 100;
     const normalize = (entry: { orders: number; value: number }) => ({ ...entry, value: round(entry.value) });
