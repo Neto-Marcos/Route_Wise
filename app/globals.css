@@ -4127,6 +4127,19 @@ textarea:focus {
   .managed-workspace .sidebar nav button span { font-size: 11px; line-height: 1.2; }
   .managed-workspace .sidebar-footer-actions { display: none !important; }
   .managed-workspace > .dashboard { padding-bottom: calc(124px + env(safe-area-inset-bottom, 0px)); }
+  /* O seletor de empresa ocupa a largura inteira no PWA e é uma ação rara.
+     Ele continua disponível no desktop para o administrador supremo. */
+  .managed-workspace .company-switcher,
+  .managed-workspace .header-company-badge { display: none !important; }
+  .managed-workspace > .dashboard { padding-left: 16px; padding-right: 16px; }
+  .managed-workspace > .dashboard > header { margin-bottom: 22px; gap: 14px; }
+  .managed-workspace > .dashboard > header h1 { font-size: 28px; line-height: 1.12; }
+  .managed-workspace > .dashboard > header .eyebrow { font-size: 11px; letter-spacing: .09em; }
+  .managed-workspace .panel { padding: 18px; border-radius: 18px; }
+  .managed-workspace .panel-title h2 { font-size: 22px; }
+  .managed-workspace .panel-title p { font-size: 15px; line-height: 1.4; }
+  .managed-workspace .button { min-height: 42px; font-size: 14px; }
+  .managed-workspace .button.compact { min-height: 38px; }
   .planning-workspace > .dashboard { padding: 12px 10px calc(122px + env(safe-area-inset-bottom, 0px)); }
   .planning-workspace > .dashboard > header { margin-bottom: 12px; }
   .planning-workspace .planner-fullscreen { height: auto; min-height: 0; }

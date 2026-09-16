@@ -205,7 +205,7 @@ export function formatDateBR(dateStr?: string | null): string {
 export default function RouteWiseApp() {
   const [activePortal, setActivePortal] = useState<
     "planner" | "dispatcher" | "driver" | "home"
-  >("home");
+  >(() => typeof window !== "undefined" && sessionStorage.getItem("rw_role") === "dispatcher" ? "dispatcher" : "home");
   const [targetRole, setTargetRole] = useState<"admin" | "route_creator" | "office">("admin");
   const [dispatcherAuthed, setDispatcherAuthed] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
@@ -217,6 +217,7 @@ export default function RouteWiseApp() {
   useEffect(() => {
     let pullStartY: number | null = null;
     let refreshing = false;
+    let pullArmed = false;
     let registration: ServiceWorkerRegistration | undefined;
 
     const checkForUpdate = () => registration?.update().catch(() => {});
@@ -237,12 +238,19 @@ export default function RouteWiseApp() {
     };
     const onTouchStart = (event: TouchEvent) => {
       const atTop = window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
-      pullStartY = atTop ? event.touches[0]?.clientY ?? null : null;
+      pullStartY = atTop && event.touches.length === 1 ? event.touches[0]?.clientY ?? null : null;
+      pullArmed = false;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (pullStartY === null) return;
+      // Evita atualizar por um gesto curto enquanto a pessoa só navega na tela.
+      pullArmed = (event.touches[0]?.clientY ?? pullStartY) - pullStartY >= 160;
     };
     const onTouchEnd = (event: TouchEvent) => {
       const endY = event.changedTouches[0]?.clientY;
-      if (pullStartY !== null && endY && endY - pullStartY > 92) refreshFromPull();
+      if (pullStartY !== null && endY && pullArmed && endY - pullStartY >= 160) refreshFromPull();
       pullStartY = null;
+      pullArmed = false;
     };
 
     navigator.serviceWorker?.register("/sw.js", { updateViaCache: "none" }).then((nextRegistration) => {
@@ -254,6 +262,7 @@ export default function RouteWiseApp() {
     window.addEventListener("focus", checkForUpdate);
     document.addEventListener("visibilitychange", checkForUpdate);
     window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
     window.addEventListener("touchend", onTouchEnd, { passive: true });
 
     // Check saved dispatcher role in session and verify with server
@@ -264,6 +273,7 @@ export default function RouteWiseApp() {
             setDispatcherAuthed(true);
             sessionStorage.setItem("rw_role", "dispatcher");
             if (s.userRole) sessionStorage.setItem("rw_user_role", s.userRole);
+            setActivePortal((current) => current === "home" ? "dispatcher" : current);
           } else if (sessionStorage.getItem("rw_role") === "dispatcher") {
             setDispatcherAuthed(false);
             sessionStorage.removeItem("rw_role");
@@ -301,6 +311,7 @@ export default function RouteWiseApp() {
       window.removeEventListener("focus", checkForUpdate);
       document.removeEventListener("visibilitychange", checkForUpdate);
       window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
     };
   }, [online]);
@@ -1656,9 +1667,13 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">(
-    "overview",
-  );
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">(() => {
+    if (typeof window === "undefined") return "overview";
+    const saved = sessionStorage.getItem("rw_dispatcher_tab");
+    return ["overview", "planner", "routes", "people", "vehicles", "dispatchers", "roteirizador", "ssw", "operations"].includes(saved || "")
+      ? saved as "overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations"
+      : "overview";
+  });
   const [routes, setRoutes] = useState<RouteData[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -1690,6 +1705,7 @@ function Dispatcher({
   });
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [heatPoints, setHeatPoints] = useState<Array<[number, number, number]>>([]);
+  useEffect(() => { sessionStorage.setItem("rw_dispatcher_tab", tab); }, [tab]);
   useEffect(() => {
     setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
   }, []);
@@ -1925,7 +1941,7 @@ function Dispatcher({
                   : "CENTRAL DE ESCRITÓRIO"}
               </span>
               {sessionInfo?.companyName && (
-                <span style={{ fontSize: "12px", background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                <span className="header-company-badge" style={{ fontSize: "12px", background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
                   {sessionInfo.companyName} ({sessionInfo.companyCode})
                 </span>
               )}
@@ -1953,7 +1969,7 @@ function Dispatcher({
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
             {/* Troca rápida de empresa para o Administrador Supremo */}
             {userRole === "superadmin" && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div className="company-switcher" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                 <Building2 size={16} color="var(--muted)" />
                 <select
                   disabled={switchingCompany}
