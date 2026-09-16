@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import webpush from "web-push";
 import { audit, db, query } from "@/lib/db";
 import { getSession, makeSession, sessionCookie, clearSessionCookie, type UserRole } from "@/lib/auth";
 import { uploadUrl, viewUrl } from "@/lib/storage";
@@ -34,6 +35,51 @@ function requestedRole(req: NextRequest): "dispatcher" | "driver" {
 }
 function routeParts(path: string[]) {
   return path.filter(Boolean);
+}
+
+async function notifyOperationOfDeliveredStop({
+  companyId,
+  routeId,
+  routeName,
+  stopName,
+  driverName,
+}: {
+  companyId: string;
+  routeId: string;
+  routeName: string;
+  stopName: string;
+  driverName: string;
+}) {
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  if (!publicKey || !privateKey) return;
+
+  const subscriptions = await query<{ endpoint: string; p256dh: string; auth: string }>(
+    "SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE company_id=$1 AND user_type='dispatcher'",
+    [companyId],
+  );
+  if (!subscriptions.rows.length) return;
+
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:contato@criarrota.com.br", publicKey, privateKey);
+  const payload = JSON.stringify({
+    title: "Entrega confirmada",
+    body: `${driverName} confirmou a entrega em ${stopName} · ${routeName}`.slice(0, 220),
+    url: `/`,
+  });
+  await Promise.all(subscriptions.rows.map(async (subscription) => {
+    try {
+      await webpush.sendNotification(
+        { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+        payload,
+        { TTL: 60 },
+      );
+    } catch (error: any) {
+      if (error?.statusCode === 404 || error?.statusCode === 410) {
+        await query("DELETE FROM push_subscriptions WHERE endpoint=$1", [subscription.endpoint]);
+      }
+      console.error("[delivery] Não foi possível enviar push da entrega", error);
+    }
+  }));
 }
 
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -885,10 +931,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         }
 
         const route = await client.query(
-          "SELECT 1 FROM routes WHERE id=$1 AND driver_id=$2 AND status IN ('active', 'completed')",
-          [p[1], session.driverId],
+          `SELECT r.company_id,r.name AS route_name,d.name AS driver_name,s.name AS stop_name
+           FROM routes r
+           LEFT JOIN drivers d ON d.id=r.driver_id
+           JOIN route_stops s ON s.id=$3 AND s.route_id=r.id
+           WHERE r.id=$1 AND r.driver_id=$2 AND r.status IN ('active', 'completed')`,
+          [p[1], session.driverId, p[3]],
         );
         if (!route.rows[0]) throw new Error("Rota não está ativa");
+        const outcome = ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue";
         await client.query(
           "INSERT INTO delivery_events(operation_id,route_id,stop_id,photo_key,note,lat,lng,occurrence) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(operation_id) DO NOTHING",
           [
@@ -899,14 +950,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             data.note || null,
             data.lat,
             data.lng,
-            ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue",
+            outcome,
           ],
         );
         await client.query(
           "UPDATE route_stops SET status='delivered', delivery_outcome=$3, delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND route_id=$2 AND NOT is_origin",
-          [p[3], p[1], ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue"],
+          [p[3], p[1], outcome],
         );
         await client.query("COMMIT");
+        if (outcome === "entregue") {
+          const routeData = route.rows[0];
+          void notifyOperationOfDeliveredStop({
+            companyId: routeData.company_id,
+            routeId: p[1],
+            routeName: routeData.route_name || "Rota em andamento",
+            stopName: routeData.stop_name || "destino",
+            driverName: routeData.driver_name || "Motorista",
+          }).catch((error) => console.error("[delivery] Erro no push da entrega", error));
+        }
         return json({ ok: true, operationId: data.operationId, photoKey });
       } catch (e) {
         await client.query("ROLLBACK");
