@@ -184,15 +184,32 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH: ADM ou escritório aprova, recusa ou marca como pago.
+// PATCH: motorista complementa solicitação pendente; ADM/escritório avaliam.
 export async function PATCH(request: Request) {
   const session = await getSession("dispatcher");
-  if (!session || !["admin", "superadmin", "office"].includes(session.userRole || "")) {
-    return NextResponse.json({ error: "Apenas ADM ou escritório podem avaliar solicitações" }, { status: 403 });
+  const driverSession = await getSession("driver");
+  if (!session && !driverSession) {
+    return NextResponse.json({ error: "Sessão necessária" }, { status: 401 });
   }
 
   try {
     const body = await request.json();
+    if (driverSession) {
+      const { id, pix_key, pix_qr_url, receipt_url } = body;
+      if (!id) return NextResponse.json({ error: "Solicitação não informada" }, { status: 400 });
+      const res = await query(
+        `UPDATE payment_requests
+         SET pix_key=COALESCE($1,pix_key), pix_qr_url=COALESCE($2,pix_qr_url), receipt_url=COALESCE($3,receipt_url)
+         WHERE id=$4 AND company_id=$5 AND driver_id=$6 AND status='pending'
+         RETURNING *`,
+        [String(pix_key || "").trim().slice(0, 255) || null, pix_qr_url || null, receipt_url || null, id, driverSession.companyId, driverSession.driverId],
+      );
+      if (!res.rows[0]) return NextResponse.json({ error: "Só é possível completar uma solicitação sua que ainda está pendente." }, { status: 403 });
+      return NextResponse.json(res.rows[0]);
+    }
+    if (!session || !["admin", "superadmin", "office"].includes(session.userRole || "")) {
+    return NextResponse.json({ error: "Apenas ADM ou escritório podem avaliar solicitações" }, { status: 403 });
+    }
     const { id, status, admin_notes, payment_receipt_url, paid_by_name } = body;
 
     if (!id || !["approved", "rejected", "paid"].includes(status)) {
