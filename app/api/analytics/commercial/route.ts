@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 import { getSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
