@@ -224,7 +224,7 @@ export function DashboardAnalytics({
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 5 }}>
-              <Target size={15} color="#2563eb" /> Meta Mensal de KM
+              <Target size={15} color="#2563eb" /> KM das rotas concluídas no mês
             </span>
             {(userRole === "admin" || userRole === "superadmin") && !editingTarget && (
               <button
@@ -276,7 +276,7 @@ export function DashboardAnalytics({
                 {data.realizedKm.toLocaleString("pt-BR")}
               </strong>
               <span style={{ fontSize: 14, color: "var(--muted)" }}>
-                / {data.targetKm.toLocaleString("pt-BR")} km ({pct}%)
+                / meta mensal de {data.targetKm.toLocaleString("pt-BR")} km ({pct}%)
               </span>
             </div>
           )}
@@ -297,7 +297,7 @@ export function DashboardAnalytics({
           {/* Previsibilidade de Fechamento */}
           <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.15)", fontSize: 12, color: "#1d4ed8" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, marginBottom: 2 }}>
-              <Award size={14} /> Previsibilidade de Fechamento:
+              <Award size={14} /> Previsão até o fim do mês:
             </div>
             <span>{data.projection.forecastStatusText}</span>
           </div>

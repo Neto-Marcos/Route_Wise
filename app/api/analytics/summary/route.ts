@@ -44,15 +44,19 @@ export async function GET(request: Request) {
 
     // 2. Rotas do mês selecionado
     const routesRes = await query(
-      `SELECT r.id, r.name, r.status, r.route_date,
+      `SELECT r.id, r.name, r.status, r.route_date, r.finished_at,
+              COALESCE(r.finished_at::date, r.route_date) AS metric_date,
               COALESCE(r.actual_km, r.estimated_km, 0) as km_val,
               (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.status = 'delivered') as completed_stops,
               (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id) as total_stops
        FROM routes r
-       WHERE r.company_id = $1 AND r.route_date::text LIKE $2
-         AND r.status NOT IN ('draft', 'cancelled')
-       ORDER BY r.route_date ASC`,
-      [session.companyId, `${month}%`]
+       WHERE r.company_id = $1 AND r.status NOT IN ('draft', 'cancelled')
+         AND (
+           (r.status = 'completed' AND to_char(COALESCE(r.finished_at, r.route_date::timestamptz), 'YYYY-MM') = $2)
+           OR (r.status <> 'completed' AND to_char(r.route_date, 'YYYY-MM') = $2)
+         )
+       ORDER BY metric_date ASC`,
+      [session.companyId, month]
     );
 
     let totalKmRealized = 0;
@@ -68,7 +72,7 @@ export async function GET(request: Request) {
       totalDeliveriesRealized += deliveries;
       totalEstimatedFuel += km * 6; // referência operacional R$/km
 
-      const d = String(row.route_date || "").slice(0, 10);
+      const d = String(row.metric_date || row.route_date || "").slice(0, 10);
       if (d) {
         const cur = dayMap.get(d) || { km: 0, deliveries: 0, routes: 0 };
         cur.km += km;
@@ -163,12 +167,15 @@ export async function GET(request: Request) {
               SUM((SELECT count(*) FROM route_stops s WHERE s.route_id = r.id AND s.status = 'delivered')) as completed_deliveries
        FROM routes r
        JOIN drivers d ON d.id = r.driver_id
-       WHERE r.company_id = $1 AND r.route_date::text LIKE $2
-         AND r.status NOT IN ('draft', 'cancelled')
+       WHERE r.company_id = $1 AND r.status NOT IN ('draft', 'cancelled')
+         AND (
+           (r.status = 'completed' AND to_char(COALESCE(r.finished_at, r.route_date::timestamptz), 'YYYY-MM') = $2)
+           OR (r.status <> 'completed' AND to_char(r.route_date, 'YYYY-MM') = $2)
+         )
        GROUP BY d.id, d.name
        ORDER BY completed_deliveries DESC, total_km DESC
        LIMIT 5`,
-      [session.companyId, `${month}%`]
+      [session.companyId, month]
     ).catch(() => ({ rows: [] }));
 
     const driverRanking = driverRankRes.rows.map((row) => ({
