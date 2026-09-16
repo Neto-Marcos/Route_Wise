@@ -17,6 +17,12 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId, driverId
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const isAdmin = userRole === "admin" || userRole === "superadmin";
+  const isDriver = userRole === "driver";
+  const modalTitle = isAdmin
+    ? (driverName ? `Pagamentos: ${driverName}` : "Solicitações de pagamento")
+    : isDriver
+      ? "Solicitar pagamento"
+      : (driverName ? `Pagamentos: ${driverName}` : "Pendências e comprovantes");
 
   const loadRequests = async () => { setLoading(true); try { const suffix = driverId ? `?driver_id=${encodeURIComponent(driverId)}` : ""; const res = await fetch(`/api/payments${suffix}`); if (res.ok) setRequests(await res.json()); } catch (error) { console.error(error); } finally { setLoading(false); } };
   useEffect(() => { loadRequests(); }, []);
@@ -59,9 +65,9 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId, driverId
 
   const content = <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: "max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px))" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div style={{ width: "100%", maxWidth: "640px", maxHeight: "85vh", background: "var(--card, #fff)", borderRadius: "18px", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 25px -5px rgba(0,0,0,.2)" }}>
-      <header style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: "8px" }}><DollarSign size={20} color="#059669" /><b style={{ fontSize: "16px", color: "var(--ink)" }}>{isAdmin ? (driverName ? `Pagamentos: ${driverName}` : "Solicitações de pagamento") : "Solicitar pagamento"}</b></div><button type="button" className="button secondary compact" onClick={onClose} style={{ width: "32px", height: "32px", padding: 0 }}>✕</button></header>
+      <header style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: "8px" }}><DollarSign size={20} color="#059669" /><b style={{ fontSize: "16px", color: "var(--ink)" }}>{modalTitle}</b></div><button type="button" className="button secondary compact" onClick={onClose} style={{ width: "32px", height: "32px", padding: 0 }}>✕</button></header>
       <div style={{ padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "18px" }}>
-        {!isAdmin && <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "12px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)" }}>
+        {isDriver && <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", borderRadius: "12px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)" }}>
           <b style={{ fontSize: "13px", color: "var(--ink)" }}>Nova solicitação</b>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}><label style={{ fontSize: "12px", fontWeight: 600 }}>Categoria:<select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}><option value="adiantamento">Adiantamento</option><option value="combustivel">Combustível</option><option value="pedagio">Pedágio</option><option value="diaria">Diária</option><option value="reembolso">Reembolso / Manutenção</option></select></label><label style={{ fontSize: "12px", fontWeight: 600 }}>Valor (R$):<input type="number" step="0.01" required placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inputStyle, fontWeight: 700 }} /></label></div>
           <label style={{ fontSize: "12px", fontWeight: 600 }}>Motivo / descrição:<input type="text" required placeholder="Ex: alimentação durante a rota" value={description} onChange={(e) => setDescription(e.target.value)} style={inputStyle} /></label>
