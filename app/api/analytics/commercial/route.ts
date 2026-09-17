@@ -16,6 +16,15 @@ const number = (value: unknown) => {
   return Number(normalized) || 0;
 };
 const indexOf = (headers: string[], predicate: (value: string) => boolean) => headers.findIndex(predicate);
+const monthKey = (value: unknown) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    return parsed ? `${parsed.y}-${String(parsed.m).padStart(2, "0")}` : "";
+  }
+  const match = text(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  return match ? `${match[3]}-${match[2].padStart(2, "0")}` : "";
+};
 
 export async function GET() {
   const session = await getSession("dispatcher");
@@ -38,6 +47,7 @@ export async function GET() {
 
     const headers = (rows[headerRow] || []).map(header);
     const orderCol = indexOf(headers, (h) => /pedido\s*sabium|numero\s*pedido|nro\s*pedido/.test(h));
+    const inclusionCol = indexOf(headers, (h) => h === "inclusao" || h.includes("data inclusao"));
     const freightCol = indexOf(headers, (h) => h === "tipo frete" || h === "tipo_frete");
     const valueCol = indexOf(headers, (h) => h === "total item" || h === "total_item");
     const qtyCol = indexOf(headers, (h) => h === "quantidade" || h === "qtd");
@@ -54,7 +64,9 @@ export async function GET() {
     const orders = new Map<string, Order>();
     const blockedProducts = new Map<string, { shortage: number; value: number; department: string }>();
     let itemLines = 0, inStockLines = 0, requestedQty = 0, availableQty = 0;
-    for (const row of rows.slice(headerRow + 1)) {
+    const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const monthlyRows = rows.slice(headerRow + 1).filter((row) => monthKey(row[inclusionCol]) === currentMonth);
+    for (const row of monthlyRows) {
       const orderId = text(row[orderCol]);
       if (!orderId) continue;
       const freightRaw = text(row[freightCol]).toUpperCase();
@@ -99,6 +111,7 @@ export async function GET() {
     const normalize = (entry: { orders: number; value: number }) => ({ ...entry, value: round(entry.value) });
     return NextResponse.json({
       filename: workbook.filename,
+      period: new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(`${currentMonth}-01T12:00:00`)),
       total: { orders: orders.size, value: round([...orders.values()].reduce((sum, order) => sum + order.value, 0)), itemLines, requestedQty: round(requestedQty), availableQty: round(availableQty) },
       freight: { CIF: normalize(freight.CIF), FOB: normalize(freight.FOB), OUTRO: normalize(freight.OUTRO) },
       invoiced: normalize(invoiced), pending: normalize(pending), ready: normalize(ready), blocked: normalize(blocked),

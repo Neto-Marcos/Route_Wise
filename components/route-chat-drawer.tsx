@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { MessageSquare, Send, X, Zap } from "lucide-react";
+import { MessageSquare, Send, X } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 
 export function RouteChatDrawer({
@@ -17,6 +17,8 @@ export function RouteChatDrawer({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
   const loadMessages = async () => {
     try {
@@ -34,7 +36,17 @@ export function RouteChatDrawer({
   }, [routeId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length > prevCountRef.current) {
+      const container = chatContainerRef.current;
+      const isNearBottom = container
+        ? container.scrollHeight - container.scrollTop - container.clientHeight < 150
+        : true;
+
+      if (prevCountRef.current === 0 || isNearBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+    prevCountRef.current = messages.length;
   }, [messages]);
 
   const handleSend = async (textToSend?: string, quickTag?: string) => {
@@ -124,7 +136,7 @@ export function RouteChatDrawer({
         </div>
 
         {/* Histórico de Mensagens */}
-        <div style={{ flex: 1, padding: "16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div ref={chatContainerRef} style={{ flex: 1, padding: "16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px" }}>
           {messages.length === 0 ? (
             <div style={{ margin: "auto", textAlign: "center", color: "var(--muted)", fontSize: "13px" }}>
               Nenhuma mensagem trocada ainda nesta rota. Envie um aviso rápido abaixo!

@@ -7,24 +7,19 @@ import {
   Calendar,
   Camera,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock,
   Copy,
-  Download,
   Eye,
   ExternalLink,
   FileText,
-  Filter,
   Gauge,
   KeyRound,
-  Lock,
   LogOut,
   LocateFixed,
   Mail,
-  Map as MapIcon,
   MapPin,
   Navigation,
   Pencil,
@@ -52,7 +47,10 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { enqueue, flushQueue } from "@/lib/offline";
+import { enqueue, flushQueue, getQueueCount } from "@/lib/offline";
+import { formatMercosulPlate, formatBRPhone } from "@/lib/formatters";
+import { ToastContainer, showToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { compressDriverPhoto, arrayBufferToBase64 } from "@/lib/driver-photo";
 import { LiveFleetMap } from "./live-fleet-map";
 import { DriverLiveMap } from "./driver-live-map";
@@ -206,7 +204,7 @@ export function formatDateBR(dateStr?: string | null): string {
 export default function RouteWiseApp() {
   const [activePortal, setActivePortal] = useState<
     "planner" | "dispatcher" | "driver" | "home"
-  >(() => typeof window !== "undefined" && sessionStorage.getItem("rw_role") === "dispatcher" ? "dispatcher" : "home");
+  >("home");
   const [targetRole, setTargetRole] = useState<"admin" | "route_creator" | "office">("admin");
   const [dispatcherAuthed, setDispatcherAuthed] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
@@ -338,6 +336,7 @@ export default function RouteWiseApp() {
 
   return (
     <div className="app">
+      <ToastContainer />
 
       {pwaRefreshing && <div className="pwa-refreshing" role="status" aria-live="polite"><RefreshCw size={19} /> Atualizando Criar Rota...</div>}
 
@@ -427,13 +426,109 @@ export default function RouteWiseApp() {
   );
 }
 
-function Connection({ online }: { online: boolean }) {
+export function ConnectionBadge({ online }: { online: boolean }) {
+  const [queueCount, setQueueCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+
+  const checkQueue = useCallback(() => {
+    getQueueCount().then(setQueueCount).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    checkQueue();
+    const interval = setInterval(checkQueue, 4000);
+    const onFlush = () => checkQueue();
+    window.addEventListener("routewise:queue-flushed", onFlush);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("routewise:queue-flushed", onFlush);
+    };
+  }, [checkQueue]);
+
+  const handleSync = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const count = await flushQueue();
+      if (count > 0) {
+        showToast(`${count} comprovante(s) sincronizado(s) com sucesso!`, "success");
+      } else {
+        showToast("Fila de comprovantes sincronizada.", "info");
+      }
+      checkQueue();
+    } catch {
+      showToast("Falha ao sincronizar fila offline.", "error");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
-    <div className={`connection ${online ? "online" : "offline"}`}>
-      {online ? <Wifi size={13} /> : <WifiOff size={13} />}{" "}
-      {online ? "Sincronizado" : "Offline · dados na fila"}
+    <div
+      className={`connection-badge ${online ? (queueCount > 0 ? "pending" : "online") : "offline"}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: "0.8125rem",
+        padding: "4px 10px",
+        borderRadius: "9999px",
+        background: online
+          ? queueCount > 0
+            ? "rgba(245, 158, 11, 0.15)"
+            : "rgba(34, 197, 94, 0.12)"
+          : "rgba(239, 68, 68, 0.12)",
+        color: online
+          ? queueCount > 0
+            ? "#b45309"
+            : "#15803d"
+          : "#b91c1c",
+        fontWeight: 500,
+      }}
+    >
+      {online ? (
+        queueCount > 0 ? (
+          <>
+            <RefreshCw size={13} className={syncing ? "spin" : ""} />
+            <span>{queueCount} na fila</span>
+            <button
+              type="button"
+              onClick={handleSync}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "inherit",
+                textDecoration: "underline",
+                padding: 0,
+                fontSize: "inherit",
+                marginLeft: 4,
+                fontWeight: 600,
+              }}
+              title="Sincronizar fotos e entregas offline agora"
+            >
+              {syncing ? "Enviando..." : "Sincronizar"}
+            </button>
+          </>
+        ) : (
+          <>
+            <Wifi size={13} />
+            <span>Sincronizado</span>
+          </>
+        )
+      ) : (
+        <>
+          <WifiOff size={13} />
+          <span>Offline{queueCount > 0 ? ` (${queueCount} na fila)` : ""}</span>
+        </>
+      )}
     </div>
   );
+}
+
+function Connection({ online }: { online: boolean }) {
+  return <ConnectionBadge online={online} />;
 }
 
 function Logo() {
@@ -511,7 +606,7 @@ function ChangePasswordModal({
         method: "POST",
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      alert(res.message || "Senha alterada com sucesso! Você foi desconectado por segurança.");
+      showToast(res.message || "Senha alterada com sucesso! Você foi desconectado por segurança.", "success");
       onLogout();
     } catch (err) {
       setError((err as Error).message);
@@ -1047,6 +1142,7 @@ function DispatchersPanel({
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDispatcher, setConfirmDispatcher] = useState<DispatcherUser | null>(null);
 
   const filteredItems = dispatchers
     .filter((d) => {
@@ -1118,17 +1214,19 @@ function DispatchersPanel({
     }
   };
 
-  const toggleActive = async (d: DispatcherUser) => {
+  const toggleActive = (d: DispatcherUser) => {
     if (d.id === sessionInfo?.dispatcherId) {
-      alert("Você não pode desativar seu próprio usuário conectado.");
+      showToast("Você não pode desativar seu próprio usuário conectado.", "warning");
       return;
     }
-    const nextActive = d.active === false;
-    const confirmMsg = nextActive
-      ? `Reativar o acesso de ${d.name}?`
-      : `Desativar o acesso de ${d.name}? Este usuário não poderá mais entrar no sistema.`;
-    if (!window.confirm(confirmMsg)) return;
+    setConfirmDispatcher(d);
+  };
 
+  const handleConfirmToggleDispatcher = async () => {
+    if (!confirmDispatcher) return;
+    const d = confirmDispatcher;
+    setConfirmDispatcher(null);
+    const nextActive = d.active === false;
     try {
       await api(`/api/dispatchers/${d.id}`, {
         method: "PUT",
@@ -1138,8 +1236,9 @@ function DispatchersPanel({
         }),
       });
       await reload();
+      showToast(`Acesso de ${d.name} ${nextActive ? "reativado" : "desativado"}.`, "success");
     } catch (e) {
-      alert((e as Error).message);
+      showToast((e as Error).message, "error");
     }
   };
 
@@ -1404,6 +1503,18 @@ function DispatchersPanel({
           </form>
         </Modal>
       )}
+      {/* Modal Editar */}
+      <ConfirmDialog
+        open={!!confirmDispatcher}
+        title={confirmDispatcher?.active === false ? "Reativar acesso" : "Desativar acesso"}
+        description={confirmDispatcher?.active === false
+          ? `Reativar o acesso de ${confirmDispatcher?.name}?`
+          : `Desativar o acesso de ${confirmDispatcher?.name}? Este usuário não poderá mais entrar no sistema.`}
+        confirmText={confirmDispatcher?.active === false ? "Reativar" : "Desativar"}
+        variant={confirmDispatcher?.active === false ? "primary" : "danger"}
+        onConfirm={handleConfirmToggleDispatcher}
+        onCancel={() => setConfirmDispatcher(null)}
+      />
     </section>
   );
 }
@@ -1422,18 +1533,21 @@ function CompaniesManagementModal({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [editingCompany, setEditingCompany] = useState<{ id: string; name: string } | null>(null);
+  const [confirmCompanyToggle, setConfirmCompanyToggle] = useState<{ id: string; code: string; name: string; active?: boolean } | null>(null);
 
-  const toggleActive = async (c: { id: string; code: string; name: string; active?: boolean }) => {
+  const toggleActive = (c: { id: string; code: string; name: string; active?: boolean }) => {
     if (c.code === "EU") {
-      alert("A empresa principal do Administrador Supremo não pode ser inativada.");
+      showToast("A empresa principal do Administrador Supremo não pode ser inativada.", "warning");
       return;
     }
-    const nextActive = c.active === false;
-    const confirmMsg = nextActive
-      ? `Reativar a empresa "${c.name}" (${c.code})?`
-      : `Inativar a empresa "${c.name}" (${c.code})? Seus usuários não conseguirão fazer login enquanto ela estiver inativa.`;
-    if (!window.confirm(confirmMsg)) return;
+    setConfirmCompanyToggle(c);
+  };
 
+  const handleConfirmCompanyToggle = async () => {
+    if (!confirmCompanyToggle) return;
+    const c = confirmCompanyToggle;
+    setConfirmCompanyToggle(null);
+    const nextActive = c.active === false;
     setError("");
     setBusyId(c.id);
     try {
@@ -1442,8 +1556,10 @@ function CompaniesManagementModal({
         body: JSON.stringify({ name: c.name, active: nextActive }),
       });
       await onReload();
+      showToast(`Empresa "${c.name}" ${nextActive ? "reativada" : "inativada"}.`, "success");
     } catch (e) {
       setError((e as Error).message);
+      showToast((e as Error).message, "error");
     } finally {
       setBusyId(null);
     }
@@ -1455,7 +1571,7 @@ function CompaniesManagementModal({
   const executeDeleteCompany = async () => {
     if (!deletingCompany) return;
     if (deletingCompany.code === "EU") {
-      alert("A empresa principal do Administrador Supremo não pode ser excluída.");
+      showToast("A empresa principal do Administrador Supremo não pode ser excluída.", "warning");
       return;
     }
     if (confirmCodeInput.trim().toUpperCase() !== deletingCompany.code.toUpperCase()) {
@@ -1658,6 +1774,17 @@ function CompaniesManagementModal({
             Fechar
           </button>
         </div>
+        <ConfirmDialog
+          open={!!confirmCompanyToggle}
+          title={confirmCompanyToggle?.active === false ? "Reativar empresa" : "Inativar empresa"}
+          description={confirmCompanyToggle?.active === false
+            ? `Reativar a empresa "${confirmCompanyToggle?.name}" (${confirmCompanyToggle?.code})?`
+            : `Inativar a empresa "${confirmCompanyToggle?.name}" (${confirmCompanyToggle?.code})? Seus usuários não conseguirão fazer login enquanto ela estiver inativa.`}
+          confirmText={confirmCompanyToggle?.active === false ? "Reativar" : "Inativar"}
+          variant={confirmCompanyToggle?.active === false ? "primary" : "danger"}
+          onConfirm={handleConfirmCompanyToggle}
+          onCancel={() => setConfirmCompanyToggle(null)}
+        />
       </div>
     </Modal>
   );
@@ -1668,13 +1795,14 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">(() => {
-    if (typeof window === "undefined") return "overview";
+  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">("overview");
+
+  useEffect(() => {
     const saved = sessionStorage.getItem("rw_dispatcher_tab");
-    return ["overview", "planner", "routes", "people", "vehicles", "dispatchers", "roteirizador", "ssw", "operations"].includes(saved || "")
-      ? saved as "overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations"
-      : "overview";
-  });
+    if (saved && ["overview", "planner", "routes", "people", "vehicles", "dispatchers", "roteirizador", "ssw", "operations"].includes(saved)) {
+      setTab(saved as any);
+    }
+  }, []);
   const [routes, setRoutes] = useState<RouteData[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -1808,6 +1936,7 @@ function Dispatcher({
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showManageCompanies, setShowManageCompanies] = useState(false);
   const [switchingCompany, setSwitchingCompany] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
 
   // Determina o papel do usuário (admin por padrão se for dispatcher geral)
   const userRole = (sessionInfo as any)?.userRole || (typeof window !== "undefined" ? sessionStorage.getItem("rw_user_role") : null) || "admin";
@@ -1839,7 +1968,7 @@ function Dispatcher({
       });
       await load();
     } catch (e) {
-      alert((e as Error).message);
+      showToast((e as Error).message, "error");
     } finally {
       setSwitchingCompany(false);
     }
@@ -2009,16 +2138,26 @@ function Dispatcher({
             <span className="live">
               <i /> Atualização automática
             </span>
+            <ConnectionBadge online={typeof navigator !== "undefined" ? navigator.onLine : true} />
             <ThemeToggle />
             <button
               type="button"
               className="button secondary compact"
-              onClick={onExit}
+              onClick={() => setConfirmExit(true)}
               title="Desconectar do sistema"
               style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#dc2626", border: "1px solid rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)" }}
             >
               <LogOut size={14} /> <span>Sair</span>
             </button>
+            <ConfirmDialog
+              open={confirmExit}
+              title="Desconectar do sistema"
+              description="Deseja realmente sair do painel operacional?"
+              confirmText="Sim, desconectar"
+              variant="danger"
+              onConfirm={onExit}
+              onCancel={() => setConfirmExit(false)}
+            />
           </div>
         </header>
         {message && <p className="form-error">{message}</p>}
@@ -2162,6 +2301,7 @@ function Overview({
   drivers: Driver[];
   onOpenHeatmap: (points: Array<[number, number, number]>) => void;
 }) {
+  const [overviewTab, setOverviewTab] = useState<"operations" | "commercial">("operations");
   const delivered = routes.filter((route) => !["draft", "cancelled"].includes(route.status)).reduce((n, r) => n + Number(r.delivered || 0), 0);
   const todayLocal = new Date().toLocaleDateString("en-CA");
   const liveRoutes = routes.filter((route) => route.status === "assigned" || route.status === "active");
@@ -2170,85 +2310,111 @@ function Overview({
   );
   return (
     <>
-      <CommercialDashboard />
-      <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
-      <section className="metrics">
-        <Metric
-          label="Rotas hoje"
-          value={
-            todayOperationalRoutes.length
-          }
-          icon={<Navigation />}
-        />
-        <Metric
-          label="Em andamento"
-          value={active.length}
-          icon={<LocateFixed />}
-        />
-        <Metric
-          label="Entregas feitas"
-          value={delivered}
-          icon={<ClipboardCheck />}
-        />
-        <Metric label="Concluídas" value={completed.length} icon={<Check />} />
-      </section>
-
-      {/* Quick Launch Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-        <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)", marginBottom: 0 }}>
-          <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <h2 style={{ color: "#10b981", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
-                📄 Roteirizador de Planilhas
-              </h2>
-              <p style={{ fontSize: 12 }}>Upload de carteira (.xlsx / .csv / NOTFIS) e cubagem m³ com LIFO.</p>
-            </div>
-            <button type="button" className="button primary compact" style={{ background: "#10b981", border: "none" }} onClick={() => onOpenTab?.("roteirizador")}>
-              Abrir
-            </button>
-          </div>
-        </section>
-
-        <section className="panel" style={{ background: "linear-gradient(135deg, rgba(14,165,233,0.12), rgba(2,132,199,0.05))", border: "1px solid rgba(14,165,233,0.3)", marginBottom: 0 }}>
-          <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <h2 style={{ color: "#0284c7", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
-                📦 Rastreamento SSW (DANFE)
-              </h2>
-              <p style={{ fontSize: 12 }}>Consulta direta pelo DANFE (44 dígitos) integrado ao ssw.inf.br.</p>
-            </div>
-            <button type="button" className="button primary compact" style={{ background: "#0284c7", border: "none" }} onClick={() => onOpenTab?.("ssw")}>
-              Consultar
-            </button>
-          </div>
-        </section>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "inline-flex", background: "var(--card)", padding: "4px", borderRadius: "10px", border: "1px solid var(--line)" }}>
+          <button
+            type="button"
+            className={`button compact ${overviewTab === "operations" ? "primary" : "secondary"}`}
+            style={{ borderRadius: "8px", fontWeight: 600, fontSize: "13px" }}
+            onClick={() => setOverviewTab("operations")}
+          >
+            🚗 Em Operação (Frota ao Vivo)
+          </button>
+          <button
+            type="button"
+            className={`button compact ${overviewTab === "commercial" ? "primary" : "secondary"}`}
+            style={{ borderRadius: "8px", fontWeight: 600, fontSize: "13px" }}
+            onClick={() => setOverviewTab("commercial")}
+          >
+            📊 Métricas Comerciais e BI
+          </button>
+        </div>
       </div>
 
-      {/* Task 1: Mapa ao vivo para o Organizador */}
-      <section className="panel live-fleet-panel">
-        <div className="panel-title">
-          <div>
-            <h2>Mapa ao vivo da frota</h2>
-            <p>Última posição transmitida por GPS dos motoristas em rota</p>
-          </div>
-        </div>
-        <LiveFleetMap routes={liveRoutes} onSelectRoute={onSelectRoute} />
-      </section>
+      {overviewTab === "commercial" ? (
+        <>
+          <CommercialDashboard />
+          <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
+        </>
+      ) : (
+        <>
+          <section className="metrics">
+            <Metric
+              label="Rotas hoje"
+              value={todayOperationalRoutes.length}
+              icon={<Navigation />}
+            />
+            <Metric
+              label="Em andamento"
+              value={active.length}
+              icon={<LocateFixed />}
+            />
+            <Metric
+              label="Entregas feitas"
+              value={delivered}
+              icon={<ClipboardCheck />}
+            />
+            <Metric label="Concluídas" value={completed.length} icon={<Check />} />
+          </section>
 
-      <section className="panel">
-        <div className="panel-title">
-          <div>
-            <h2>Operação ao vivo</h2>
-            <p>Clique em uma rota para abrir detalhes, paradas e fotos</p>
+          {/* Quick Launch Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>
+            <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)", marginBottom: 0 }}>
+              <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h2 style={{ color: "#10b981", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                    📄 Roteirizador de Planilhas
+                  </h2>
+                  <p style={{ fontSize: 12 }}>Upload de carteira (.xlsx / .csv / NOTFIS) e cubagem m³ com LIFO.</p>
+                </div>
+                <button type="button" className="button primary compact" style={{ background: "#10b981", border: "none" }} onClick={() => onOpenTab?.("roteirizador")}>
+                  Abrir
+                </button>
+              </div>
+            </section>
+
+            <section className="panel" style={{ background: "linear-gradient(135deg, rgba(14,165,233,0.12), rgba(2,132,199,0.05))", border: "1px solid rgba(14,165,233,0.3)", marginBottom: 0 }}>
+              <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h2 style={{ color: "#0284c7", fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                    📦 Rastreamento SSW (DANFE)
+                  </h2>
+                  <p style={{ fontSize: 12 }}>Consulta direta pelo DANFE (44 dígitos) integrado ao ssw.inf.br.</p>
+                </div>
+                <button type="button" className="button primary compact" style={{ background: "#0284c7", border: "none" }} onClick={() => onOpenTab?.("ssw")}>
+                  Consultar
+                </button>
+              </div>
+            </section>
           </div>
-        </div>
-        <RouteTable
-          routes={liveRoutes}
-          onSelectRoute={onSelectRoute}
-          onPrintReport={onPrintReport}
-          onAssignRoute={onAssignRoute}
-        />
-      </section>
+
+          {/* Task 1: Mapa ao vivo para o Organizador */}
+          <section className="panel live-fleet-panel">
+            <div className="panel-title">
+              <div>
+                <h2>Mapa ao vivo da frota</h2>
+                <p>Última posição transmitida por GPS dos motoristas em rota</p>
+              </div>
+            </div>
+            <LiveFleetMap routes={liveRoutes} onSelectRoute={onSelectRoute} />
+          </section>
+
+          <section className="panel">
+            <div className="panel-title">
+              <div>
+                <h2>Operação ao vivo</h2>
+                <p>Clique em uma rota para abrir detalhes, paradas e fotos</p>
+              </div>
+            </div>
+            <RouteTable
+              routes={liveRoutes}
+              onSelectRoute={onSelectRoute}
+              onPrintReport={onPrintReport}
+              onAssignRoute={onAssignRoute}
+            />
+          </section>
+        </>
+      )}
     </>
   );
 }
@@ -2426,6 +2592,9 @@ function Registry({
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("active");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [phoneVal, setPhoneVal] = useState("");
+  const [plateVal, setPlateVal] = useState("");
+  const [toggleConfirmItem, setToggleConfirmItem] = useState<Driver | Vehicle | null>(null);
 
   const filteredItems = items.filter((item) => {
     if (filter === "active") return item.active !== false;
@@ -2502,13 +2671,15 @@ function Registry({
     }
   };
 
-  const toggleActive = async (item: Driver | Vehicle) => {
-    const nextActive = item.active === false;
-    const confirmMsg = nextActive
-      ? `Reativar o cadastro de ${item.name}?`
-      : `Desativar o cadastro de ${item.name}?`;
-    if (!window.confirm(confirmMsg)) return;
+  const toggleActive = (item: Driver | Vehicle) => {
+    setToggleConfirmItem(item);
+  };
 
+  const handleConfirmToggleItem = async () => {
+    if (!toggleConfirmItem) return;
+    const item = toggleConfirmItem;
+    setToggleConfirmItem(null);
+    const nextActive = item.active === false;
     try {
       await api(`/api/${kind === "driver" ? "drivers" : "vehicles"}/${item.id}`, {
         method: "PUT",
@@ -2518,8 +2689,9 @@ function Registry({
         }),
       });
       await reload();
+      showToast(`Cadastro de ${item.name} ${nextActive ? "reativado" : "desativado"}.`, "success");
     } catch (e) {
-      alert((e as Error).message);
+      showToast((e as Error).message, "error");
     }
   };
 
@@ -2558,6 +2730,8 @@ function Registry({
             className="button primary compact"
             onClick={() => {
               setError("");
+              setPhoneVal("");
+              setPlateVal("");
               setOpen(true);
             }}
           >
@@ -2643,7 +2817,13 @@ function Registry({
               <>
                 <label>
                   Telefone / WhatsApp
-                  <input name="phone" inputMode="tel" placeholder="(11) 99999-9999" />
+                  <input
+                    name="phone"
+                    inputMode="tel"
+                    placeholder="(11) 99999-9999"
+                    value={phoneVal}
+                    onChange={(e) => setPhoneVal(formatBRPhone(e.target.value))}
+                  />
                 </label>
                 <label>
                   Senha de acesso do motorista (PIN)
@@ -2664,7 +2844,14 @@ function Registry({
                 <div className="form-row">
                   <label>
                     Placa do veículo
-                    <input name="plate" required maxLength={8} placeholder="ABC1D23" />
+                    <input
+                      name="plate"
+                      required
+                      maxLength={8}
+                      placeholder="ABC1D23"
+                      value={plateVal}
+                      onChange={(e) => setPlateVal(formatMercosulPlate(e.target.value))}
+                    />
                   </label>
                   <label>
                     Odômetro atual (km)
@@ -2718,6 +2905,9 @@ function Registry({
                     name="phone"
                     inputMode="tel"
                     defaultValue={(editing as Driver).phone || ""}
+                    onChange={(e) => {
+                      e.target.value = formatBRPhone(e.target.value);
+                    }}
                   />
                 </label>
                 <label>
@@ -2743,6 +2933,9 @@ function Registry({
                       required
                       maxLength={8}
                       defaultValue={(editing as Vehicle).plate}
+                      onChange={(e) => {
+                        e.target.value = formatMercosulPlate(e.target.value);
+                      }}
                     />
                   </label>
                   <label>
@@ -2794,6 +2987,18 @@ function Registry({
           </form>
         </Modal>
       )}
+
+      <ConfirmDialog
+        open={!!toggleConfirmItem}
+        title={toggleConfirmItem?.active === false ? "Reativar cadastro" : "Desativar cadastro"}
+        description={toggleConfirmItem?.active === false
+          ? `Reativar o cadastro de ${toggleConfirmItem?.name}?`
+          : `Desativar o cadastro de ${toggleConfirmItem?.name}?`}
+        confirmText={toggleConfirmItem?.active === false ? "Reativar" : "Desativar"}
+        variant={toggleConfirmItem?.active === false ? "primary" : "danger"}
+        onConfirm={handleConfirmToggleItem}
+        onCancel={() => setToggleConfirmItem(null)}
+      />
     </section>
   );
 }
@@ -2822,6 +3027,7 @@ function RoutesPanel({
 
   // Filters state
   const [searchTerm, setSearchTerm] = useState("");
+  const [routeToCancel, setRouteToCancel] = useState<RouteData | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [driverFilter, setDriverFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("");
@@ -2857,15 +3063,21 @@ function RoutesPanel({
     setSearchTerm("");
   };
 
-  const cancelRoute = async (route: RouteData) => {
-    if (
-      !window.confirm(
-        `Cancelar a rota “${route.name}”? Esta ação interrompe o rastreamento e não pode ser desfeita.`,
-      )
-    )
-      return;
-    await api(`/api/routes/${route.id}/cancel`, { method: "POST" });
-    await reload();
+  const cancelRoute = (route: RouteData) => {
+    setRouteToCancel(route);
+  };
+
+  const handleConfirmCancelRoute = async () => {
+    if (!routeToCancel) return;
+    const r = routeToCancel;
+    setRouteToCancel(null);
+    try {
+      await api(`/api/routes/${r.id}/cancel`, { method: "POST" });
+      await reload();
+      showToast(`Rota "${r.name}" cancelada com sucesso.`, "info");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    }
   };
 
   return (
@@ -2986,6 +3198,16 @@ function RoutesPanel({
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!routeToCancel}
+        title="Cancelar rota"
+        description={`Cancelar a rota "${routeToCancel?.name}"? Esta ação interrompe o rastreamento e não pode ser desfeita.`}
+        confirmText="Sim, cancelar rota"
+        variant="danger"
+        onConfirm={handleConfirmCancelRoute}
+        onCancel={() => setRouteToCancel(null)}
+      />
     </>
   );
 }
@@ -3422,7 +3644,7 @@ function RoutePlannerView({
   const printRouteSheet = () => {
     if (stops.length < 2) return;
     printElement("planner-print-document", `Romaneio - ${routeName || "Nova rota"}`)
-      .catch((error) => window.alert(error.message));
+      .catch((error) => showToast(error.message, "error"));
   };
 
   const shareWhatsApp = () => {
@@ -4361,6 +4583,8 @@ function DriverApp({
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showPaymentRequest, setShowPaymentRequest] = useState(false);
+  const [showDriverProfile, setShowDriverProfile] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
 
   const todayStr = new Date().toLocaleDateString("en-CA");
 
@@ -4414,39 +4638,84 @@ function DriverApp({
       <header>
         <Logo />
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ConnectionBadge online={online} />
           <ThemeToggle />
           <button
             type="button"
-            className="secondary compact"
-            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid var(--line)", background: "var(--paper)", cursor: "pointer" }}
-            onClick={() => setShowChangePassword(true)}
-            title="Alterar meu PIN de acesso"
+            className="avatar-button"
+            onClick={() => setShowDriverProfile(true)}
+            title="Meu perfil e configurações"
+            style={{ cursor: "pointer" }}
           >
-            <KeyRound size={14} /> <span>Alterar PIN</span>
-          </button>
-          <button
-            type="button"
-            className="secondary compact"
-            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid rgba(5, 150, 105, 0.25)", background: "rgba(5, 150, 105, 0.08)", color: "#047857", cursor: "pointer" }}
-            onClick={() => setShowPaymentRequest(true)}
-            title="Solicitar pagamento, diária ou reembolso"
-          >
-            <Send size={14} /> <span>Solicitar pagamento</span>
-          </button>
-          <button
-            type="button"
-            className="secondary compact"
-            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "8px", fontSize: "12px", border: "1px solid rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)", color: "#dc2626", cursor: "pointer" }}
-            onClick={onExit}
-            title="Sair / Desconectar"
-          >
-            <LogOut size={14} /> <span>Sair</span>
-          </button>
-          <button className="avatar-button" onClick={onExit} title="Perfil / Sair">
             {driver.name.slice(0, 2).toUpperCase()}
           </button>
         </div>
       </header>
+
+      {showDriverProfile && (
+        <Modal title="Meu perfil" onClose={() => setShowDriverProfile(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: "var(--card)", borderRadius: "10px", border: "1px solid var(--line)" }}>
+              <div className="avatar-button" style={{ width: 44, height: 44, fontSize: 18 }}>
+                {driver.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <b style={{ fontSize: "16px", display: "block" }}>{driver.name}</b>
+                <small style={{ color: "var(--muted)" }}>Motorista · {driver.phone || "Sem telefone cadastrado"}</small>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "10px", padding: "12px" }}
+                onClick={() => {
+                  setShowDriverProfile(false);
+                  setShowPaymentRequest(true);
+                }}
+              >
+                <Send size={16} color="#059669" />
+                <span>Solicitar pagamento / diária</span>
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "10px", padding: "12px" }}
+                onClick={() => {
+                  setShowDriverProfile(false);
+                  setShowChangePassword(true);
+                }}
+              >
+                <KeyRound size={16} />
+                <span>Alterar PIN de acesso</span>
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: "10px", padding: "12px", color: "#dc2626", borderColor: "rgba(220, 38, 38, 0.2)" }}
+                onClick={() => {
+                  setShowDriverProfile(false);
+                  setConfirmExit(true);
+                }}
+              >
+                <LogOut size={16} />
+                <span>Sair / Desconectar</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      <ConfirmDialog
+        open={confirmExit}
+        title="Sair do aplicativo?"
+        description="Deseja realmente desconectar? Dados e comprovantes offline continuarão salvos com segurança neste aparelho."
+        confirmText="Sim, desconectar"
+        variant="danger"
+        onConfirm={onExit}
+        onCancel={() => setConfirmExit(false)}
+      />
       <section className="driver-content">
         <span className="eyebrow">BOM TRABALHO</span>
         <h1>Olá, {driver.name.split(" ")[0]}</h1>
@@ -4549,6 +4818,8 @@ function ActiveRoute({
   );
   const [showReport, setShowReport] = useState(false);
   const [next, setNext] = useState<Stop | null>(null);
+  const [selectedDeliveryStop, setSelectedDeliveryStop] = useState<Stop | null>(null);
+  const [showItinerary, setShowItinerary] = useState(false);
   const [currentCoords, setCurrentCoords] = useState<{
     lat: number;
     lng: number;
@@ -4701,7 +4972,10 @@ function ActiveRoute({
                   </a>
                   <button
                     className="button primary"
-                    onClick={() => setModal("delivery")}
+                    onClick={() => {
+                      setSelectedDeliveryStop(next);
+                      setModal("delivery");
+                    }}
                   >
                     <Check /> Entrega feita
                   </button>
@@ -4712,6 +4986,93 @@ function ActiveRoute({
                 <Check size={28} />
                 <b>Todas as entregas foram concluídas!</b>
                 <p>Retorne ao ponto de saída e registre o odômetro final.</p>
+              </div>
+            )}
+
+            {/* BP-3: Itinerário Completo & Entregas fora de ordem */}
+            {data.stops && data.stops.filter((s) => !s.is_origin).length > 0 && (
+              <div style={{ marginTop: 12, marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  style={{ width: "100%", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10 }}
+                  onClick={() => setShowItinerary(!showItinerary)}
+                >
+                  <span>📋 Itinerário completo ({data.stops.filter((s) => !s.is_origin).length} paradas)</span>
+                  <ChevronDown size={16} style={{ transform: showItinerary ? "rotate(180deg)" : undefined, transition: "transform 0.2s" }} />
+                </button>
+
+                {showItinerary && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                    {data.stops
+                      .filter((s) => !s.is_origin)
+                      .map((s, idx) => (
+                        <div
+                          key={s.id || idx}
+                          style={{
+                            padding: 12,
+                            borderRadius: 10,
+                            border: "1px solid var(--line)",
+                            background: s.status === "delivered" ? "rgba(34, 197, 94, 0.06)" : "var(--card)",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                              <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>
+                                {idx + 1}. {s.name}
+                              </span>
+                              {s.status === "delivered" && (
+                                <span style={{ fontSize: 11, background: "rgba(34, 197, 94, 0.15)", color: "#15803d", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>
+                                  Entregue
+                                </span>
+                              )}
+                            </div>
+                            <small style={{ color: "var(--muted)", display: "block", fontSize: 12 }} className="truncate">
+                              {s.address}
+                            </small>
+                            {(s.boxes || s.volume_m3 || s.order_ids?.length) ? (
+                              <div style={{ display: "flex", gap: 8, fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                                {s.boxes ? <span>📦 {s.boxes} cx</span> : null}
+                                {s.volume_m3 ? <span>📐 {s.volume_m3.toFixed(2)} m³</span> : null}
+                                {s.order_ids?.length ? <span>📄 Pedidos: {s.order_ids.join(", ")}</span> : null}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <a
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="button secondary compact"
+                              style={{ padding: "6px 8px" }}
+                              title="Navegar no Maps"
+                            >
+                              <Navigation size={13} />
+                            </a>
+                            {data.status === "active" && s.status !== "delivered" && (
+                              <button
+                                type="button"
+                                className="button primary compact"
+                                style={{ padding: "6px 10px", fontSize: 12 }}
+                                onClick={() => {
+                                  setSelectedDeliveryStop(s);
+                                  setModal("delivery");
+                                }}
+                                title="Fazer entrega desta parada fora de ordem"
+                              >
+                                Entregar
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -4747,12 +5108,16 @@ function ActiveRoute({
         <ProofModal
           phase={modal}
           route={data}
-          stop={next}
-          onClose={() => setModal(null)}
+          stop={selectedDeliveryStop || next}
+          onClose={() => {
+            setModal(null);
+            setSelectedDeliveryStop(null);
+          }}
           onDone={async (completedPhase, completedStop) => {
             const currentPhase = completedPhase || modal;
-            const currentStop = completedStop !== undefined ? completedStop : next;
+            const currentStop = completedStop !== undefined ? completedStop : (selectedDeliveryStop || next);
             setModal(null);
+            setSelectedDeliveryStop(null);
             if (currentPhase === "start") {
               setData((prev) => ({ ...prev, status: "active" }));
             } else if (currentPhase === "delivery" && currentStop?.id) {

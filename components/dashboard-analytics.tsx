@@ -4,17 +4,12 @@ import React, { useState, useEffect } from "react";
 import {
   TrendingUp,
   Target,
-  Clock,
   MapPin,
   Flame,
   Award,
-  Calendar,
-  DollarSign,
   Truck,
   RefreshCw,
   Edit2,
-  CheckCircle2,
-  AlertTriangle,
 } from "lucide-react";
 import { haptics } from "@/lib/haptics";
 
@@ -273,10 +268,10 @@ export function DashboardAnalytics({
           ) : (
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "6px 0 10px" }}>
               <strong style={{ fontSize: 26, fontWeight: 800, color: "var(--ink)" }}>
-                {data.realizedKm.toLocaleString("pt-BR")}
+                {Number(data.realizedKm ?? 0).toLocaleString("pt-BR")}
               </strong>
               <span style={{ fontSize: 14, color: "var(--muted)" }}>
-                / meta mensal de {data.targetKm.toLocaleString("pt-BR")} km ({pct}%)
+                / meta mensal de {Number(data.targetKm ?? 0).toLocaleString("pt-BR")} km ({pct}%)
               </span>
             </div>
           )}

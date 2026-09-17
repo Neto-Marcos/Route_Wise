@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { FileSpreadsheet, Navigation, Printer, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
 import { printElement } from "@/lib/print-document";
@@ -48,6 +49,10 @@ export function RouteReportModal({
   };
 
   const duration = calculateDuration();
+  const [emissionDate, setEmissionDate] = useState<string>("");
+  useEffect(() => {
+    setEmissionDate(`${new Date().toLocaleDateString("pt-BR")} às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`);
+  }, []);
   const mapStops = route.stops?.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng))) || [];
   const googleMapsUrl = mapStops.length > 1
     ? `https://www.google.com/maps/dir/${mapStops.map((stop) => `${stop.lat},${stop.lng}`).join("/")}`
@@ -93,7 +98,7 @@ export function RouteReportModal({
             </div>
             <div className="report-meta-box">
               <span>Data de emissão</span>
-              <strong>{new Date().toLocaleDateString("pt-BR")} às {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</strong>
+              <strong suppressHydrationWarning>{emissionDate || "—"}</strong>
             </div>
           </header>
 

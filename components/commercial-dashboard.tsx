@@ -1,19 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Boxes, CircleDollarSign, FileCheck2, PackageCheck, RefreshCw, ShoppingCart, Store, TriangleAlert } from "lucide-react";
+import { Boxes, CircleDollarSign, RefreshCw, ShoppingCart, Store, TriangleAlert } from "lucide-react";
 
 type Bucket = { orders: number; value: number };
-type Data = { filename: string; total: Bucket & { itemLines: number; requestedQty: number; availableQty: number }; freight: { CIF: Bucket; FOB: Bucket; OUTRO: Bucket }; invoiced: Bucket; pending: Bucket; ready: Bucket; blocked: Bucket; stock: { inStockLines: number; totalLines: number; coveragePct: number }; topBlockedProducts: Array<{ product: string; department: string; shortage: number; value: number }> };
+type Data = { filename: string; period: string; total: Bucket & { itemLines: number; requestedQty: number; availableQty: number }; freight: { CIF: Bucket; FOB: Bucket; OUTRO: Bucket }; invoiced: Bucket; pending: Bucket; ready: Bucket; blocked: Bucket; stock: { inStockLines: number; totalLines: number; coveragePct: number }; topBlockedProducts: Array<{ product: string; department: string; shortage: number; value: number }> };
 const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const card = (label: string, value: string, detail: string, color = "#2563eb") => <div style={{ padding: "14px", border: "1px solid var(--line)", borderRadius: 14, background: "var(--card-subtle)" }}><small style={{ color: "var(--muted)", fontWeight: 800, textTransform: "uppercase", fontSize: 11 }}>{label}</small><strong style={{ display: "block", color, fontSize: 22, marginTop: 5 }}>{value}</strong><span style={{ color: "var(--muted)", fontSize: 12 }}>{detail}</span></div>;
 
 export function CommercialDashboard() {
   const [data, setData] = useState<Data | null>(null); const [error, setError] = useState(""); const [loading, setLoading] = useState(true); const [tab, setTab] = useState<"resumo" | "frete" | "estoque">("resumo");
-  const load = async () => { setLoading(true); setError(""); try { const response = await fetch("/api/analytics/commercial"); const json = await response.json(); if (!response.ok) throw new Error(json.error); setData(json); } catch (e: any) { setError(e.message || "Não foi possível carregar a carteira."); } finally { setLoading(false); } };
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/analytics/commercial");
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Erro ${response.status}: Falha ao carregar a carteira`);
+      }
+      const json = await response.json();
+      setData(json);
+    } catch (e: any) {
+      setError(e.message || "Não foi possível carregar a carteira.");
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => { load(); }, []);
   return <section className="panel" style={{ marginBottom: 18 }}>
-    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ display: "flex", alignItems: "center", gap: 8 }}><CircleDollarSign size={21} color="#059669" /> Carteira comercial</h2><p>{data ? `Base: ${data.filename}` : "Indicadores da planilha ativa do roteirizador"}</p></div><button className="button secondary compact" onClick={load} disabled={loading}><RefreshCw size={15} /> Atualizar</button></div>
+    <div className="panel-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ display: "flex", alignItems: "center", gap: 8 }}><CircleDollarSign size={21} color="#059669" /> Carteira comercial</h2><p>{data ? `Competência: ${data.period} · Base: ${data.filename}` : "Indicadores do mês na planilha ativa do roteirizador"}</p></div><button className="button secondary compact" onClick={load} disabled={loading}><RefreshCw size={15} /> Atualizar</button></div>
     <div style={{ display: "flex", gap: 7, overflowX: "auto", margin: "12px 0 16px" }}>{([ ["resumo", "Resumo", ShoppingCart], ["frete", "CIF e FOB", Store], ["estoque", "Estoque", Boxes] ] as const).map(([id, label, Icon]) => <button key={id} className={`button compact ${tab === id ? "primary" : "secondary"}`} onClick={() => setTab(id)}><Icon size={15} />{label}</button>)}</div>
     {loading && !data ? <p style={{ color: "var(--muted)" }}>Lendo a carteira ativa...</p> : error ? <div className="form-error">{error}</div> : data && <>
       {tab === "resumo" && <><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>{card("Carteira total", money(data.total.value), `${data.total.orders} pedidos`)}{card("Já faturado", money(data.invoiced.value), `${data.invoiced.orders} pedidos com alguma linha faturada`, "#059669")}{card("A faturar", money(data.pending.value), `${data.pending.orders} pedidos com saldo pendente`, "#d97706")}{card("Pronto para faturar", money(data.ready.value), `${data.ready.orders} pedidos com item disponível`, "#0f9f78")}{card("A faturar sem estoque", money(data.blocked.value), `${data.blocked.orders} pedidos bloqueados`, "#dc2626")}</div><div style={{ marginTop: 14, padding: 13, borderRadius: 12, background: "rgba(37,99,235,.08)", color: "var(--ink)", fontSize: 13 }}><strong>Leitura rápida:</strong> {data.stock.coveragePct}% das linhas têm saldo suficiente na filial 281. Em pedido parcialmente faturado, cada item é separado: só o valor da linha ainda sem NF/data de faturamento entra em “A faturar”.</div></>}

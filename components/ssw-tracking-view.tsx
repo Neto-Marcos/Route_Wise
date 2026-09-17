@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Package, AlertCircle, RefreshCw, Truck, FileText, UserCheck, ShieldCheck, X, Maximize2 } from "lucide-react";
+import { Search, Package, AlertCircle, Truck, FileText, UserCheck, ShieldCheck, X, ArrowLeft } from "lucide-react";
+import { formatDANFEKey } from "@/lib/formatters";
 
 export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   const [provider, setProvider] = useState<"ssw" | "correios">("ssw");
@@ -65,6 +66,18 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
   return (
     <section className="panel" style={{ maxWidth: 1040, margin: "0 auto" }}>
       {/* Header com seleção de Provedor */}
+      {onBack && (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="button secondary compact"
+            onClick={onBack}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <ArrowLeft size={15} /> Voltar
+          </button>
+        </div>
+      )}
       <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 16 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -148,7 +161,10 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
             <input
               type="text"
               value={queryValue}
-              onChange={(e) => setQueryValue(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setQueryValue(provider === "ssw" && searchType === "danfe" ? formatDANFEKey(val) : val);
+              }}
               placeholder={
                 provider === "correios"
                   ? "Ex.: AA123456789BR ou 000.000.000-00"

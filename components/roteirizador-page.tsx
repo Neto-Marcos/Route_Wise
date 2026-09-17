@@ -99,6 +99,9 @@ function RoutePointMap({ route, selectedStop }: { route: SuggestedRoute; selecte
       mapRef.current?.remove();
       const focus = selectedStop ?? route.stops[0];
       if (!focus || !Number.isFinite(focus.lat) || !Number.isFinite(focus.lng)) return;
+      if ((containerRef.current as any)._leaflet_id) {
+        delete (containerRef.current as any)._leaflet_id;
+      }
       const map = L.map(containerRef.current, { zoomControl: true }).setView([focus.lat, focus.lng], 10);
       mapRef.current = map;
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
@@ -563,7 +566,7 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
   const presetLabel = VEHICLE_PRESETS[vehiclePreset]?.label ?? vehiclePreset;
 
   const TH = ({ children, minW }: { children: React.ReactNode; minW?: number }) => (
-    <th style={{ padding: "9px 10px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.4)", textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,.07)", background: "#0b1120", position: "sticky", top: 0, zIndex: 2, minWidth: minW, textAlign: "left" }}>
+    <th style={{ padding: "9px 10px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".07em", whiteSpace: "nowrap", borderBottom: "1px solid var(--line)", background: "var(--card-subtle)", position: "sticky", top: 0, zIndex: 2, minWidth: minW, textAlign: "left" }}>
       {children}
     </th>
   );
@@ -596,12 +599,13 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
       )}
 
       {/* Table */}
-      <div style={{ borderRadius: 14, overflow: "auto", border: "1px solid rgba(255,255,255,.07)", marginBottom: 16, maxHeight: "62vh" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", background: "#0b1120", color: "#e2e8f0", fontSize: 12 }}>
+      <div style={{ borderRadius: 14, overflow: "auto", border: "1px solid var(--line)", marginBottom: 16, maxHeight: "62vh" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", background: "var(--card)", color: "var(--ink)", fontSize: 12 }}>
           <thead>
             <tr>
               <TH minW={80}>Rota</TH>
               <TH minW={150}>Ações</TH>
+              <TH minW={190}>Atribuição (Motorista / Veículo)</TH>
               <TH minW={80}>Região/Eixo</TH>
               <TH minW={200}>Sequência sugerida</TH>
               <TH minW={70}>Entregas</TH>
@@ -652,6 +656,69 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
                           <MapPin size={11} /> Detalhes/mapa
                         </button>
                       )}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", minWidth: 200 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <select
+                        value={asgn.driverId ?? ""}
+                        onChange={(e) =>
+                          setAssignments((prev) => ({
+                            ...prev,
+                            [route.index]: { ...prev[route.index], driverId: e.target.value },
+                          }))
+                        }
+                        style={{
+                          padding: "5px 8px",
+                          borderRadius: 6,
+                          fontSize: 11,
+                          background: "var(--card-subtle)",
+                          color: "var(--ink)",
+                          border: "1px solid var(--line)",
+                          cursor: "pointer",
+                        }}
+                        aria-label={`Motorista da Dedicada ${route.index}`}
+                      >
+                        <option value="">— Motorista —</option>
+                        {drivers.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={asgn.vehicleId ?? ""}
+                        onChange={(e) =>
+                          setAssignments((prev) => ({
+                            ...prev,
+                            [route.index]: { ...prev[route.index], vehicleId: e.target.value },
+                          }))
+                        }
+                        style={{
+                          padding: "5px 8px",
+                          borderRadius: 6,
+                          fontSize: 11,
+                          background: "var(--card-subtle)",
+                          color: "var(--ink)",
+                          border: "1px solid var(--line)",
+                          cursor: "pointer",
+                        }}
+                        aria-label={`Veículo da Dedicada ${route.index}`}
+                      >
+                        <option value="">— Veículo —</option>
+                        {vehicles.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} · {v.plate}
+                          </option>
+                        ))}
+                      </select>
+                      {asgn.driverId && asgn.vehicleId ? (
+                        <span style={{ fontSize: 10, color: "#10b981", fontWeight: 700 }}>
+                          ✓ Atribuído
+                        </span>
+                      ) : asgn.driverId ? (
+                        <span style={{ fontSize: 10, color: "#f59e0b" }}>Falta vincular veículo</span>
+                      ) : null}
                     </div>
                   </td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", color: "rgba(255,255,255,.5)", fontSize: 11 }}>{region}</td>
@@ -705,13 +772,13 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
 
       {/* Detail panel */}
       {detailRoute && (
-        <div style={{ marginBottom: 16, padding: "16px 20px", borderRadius: 14, border: "1px solid rgba(56,189,248,.2)", background: "#0b1120" }}>
+        <div style={{ marginBottom: 16, padding: "16px 20px", borderRadius: 14, border: "1px solid var(--line)", background: "var(--card)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: "50%", background: "rgba(16,185,129,.15)", color: "#10b981", fontWeight: 900, fontSize: 14 }}>{detailRoute.index}</span>
               <div>
-                <p style={{ margin: 0, fontWeight: 700, color: "#e2e8f0", fontSize: 14 }}>{detailRoute.name}</p>
-                <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,.4)" }}>{detailRoute.totalOrders} pedidos · {detailRoute.stops.length} paradas · {fmt(detailRoute.totalVolumeM3)} m³</p>
+                <p style={{ margin: 0, fontWeight: 700, color: "var(--ink)", fontSize: 14 }}>{detailRoute.name}</p>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>{detailRoute.totalOrders} pedidos · {detailRoute.stops.length} paradas · {fmt(detailRoute.totalVolumeM3)} m³</p>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -720,39 +787,39 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
                   <MapPin size={13} /> Abrir e Revisar no Mapa
                 </button>
               )}
-              <button onClick={() => setDetailRoute(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,.35)", padding: 4 }}><X size={18} /></button>
+              <button onClick={() => setDetailRoute(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}><X size={18} /></button>
             </div>
           </div>
-          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.3)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".1em" }}>
             📦 Ordem de Carregamento (LIFO — última entrega = primeira a carregar)
           </p>
-          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(255,255,255,.55)" }}>Clique em uma cidade abaixo para localizá-la no mapa.</p>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>Clique em uma cidade abaixo para localizá-la no mapa.</p>
           <RoutePointMap route={detailRoute} selectedStop={selectedStop} />
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
             {[...detailRoute.stops].sort((a, b) => a.loadingSequence - b.loadingSequence).map(stop => (
-              <div role="button" tabIndex={0} key={stop.position} onClick={() => setSelectedStop(stop)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedStop(stop); }} style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, background: selectedStop?.position === stop.position ? "rgba(245,158,11,.12)" : "rgba(255,255,255,.03)", border: selectedStop?.position === stop.position ? "1px solid rgba(245,158,11,.5)" : "1px solid rgba(255,255,255,.06)", cursor: "pointer", color: "inherit" }}>
+              <div role="button" tabIndex={0} key={stop.position} onClick={() => setSelectedStop(stop)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedStop(stop); }} style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "flex-start", gap: 10, padding: "9px 12px", borderRadius: 9, background: selectedStop?.position === stop.position ? "rgba(245,158,11,.12)" : "var(--card-subtle)", border: selectedStop?.position === stop.position ? "1px solid rgba(245,158,11,.5)" : "1px solid var(--line)", cursor: "pointer", color: "inherit" }}>
                 <span style={{ display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: "50%", background: "rgba(56,189,248,.15)", color: "#38bdf8", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{stop.loadingSequence}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#e2e8f0" }}>{stop.city}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "rgba(255,255,255,.4)" }}>{stop.clientName || "—"} · {fmt(stop.volumeM3)} m³ · {stop.boxes} cx</p>
-                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "rgba(255,255,255,.3)" }}>Pedidos: {stop.orders.map(o => o.orderId).join(", ")}</p>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{stop.city}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--muted)" }}>{stop.clientName || "—"} · {fmt(stop.volumeM3)} m³ · {stop.boxes} cx</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--muted)" }}>Pedidos: {stop.orders.map(o => o.orderId).join(", ")}</p>
                 </div>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,.3)", fontWeight: 600 }}>Entrega {stop.position}</span>
+                <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Entrega {stop.position}</span>
               </div>
             ))}
           </div>
-          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.3)", textTransform: "uppercase", letterSpacing: ".1em" }}>Atribuição</p>
+          <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".1em" }}>Atribuição desta rota</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <label>
-              <span style={{ ...S.label, color: "rgba(255,255,255,.35)" }}><Truck size={11} style={{ display: "inline", marginRight: 4 }} />Motorista</span>
-              <select value={assignments[detailRoute.index]?.driverId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], driverId: e.target.value } }))} style={{ ...S.select, background: "rgba(255,255,255,.05)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,.1)" }}>
+              <span style={{ ...S.label, color: "var(--muted)" }}><Truck size={11} style={{ display: "inline", marginRight: 4 }} />Motorista</span>
+              <select value={assignments[detailRoute.index]?.driverId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], driverId: e.target.value } }))} style={{ ...S.select, background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)" }}>
                 <option value="">— Selecionar motorista —</option>
                 {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </label>
             <label>
-              <span style={{ ...S.label, color: "rgba(255,255,255,.35)" }}><Package size={11} style={{ display: "inline", marginRight: 4 }} />Veículo</span>
-              <select value={assignments[detailRoute.index]?.vehicleId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], vehicleId: e.target.value } }))} style={{ ...S.select, background: "rgba(255,255,255,.05)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,.1)" }}>
+              <span style={{ ...S.label, color: "var(--muted)" }}><Package size={11} style={{ display: "inline", marginRight: 4 }} />Veículo</span>
+              <select value={assignments[detailRoute.index]?.vehicleId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], vehicleId: e.target.value } }))} style={{ ...S.select, background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)" }}>
                 <option value="">— Selecionar veículo —</option>
                 {vehicles.map(v => <option key={v.id} value={v.id}>{v.name} · {v.plate}</option>)}
               </select>
@@ -763,12 +830,56 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
 
       {error && <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444", fontSize: 13, marginBottom: 12 }}>⚠ {error}</div>}
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={dispatch} disabled={loading || assignedCount === 0} style={{ ...S.btnPrimary, background: assignedCount === 0 ? "var(--line)" : "var(--green)", color: assignedCount === 0 ? "var(--muted)" : "#fff", cursor: assignedCount === 0 ? "not-allowed" : "pointer", opacity: loading ? .7 : 1 }}>
-          {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />}
-          {loading ? "Salvando rotas..." : `Despachar ${assignedCount} de ${result.routes.length} rotas`}
+      {/* Sticky Bottom Action Bar */}
+      <div
+        style={{
+          position: "sticky",
+          bottom: 12,
+          zIndex: 20,
+          padding: "14px 20px",
+          borderRadius: 14,
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
+          marginTop: 18,
+          backdropFilter: "blur(10px)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <strong style={{ fontSize: 14, color: "var(--ink)" }}>
+            {assignedCount} de {result.routes.length} rotas com motorista atribuído
+          </strong>
+          {assignedCount < result.routes.length && (
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              (Atribua na tabela acima ou no detalhe da rota)
+            </span>
+          )}
+        </div>
+        <button
+          onClick={dispatch}
+          disabled={loading || assignedCount === 0}
+          style={{
+            ...S.btnPrimary,
+            background: assignedCount === 0 ? "var(--line)" : "#059669",
+            color: assignedCount === 0 ? "var(--muted)" : "#fff",
+            cursor: assignedCount === 0 ? "not-allowed" : "pointer",
+            padding: "10px 22px",
+            fontSize: 13,
+            fontWeight: 700,
+            opacity: loading ? 0.7 : 1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {loading ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
+          {loading ? "Salvando e despachando rotas..." : `Despachar ${assignedCount} ${assignedCount === 1 ? "rota" : "rotas"}`}
         </button>
-        {assignedCount === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>Clique em "Dedicada N" para atribuir motorista + veículo</span>}
       </div>
     </div>
   );

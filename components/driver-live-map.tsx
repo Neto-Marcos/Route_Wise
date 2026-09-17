@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Crosshair, MapPin, Navigation } from "lucide-react";
+import { ChevronDown, ChevronUp, Crosshair, MapPin } from "lucide-react";
 
 export type DriverMapStop = {
   id?: string;

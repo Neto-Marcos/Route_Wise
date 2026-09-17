@@ -9,6 +9,8 @@ type Payment = { id: string; amount: number; category: string; description: stri
 const inputStyle = { width: "100%", height: "36px", marginTop: "4px", borderRadius: "8px", border: "1px solid var(--line)", padding: "0 8px", background: "var(--card)", color: "var(--ink)" };
 
 export function PaymentRequestModal({ onClose, userRole, activeRouteId, driverId, driverName }: { onClose: () => void; userRole?: string; activeRouteId?: string; driverId?: string; driverName?: string }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   const [requests, setRequests] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [amount, setAmount] = useState(""); const [description, setDescription] = useState(""); const [category, setCategory] = useState("adiantamento"); const [pixKey, setPixKey] = useState("");
@@ -100,5 +102,6 @@ export function PaymentRequestModal({ onClose, userRole, activeRouteId, driverId
       </div>
     </div>
   </div>;
-  return typeof document === "undefined" ? null : createPortal(content, document.body);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(content, document.body);
 }

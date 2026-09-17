@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 export type RouteMapItem = {
   id: string;
@@ -25,8 +25,12 @@ export function LiveFleetMap({
   const markersLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const initialFitDone = useRef(false);
 
-  const activeRoutesWithLoc = routes.filter(
-    (r) => r.last_location && (r.status === "active" || r.status === "assigned"),
+  const activeRoutesWithLoc = useMemo(
+    () =>
+      routes.filter(
+        (r) => r.last_location && (r.status === "active" || r.status === "assigned"),
+      ),
+    [routes],
   );
 
   // Initialize map once

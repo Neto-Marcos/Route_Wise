@@ -1,19 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft,
   Calendar,
   Camera,
   Check,
-  CheckCircle2,
   Clock,
-  FileText,
   Gauge,
   MapPin,
   Navigation,
   Printer,
   Truck,
-  UserRound,
   X,
 } from "lucide-react";
 
@@ -90,38 +86,67 @@ function SavedRouteMap({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const layersRef = useRef<any>(null);
 
   useEffect(() => {
     let mounted = true;
+    const validStops = stops.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)));
+    if (!validStops.length || !containerRef.current) return;
+
     (async () => {
-      const validStops = stops.filter((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)));
-      if (!validStops.length || !containerRef.current) return;
       const L = (await import("leaflet")).default;
       if (!mounted || !containerRef.current) return;
-      mapRef.current?.remove();
-      const points = validStops.map((stop) => [Number(stop.lat), Number(stop.lng)] as [number, number]);
-      const selected = validStops.find((stop) => stop.id === selectedStopId);
-      const map = L.map(containerRef.current, { zoomControl: true });
-      mapRef.current = map;
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
-      if (selected) map.setView([Number(selected.lat), Number(selected.lng)], 11);
-      else map.fitBounds(L.latLngBounds(points).pad(0.18));
-      L.polyline(points, { color: "#2563eb", weight: 4, opacity: 0.75 }).addTo(map);
-      validStops.forEach((stop, index) => {
-        const active = stop.id === selectedStopId;
-        const marker = L.circleMarker([Number(stop.lat), Number(stop.lng)], {
-          radius: active ? 12 : 8,
-          color: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
-          fillColor: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
-          fillOpacity: 0.95,
-          weight: 3,
-        }).addTo(map);
-        marker.bindTooltip(stop.is_origin ? "Origem" : `${index}ª parada · ${stop.name}`, { direction: "top" });
-        marker.on("click", () => onSelectStop(stop.id));
-      });
+
+      if (!mapRef.current) {
+        if ((containerRef.current as any)._leaflet_id) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+        const points = validStops.map((stop) => [Number(stop.lat), Number(stop.lng)] as [number, number]);
+        const map = L.map(containerRef.current, { zoomControl: true });
+        mapRef.current = map;
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+        map.fitBounds(L.latLngBounds(points).pad(0.18));
+        layersRef.current = L.layerGroup().addTo(map);
+      }
+
+      if (layersRef.current && mapRef.current) {
+        layersRef.current.clearLayers();
+        const points = validStops.map((stop) => [Number(stop.lat), Number(stop.lng)] as [number, number]);
+        L.polyline(points, { color: "#2563eb", weight: 4, opacity: 0.75 }).addTo(layersRef.current);
+
+        validStops.forEach((stop, index) => {
+          const active = stop.id === selectedStopId;
+          const marker = L.circleMarker([Number(stop.lat), Number(stop.lng)], {
+            radius: active ? 12 : 8,
+            color: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
+            fillColor: active ? "#f59e0b" : stop.is_origin ? "#10b981" : "#2563eb",
+            fillOpacity: 0.95,
+            weight: 3,
+          }).addTo(layersRef.current);
+          marker.bindTooltip(stop.is_origin ? "Origem" : `${index}ª parada · ${stop.name}`, { direction: "top" });
+          marker.on("click", () => onSelectStop(stop.id));
+        });
+
+        const selected = validStops.find((stop) => stop.id === selectedStopId);
+        if (selected) {
+          mapRef.current.setView([Number(selected.lat), Number(selected.lng)], 13);
+        }
+      }
     })();
-    return () => { mounted = false; mapRef.current?.remove(); mapRef.current = null; };
+
+    return () => {
+      mounted = false;
+    };
   }, [stops, selectedStopId, onSelectStop]);
+
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
 
   if (!stops.some((stop) => Number.isFinite(Number(stop.lat)) && Number.isFinite(Number(stop.lng)))) return null;
   return <div ref={containerRef} style={{ height: 300, borderRadius: 12, overflow: "hidden", border: "1px solid var(--line)", marginTop: 10 }} />;
