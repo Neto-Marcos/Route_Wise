@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -19,6 +19,12 @@ import {
 } from "lucide-react";
 import type { SuggestedRoute, EngineResult, EngineConfig } from "@/lib/route-engine";
 import { parseSpreadsheet, type OrderRow } from "@/lib/spreadsheet-parser";
+import {
+  STATE_MIN_ORDER_VALUE,
+  checkOrderMinEligibility,
+  getMinOrderValueForState,
+  type MinOrderCheckResult,
+} from "@/lib/business-rules";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -69,7 +75,10 @@ function getFreightType(row: OrderRow): string {
 }
 
 function getRowValue(row: OrderRow): number {
-  const raw = row.extra?.["total item"] ?? row.extra?.["total_item"] ?? row.extra?.["valor"] ?? row.extra?.["vlr total"] ?? "0";
+  if (typeof row.totalValue === "number" && !isNaN(row.totalValue) && row.totalValue > 0) {
+    return row.totalValue;
+  }
+  const raw = row.extra?.["total item"] ?? row.extra?.["total_item"] ?? row.extra?.["valor"] ?? row.extra?.["vlr total"] ?? row.extra?.["valor total"] ?? "0";
   const s = String(raw).replace(/[^\d,.-]/g, "").replace(",", ".");
   return parseFloat(s) || 0;
 }
@@ -377,6 +386,9 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(true);
 
+  const [enforceMinOrderValue, setEnforceMinOrderValue] = useState(true);
+  const [showBelowMinModal, setShowBelowMinModal] = useState(false);
+
   const applyPreset = (key: string) => {
     setPreset(key);
     if (key !== "custom") { const p = VEHICLE_PRESETS[key]; setMaxVol(p.maxVol); setMaxWt(p.maxWt); }
@@ -397,6 +409,13 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
   const fobCount = rows.filter(r => getFreightType(r) === "FOB").length;
   const uniqueCities = new Set(filtered.map(r => r.city)).size;
   const totalVol = filtered.reduce((s, r) => s + r.volumeM3, 0);
+
+  const belowMinOrders = useMemo(() => {
+    return filtered.filter(order => {
+      const check = checkOrderMinEligibility(order);
+      return !check.eligible;
+    });
+  }, [filtered]);
 
   const generate = async () => {
     setLoading(true); setError("");
@@ -428,6 +447,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         averageSpeed: speedKmh,
         serviceMinutes: serviceMin,
         maxHours,
+        enforceMinOrderValue,
       };
       const result = await api<EngineResult>("/api/routerizador/generate", { method: "POST", body: JSON.stringify({ rows: routableRows, config: fullConfig }) });
       onGenerate(result, fullConfig, preset, serviceMin, speedKmh, costPctMin, costPctMax, minVolDed, freightFilter);
@@ -466,6 +486,38 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         </div>
       </div>
 
+      {/* Regra de Pedido Mínimo por Estado */}
+      <div style={{ ...S.card, marginBottom: 14, borderLeft: "4px solid #f59e0b" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>
+              📋 Regra de Pedido Mínimo por Estado
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
+              PB: <strong style={{ color: "var(--ink)" }}>R$ 1.500</strong> · AL, BA, CE, PE, RN, SE: <strong style={{ color: "var(--ink)" }}>R$ 2.000</strong> · MA, PA, PI, TO: <strong style={{ color: "var(--ink)" }}>R$ 7.000</strong> · AP: <strong style={{ color: "var(--ink)" }}>R$ 10.000</strong>
+            </p>
+          </div>
+          {belowMinOrders.length > 0 ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700 }}>
+                ⚠ {belowMinOrders.length} {belowMinOrders.length === 1 ? "pedido abaixo" : "pedidos abaixo"} do mínimo
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowBelowMinModal(true)}
+                style={{ ...S.btnSecondary, padding: "5px 12px", fontSize: 11, background: "rgba(245,158,11,.1)", borderColor: "rgba(245,158,11,.3)", color: "#f59e0b" }}
+              >
+                Ver pedidos ({belowMinOrders.length})
+              </button>
+            </div>
+          ) : (
+            <span style={{ fontSize: 12, color: "#10b981", fontWeight: 600 }}>
+              ✔ Todos os pedidos atingem o valor mínimo estadual
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Config */}
       <div style={{ ...S.card, marginBottom: 14 }}>
         <button onClick={() => setConfigOpen(o => !o)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink)", fontWeight: 700, fontSize: 13, padding: 0, display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
@@ -501,6 +553,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
               {[
                 { label: "Priorizar registros mais antigos", val: prioritizeOld, set: setPrioritizeOld },
                 { label: "Buscar coordenadas online quando não cadastrada", val: searchOnline, set: setSearchOnline },
+                { label: "Validar e bloquear pedidos abaixo do pedido mínimo estadual", val: enforceMinOrderValue, set: setEnforceMinOrderValue },
               ].map(({ label, val, set }) => (
                 <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
                   <input type="checkbox" checked={val} onChange={e => set(e.target.checked)} style={{ accentColor: "var(--green)" }} />
@@ -521,6 +574,53 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
           </div>
         )}
       </div>
+
+      {showBelowMinModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16, maxWidth: 720, width: "100%", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,.4)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Pedidos Abaixo do Pedido Mínimo Estadual</h3>
+                <small style={{ color: "var(--muted)" }}>{belowMinOrders.length} pedidos não atingem a meta financeira do estado de entrega</small>
+              </div>
+              <button type="button" onClick={() => setShowBelowMinModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={18} /></button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto", flex: 1 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left", color: "var(--muted)" }}>
+                    <th style={{ padding: "6px 8px" }}>Pedido</th>
+                    <th style={{ padding: "6px 8px" }}>Cliente</th>
+                    <th style={{ padding: "6px 8px" }}>Cidade/UF</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Valor Atual</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Mínimo</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Faltante</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {belowMinOrders.map(o => {
+                    const check = checkOrderMinEligibility(o);
+                    return (
+                      <tr key={o.orderId} style={{ borderBottom: "1px solid rgba(255,255,255,.05)" }}>
+                        <td style={{ padding: "8px", fontWeight: 700, color: "#38bdf8" }}>{o.orderId}</td>
+                        <td style={{ padding: "8px" }}>{o.client}</td>
+                        <td style={{ padding: "8px" }}>{o.city} {o.uf ? `(${o.uf})` : ""}</td>
+                        <td style={{ padding: "8px", textAlign: "right", color: "#f59e0b", fontWeight: 700 }}>{fmtBRL(check.currentValue)}</td>
+                        <td style={{ padding: "8px", textAlign: "right", color: "var(--muted)" }}>{fmtBRL(check.minRequired)}</td>
+                        <td style={{ padding: "8px", textAlign: "right", color: "#ef4444", fontWeight: 700 }}>-{fmtBRL(check.difference)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid var(--line)", display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setShowBelowMinModal(false)} style={S.btnPrimary}>Entendido / Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && <div style={{ padding: "12px 16px", borderRadius: 12, background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444", fontSize: 13, marginTop: 8 }}>⚠ {error}</div>}
     </div>
   );
@@ -591,12 +691,26 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
         ))}
       </div>
 
-      {result.unassigned.length > 0 && (
-        <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,.07)", border: "1px dashed rgba(239,68,68,.3)", marginBottom: 14, fontSize: 13 }}>
-          <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {result.unassigned.length} pedidos não roteirizados</span>
-          <span style={{ color: "var(--muted)", marginLeft: 6 }}>— cidade sem coordenada confirmada no mapa.</span>
-        </div>
-      )}
+      {result.unassigned.length > 0 && (() => {
+        const belowMin = result.unassigned.filter(o => o.extra?.unassignedReason?.includes("mínimo"));
+        const others = result.unassigned.filter(o => !o.extra?.unassignedReason?.includes("mínimo"));
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {belowMin.length > 0 && (
+              <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(245,158,11,.08)", border: "1px dashed rgba(245,158,11,.4)", fontSize: 13 }}>
+                <span style={{ color: "#f59e0b", fontWeight: 700 }}>📋 {belowMin.length} {belowMin.length === 1 ? "pedido retido" : "pedidos retidos"} por valor abaixo do mínimo estadual</span>
+                <span style={{ color: "var(--muted)", marginLeft: 6 }}>— PB: R$ 1.500 · AL/BA/CE/PE/RN/SE: R$ 2.000 · MA/PA/PI/TO: R$ 7.000 · AP: R$ 10.000</span>
+              </div>
+            )}
+            {others.length > 0 && (
+              <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(239,68,68,.07)", border: "1px dashed rgba(239,68,68,.3)", fontSize: 13 }}>
+                <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {others.length} {others.length === 1 ? "pedido não roteirizado" : "pedidos não roteirizados"}</span>
+                <span style={{ color: "var(--muted)", marginLeft: 6 }}>— cidade sem coordenada confirmada no mapa ou capacidade excedida.</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Table */}
       <div style={{ borderRadius: 14, overflow: "auto", border: "1px solid var(--line)", marginBottom: 16, maxHeight: "62vh" }}>

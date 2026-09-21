@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       averageSpeed:    body.config?.averageSpeed    ?? 55,
       serviceMinutes:  body.config?.serviceMinutes  ?? 40,
       maxHours:        body.config?.maxHours        ?? 72,
+      enforceMinOrderValue: body.config?.enforceMinOrderValue ?? true,
     };
 
     // A cidade/UF da planilha é a fonte de verdade. Antes de montar a rota,

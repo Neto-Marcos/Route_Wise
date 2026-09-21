@@ -51,7 +51,8 @@ const COL_CLIENT   = /^nome$|cliente|destinat[áa]rio|raz[aã]o\s*social|nome\s*
 const COL_ORDER    = /pedido\s*sabium|n[°º]?\s*pedido|num\s*pedido|numero\s*pedido|nro\s*pedido|cod\s*pedido|pedido|nota\s*fiscal|n[°º]?\s*nf|nf|n[uú]mero\s*(do\s*pedido)?|chave|doc/i;
 const COL_VOLUME   = /volume\s*c[uú]bico|volume\s*cubico|cubagem|volume|m3|m[³]|cbm|m\^3/i;
 const COL_WEIGHT   = /peso|peso\s*bruto|kg\b|peso\s*total/i;
-const COL_BOXES    = /quantidade|qtd|qtde|pecas|pe[çc]as|caixas|volumes|volume\s*total|total\s*item/i;
+const COL_BOXES    = /quantidade|qtd|qtde|pecas|pe[çc]as|caixas|volumes|num\s*volumes/i;
+const COL_VALUE    = /valor\s*(da\s*)?(nota|nf|mercadoria|pedido|total)|vlr\s*(total|da\s*nota|nf)|vl\s*total|total\s*item|total\s*nota|total\s*pedido|total\s*geral|^valor$|^total$/i;
 const COL_ADDRESS  = /endere[cç]o|logradouro|rua|bairro/i;
 const COL_UF       = /^(uf|sigla\s*uf|estado|sigla)$/i;
 const COL_PRODUCTS = /c[oó]digo|cod\s*produto|c[oó]d\s*produto|produto|mercadoria|itens|item|descri[cç][aã]o/i;
@@ -209,6 +210,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
   const iVolume   = matchCol(headers, COL_VOLUME);
   const iWeight   = matchCol(headers, COL_WEIGHT);
   const iBoxes    = matchCol(headers, COL_BOXES);
+  const iValue    = matchCol(headers, COL_VALUE);
   const iAddress  = matchCol(headers, COL_ADDRESS);
   const iUf       = matchCol(headers, COL_UF);
   const iProducts = matchCol(headers, COL_PRODUCTS);
@@ -219,6 +221,12 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
 
   const rawLines: OrderRow[] = [];
   const ineligibleOrderIds = new Set<string>();
+
+  const BRAZILIAN_UFS = new Set([
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+    "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+    "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+  ]);
 
   for (let r = headerRowIdx + 1; r < raw.length; r++) {
     let row = raw[r] as unknown[];
@@ -234,14 +242,14 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
       if (status && INELIGIBLE_STATUS.test(status)) continue;
     }
 
-    const city   = iCity   >= 0 ? toStr(row[iCity])   : '';
+    let city     = iCity   >= 0 ? toStr(row[iCity])   : '';
     const client = iClient >= 0 ? toStr(row[iClient]) : '';
     let order    = iOrder  >= 0 ? toStr(row[iOrder])  : '';
     const vol    = iVolume >= 0 ? toFloat(row[iVolume]) : 0;
     const wt     = iWeight >= 0 ? toFloat(row[iWeight]) : 0;
     const bx     = iBoxes  >= 0 ? toFloat(row[iBoxes])  : 0;
     const addr   = iAddress >= 0 ? toStr(row[iAddress]) : undefined;
-    const uf     = iUf     >= 0 ? toStr(row[iUf])     : undefined;
+    let uf       = iUf     >= 0 ? toStr(row[iUf]).toUpperCase() : undefined;
     const prod   = iProducts >= 0 ? toStr(row[iProducts]) : undefined;
 
     // Normalização de número de pedido (ex: 219667.0 -> 219667)
@@ -249,6 +257,15 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
       order = order.replace(/\.0+$/, '').trim();
     } else {
       order = `__AUTO_ROW_${r}__`;
+    }
+
+    // Se UF não veio ou está vazia, tenta extrair da cidade (ex: "CAMPINA GRANDE - PB", "RECIFE/PE")
+    if ((!uf || !BRAZILIAN_UFS.has(uf)) && city) {
+      const ufMatch = city.match(/[\s\-\/,]+([A-Za-z]{2})$/);
+      if (ufMatch && BRAZILIAN_UFS.has(ufMatch[1].toUpperCase())) {
+        uf = ufMatch[1].toUpperCase();
+        city = city.replace(/[\s\-\/,]+[A-Za-z]{2}$/, "").trim();
+      }
     }
 
     // Carteiras Sabium da filial 281: um pedido só pode seguir para rota se
@@ -273,7 +290,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
     // Coleta campos extras
     const extra: Record<string, string> = {};
     headers.forEach((h, i) => {
-      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iAddress, iUf, iProducts, iStatus].includes(i)) {
+      if (![iCity, iClient, iOrder, iVolume, iWeight, iBoxes, iValue, iAddress, iUf, iProducts, iStatus].includes(i)) {
         const v = toStr(row[i]);
         if (v) extra[headers[i]] = v;
       }
@@ -290,7 +307,10 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
         ? "FOB"
         : "";
     const closedAt = extra["fechado"] ?? extra["data fechado"] ?? "";
-    const totalValue = toFloat(extra["total item"] ?? extra["total_item"] ?? extra["valor"] ?? 0);
+    let totalValue = iValue >= 0 ? toFloat(row[iValue]) : 0;
+    if (!totalValue) {
+      totalValue = toFloat(extra["total item"] ?? extra["total_item"] ?? extra["valor"] ?? extra["valor total"] ?? extra["vlr total"] ?? extra["total"] ?? 0);
+    }
 
     rawLines.push({
       city: safeCity,
@@ -312,7 +332,7 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
 
   // ─── Consolidação / Agregação por Pedido (ERP Sabium / Linhas de Produto) ───
   // Em planilhas de carteira Sabium, cada linha é um produto do mesmo pedido.
-  // Consolidamos os volumes, caixas, peso e lista de produtos por orderId.
+  // Consolidamos os volumes, caixas, peso, valor total e lista de produtos por orderId.
   const aggregatedOrders = new Map<string, OrderRow>();
   const productDedupeByOrder = new Map<string, Set<string>>();
 
@@ -331,10 +351,11 @@ function parseSheetData(raw: unknown[][]): OrderRow[] {
       productDedupeByOrder.set(groupKey, new Set(line.products ? [line.products] : []));
     } else {
       const existing = aggregatedOrders.get(groupKey)!;
-      // Soma métricas operacionais
+      // Soma métricas operacionais e financeiras
       existing.volumeM3 = Math.round((existing.volumeM3 + line.volumeM3) * 1000) / 1000;
       existing.weightKg = Math.round((existing.weightKg + line.weightKg) * 100) / 100;
       existing.boxes += line.boxes;
+      existing.totalValue = Math.round(((existing.totalValue ?? 0) + (line.totalValue ?? 0)) * 100) / 100;
 
       // Completa dados ausentes
       if ((!existing.client || existing.client === "Cliente Geral") && line.client && line.client !== "Cliente Geral") {

@@ -19,14 +19,74 @@ export function normCity(city: string): string {
     .replace(/\s+/g, ' ');
 }
 
+// ─── Políticas de Pedido Mínimo por Estado (Regra Comercial) ────────────────
+
+export const STATE_MIN_ORDER_VALUE: Record<string, number> = {
+  PB: 1500,
+  AL: 2000,
+  BA: 2000,
+  CE: 2000,
+  PE: 2000,
+  RN: 2000,
+  SE: 2000,
+  MA: 7000,
+  PA: 7000,
+  PI: 7000,
+  TO: 7000,
+  AP: 10000,
+};
+
+export function getMinOrderValueForState(uf?: string): number {
+  if (!uf) return 0;
+  const cleanUf = uf.trim().toUpperCase();
+  return STATE_MIN_ORDER_VALUE[cleanUf] ?? 0;
+}
+
+export interface MinOrderCheckResult {
+  eligible: boolean;
+  minRequired: number;
+  currentValue: number;
+  difference: number;
+  reason?: string;
+}
+
+export function checkOrderMinEligibility(order: { uf?: string; totalValue?: number; city?: string; orderId?: string }): MinOrderCheckResult {
+  const uf = (order.uf ?? "").trim().toUpperCase();
+  const minRequired = getMinOrderValueForState(uf);
+  const currentValue = order.totalValue ?? 0;
+
+  if (minRequired === 0) {
+    return {
+      eligible: true,
+      minRequired: 0,
+      currentValue,
+      difference: 0,
+    };
+  }
+
+  const eligible = currentValue >= minRequired;
+  const difference = eligible ? 0 : Math.round((minRequired - currentValue) * 100) / 100;
+  const reason = eligible
+    ? undefined
+    : `Pedido com valor de ${currentValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} abaixo do mínimo de ${minRequired.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} para o estado ${uf}`;
+
+  return {
+    eligible,
+    minRequired,
+    currentValue,
+    difference,
+    reason,
+  };
+}
+
 // ─── Tipos públicos ──────────────────────────────────────────────────────────
 
 export interface EngineConfig {
   /** Volume máximo por veículo em m³. Padrão: 30 */
   maxVolumeM3: number;
-  /** Peso máximo por veículo em kg. Padrão: 10000 */
+  /** Peso máximo por veículo em kg. Padrão: 10.000 */
   maxWeightKg: number;
-  /** Raio em km para considerar cidades "próximas" e agrupá-las. Padrão: 80 */
+  /** Raio de clusterização em km. Padrão: 80 */
   clusterRadiusKm: number;
   /** Data de entrega (YYYY-MM-DD) */
   routeDate: string;
@@ -43,6 +103,8 @@ export interface EngineConfig {
   averageSpeed?: number;
   serviceMinutes?: number;
   maxHours?: number;
+  /** Quando true, valida e bloqueia pedidos abaixo do valor mínimo do estado */
+  enforceMinOrderValue?: boolean;
 }
 
 export interface SuggestedStop {
@@ -240,6 +302,14 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
 
   for (const o of orders) {
     if (o.volumeM3 > maxVolumeM3 || o.weightKg > maxWeightKg) { unassigned.push(o); continue; }
+    if (config.enforceMinOrderValue) {
+      const eligibility = checkOrderMinEligibility(o);
+      if (!eligibility.eligible) {
+        o.extra = { ...o.extra, unassignedReason: eligibility.reason ?? "Abaixo do pedido mínimo" };
+        unassigned.push(o);
+        continue;
+      }
+    }
     const city = normCity(o.city);
     const uf = (o.uf ?? '').trim().toUpperCase();
     const key = `${uf}|${city}`;
