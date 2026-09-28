@@ -104,6 +104,39 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         return json({ error: `OSRM fetch failed: ${(err as Error).message}` }, 502);
       }
     }
+    if (p[0] === "geocode") {
+      const term = String(req.nextUrl.searchParams.get("q") || "").trim();
+      if (term.length < 3) return json([]);
+      const search = new URLSearchParams({
+        format: "jsonv2",
+        limit: "8",
+        countrycodes: "br",
+        addressdetails: "1",
+        q: term,
+      });
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?${search}`, {
+          headers: {
+            "User-Agent": "CriarRota/1.0 (geocodificacao de rotas)",
+            Accept: "application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+          },
+          signal: AbortSignal.timeout(10000),
+          next: { revalidate: 300 },
+        });
+        if (!response.ok) throw new Error(`Nominatim respondeu ${response.status}`);
+        const data = await response.json();
+        return json((Array.isArray(data) ? data : []).map((item: any) => ({
+          name: item.name || String(item.display_name || "").split(",")[0],
+          address: item.display_name || item.name || term,
+          lat: Number(item.lat),
+          lng: Number(item.lon),
+        })).filter((item: any) => Number.isFinite(item.lat) && Number.isFinite(item.lng)));
+      } catch (err) {
+        console.warn("Geocode fetch failed:", err);
+        return json({ error: "Serviço de busca de endereços indisponível. Tente novamente." }, 502);
+      }
+    }
     if (p[0] === "stations") {
       try {
         const response = await fetch(
@@ -350,6 +383,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (status && status !== "all") {
           values.push(status);
           conditions.push(`r.status=$${values.length}`);
+        } else {
+          // Rotas canceladas permanecem no banco para auditoria, mas não ocupam
+          // o histórico operacional padrão.
+          conditions.push("r.status <> 'cancelled'");
         }
         if (driverId && driverId !== "all") {
           values.push(driverId);
@@ -1140,6 +1177,48 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     const session = await getSession(requestedRole(req));
     if (!session || session.role !== "dispatcher")
       return json({ error: "Acesso restrito" }, 403);
+
+    if (p[0] === "routes" && p[1] && p.length === 2) {
+      const data = await body(req);
+      if (!Array.isArray(data.stops) || data.stops.length < 2)
+        return json({ error: "Adicione uma origem e ao menos uma entrega" }, 400);
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const current = await client.query(
+          "SELECT id,status FROM routes WHERE id=$1 AND company_id=$2 FOR UPDATE",
+          [p[1], session.companyId],
+        );
+        if (!current.rows[0]) {
+          await client.query("ROLLBACK");
+          return json({ error: "Rota não encontrada" }, 404);
+        }
+        if (!["draft", "assigned"].includes(String(current.rows[0].status))) {
+          await client.query("ROLLBACK");
+          return json({ error: "Uma rota já iniciada não pode ser alterada. Cancele e duplique a rota." }, 409);
+        }
+        const updated = await client.query(
+          "UPDATE routes SET name=$1,route_date=$2,optimize_by=$3,circular=$4,estimated_km=$5 WHERE id=$6 AND company_id=$7 RETURNING *",
+          [String(data.name || "").trim(), data.routeDate, data.optimizeBy || "distance", !!data.circular, data.estimatedKm || null, p[1], session.companyId],
+        );
+        await client.query("DELETE FROM route_stops WHERE route_id=$1", [p[1]]);
+        for (let i = 0; i < data.stops.length; i++) {
+          const s = data.stops[i];
+          await client.query(
+            "INSERT INTO route_stops(route_id,position,name,address,lat,lng,is_origin,boxes,volume_m3) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            [p[1], i, s.name, s.address, Number(s.lat), Number(s.lng), i === 0, s.boxes ? Number(s.boxes) : null, s.volume_m3 ? Number(s.volume_m3) : null],
+          );
+        }
+        await client.query("COMMIT");
+        await audit("dispatcher", session.dispatcherId || null, "update", "route", p[1], { stops: data.stops.length });
+        return json(updated.rows[0]);
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      } finally {
+        client.release();
+      }
+    }
 
     if (p[0] === "drivers" && p[1]) {
       const data = await body(req);

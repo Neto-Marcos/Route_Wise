@@ -1821,6 +1821,7 @@ function Dispatcher({
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
   const [importedPlannerData, setImportedPlannerData] = useState<{
     id: string;
+    routeId?: string;
     stops: Stop[];
     name?: string;
     date?: string;
@@ -1868,6 +1869,25 @@ function Dispatcher({
       date: engineConfig?.routeDate || new Date().toISOString().slice(0, 10),
     });
     setTab("planner");
+  };
+
+  const handleEditRouteInPlanner = async (route: RouteData) => {
+    try {
+      const detailed = await api(`/api/routes/${route.id}`) as DetailedRoute;
+      setImportedPlannerData({
+        id: crypto.randomUUID(),
+        routeId: route.id,
+        stops: (detailed.stops || []).map((stop) => ({
+          ...stop,
+          order_ids: stop.order_ids || undefined,
+        })),
+        name: detailed.name,
+        date: detailed.route_date,
+      });
+      setTab("planner");
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
   };
 
   const load = useCallback(
@@ -2164,7 +2184,14 @@ function Dispatcher({
         {tab === "planner" && (
           <RoutePlannerView
             key={importedPlannerData?.id || "planner-default"}
-            onDone={load}
+            onDone={() => {
+              load();
+              if (importedPlannerData?.routeId) {
+                setImportedPlannerData(null);
+                setTab("routes");
+              }
+            }}
+            initialRouteId={importedPlannerData?.routeId}
             initialStops={importedPlannerData?.stops}
             initialRouteName={importedPlannerData?.name}
             initialRouteDate={importedPlannerData?.date}
@@ -2193,6 +2220,7 @@ function Dispatcher({
             onSelectRoute={(id) => setSelectedRouteId(id)}
             onPrintReport={(r) => openReport(r.id)}
             onOpenPlanner={() => setTab("planner")}
+            onEditRoute={handleEditRouteInPlanner}
             onAssignRoute={(r) => setAssigningRoute(r)}
           />
         )}{" "}
@@ -2443,12 +2471,14 @@ function RouteTable({
   onPrintReport,
   onAssignRoute,
   onCancelRoute,
+  onEditRoute,
 }: {
   routes: RouteData[];
   onSelectRoute?: (routeId: string) => void;
   onPrintReport?: (route: RouteData) => void;
   onAssignRoute?: (route: RouteData) => void;
   onCancelRoute?: (route: RouteData) => void;
+  onEditRoute?: (route: RouteData) => void;
 }) {
   return (
     <div className="route-list">
@@ -2482,6 +2512,11 @@ function RouteTable({
             </small>
           </div>
           <div className="route-row-actions" onClick={(e) => e.stopPropagation()}>
+            {(r.status === "draft" || r.status === "assigned") && onEditRoute && (
+              <button type="button" className="btn-link" onClick={() => onEditRoute(r)} title="Adicionar, remover ou reorganizar cidades">
+                <Pencil size={13} /> Editar rota
+              </button>
+            )}
             {(r.status === "draft" || r.status === "assigned") && onAssignRoute && (
               <button
                 type="button"
@@ -3012,6 +3047,7 @@ function RoutesPanel({
   onPrintReport,
   onOpenPlanner,
   onAssignRoute,
+  onEditRoute,
 }: {
   routes: RouteData[];
   drivers: Driver[];
@@ -3021,6 +3057,7 @@ function RoutesPanel({
   onPrintReport: (route: RouteData) => void;
   onOpenPlanner?: () => void;
   onAssignRoute?: (route: RouteData) => void;
+  onEditRoute?: (route: RouteData) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<RouteData | null>(null);
@@ -3126,7 +3163,6 @@ function RoutesPanel({
               <option value="assigned">Atribuída</option>
               <option value="active">Em rota (ativa)</option>
               <option value="completed">Concluída</option>
-              <option value="cancelled">Cancelada</option>
             </select>
 
             <select
@@ -3174,6 +3210,7 @@ function RoutesPanel({
           onPrintReport={onPrintReport}
           onAssignRoute={onAssignRoute || ((r) => setSelected(r))}
           onCancelRoute={cancelRoute}
+          onEditRoute={onEditRoute}
         />
 
         {selected && (
@@ -3348,6 +3385,7 @@ function RoutePlannerView({
   initialStops,
   initialRouteName,
   initialRouteDate,
+  initialRouteId,
 }: {
   onClose?: () => void;
   onDone?: () => void;
@@ -3356,6 +3394,7 @@ function RoutePlannerView({
   initialStops?: Stop[];
   initialRouteName?: string;
   initialRouteDate?: string;
+  initialRouteId?: string;
 }) {
   const [stops, setStops] = useState<Stop[]>(initialStops || []);
   const [mobileShowMap, setMobileShowMap] = useState(false);
@@ -3419,28 +3458,16 @@ function RoutePlannerView({
       return;
     }
     setSearching(true);
+    setError("");
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=br&q=${encodeURIComponent(term)}`,
-        { signal },
-      ).then((r) => r.json());
-      setResults(
-        res.map(
-          (x: {
-            name?: string;
-            display_name: string;
-            lat: string;
-            lon: string;
-          }) => ({
-            name: x.name || x.display_name.split(",")[0],
-            address: x.display_name,
-            lat: +x.lat,
-            lng: +x.lon,
-          }),
-        ),
-      );
+      const response = await fetch(`/api/geocode?q=${encodeURIComponent(term.trim())}`, { signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Não foi possível pesquisar o endereço.");
+      const places = Array.isArray(data) ? data : [];
+      setResults(places);
+      if (places.length === 0) setError("Nenhuma cidade ou endereço encontrado. Tente informar também o estado.");
     } catch (e) {
-      if ((e as Error).name !== "AbortError") setError("Não foi possível pesquisar o endereço.");
+      if ((e as Error).name !== "AbortError") setError((e as Error).message || "Não foi possível pesquisar o endereço.");
     } finally {
       if (!signal?.aborted) setSearching(false);
     }
@@ -3601,8 +3628,8 @@ function RoutePlannerView({
     setError("");
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     try {
-      await api("/api/routes", {
-        method: "POST",
+      await api(initialRouteId ? `/api/routes/${initialRouteId}` : "/api/routes", {
+        method: initialRouteId ? "PUT" : "POST",
         body: JSON.stringify({
           name,
           routeDate,
@@ -3612,7 +3639,7 @@ function RoutePlannerView({
           estimatedKm: routeInfo?.km,
         }),
       });
-      setSuccessMessage(`Rota "${name}" salva com sucesso no painel!`);
+      setSuccessMessage(`Rota "${name}" ${initialRouteId ? "atualizada" : "salva"} com sucesso no painel!`);
       if (onDone) onDone();
       setTimeout(() => setSuccessMessage(""), 5000);
     } catch (err) {

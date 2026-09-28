@@ -246,7 +246,101 @@ const GEO: Record<string, [number, number]> = {
   'PORTO ALEGRE': [-30.0346, -51.2177],
   'FLORIANOPOLIS': [-27.5954, -48.5480],
   'GOIANIA': [-16.6864, -49.2643],
+  // Pará
+  'SANTAREM': [-2.4366, -54.6868],
+  'MARABA': [-5.3681, -49.1175],
+  'CASTANHAL': [-1.2941, -47.9254],
+  'ANANINDEUA': [-1.3659, -48.3722],
+  'PARAUAPEBAS': [-6.0680, -49.9010],
+  'TUCUMA': [-6.7519, -51.1593],
+  'REDENCAO': [-8.0266, -50.0298],
+  'ALTAMIRA': [-3.2053, -52.2118],
+  'ITAITUBA': [-4.2764, -55.9836],
+  'TUCURUI': [-3.7583, -49.6725],
+  'PORTO DE MOZ': [-1.7496, -52.2361],
+  'SENADOR JOSE PORFIRIO': [-2.5919, -51.9544],
+  'PORTO DE MOZ/PA': [-1.7496, -52.2361],
+  'SENADOR JOSE PORFIRIO/PA': [-2.5919, -51.9544],
+  'ALENQUER': [-1.9396, -54.7384],
+  'OBIDOS': [-1.9009, -55.5132],
+  'ORIXIMINA': [-1.7654, -55.8658],
+  'CURUCA': [-0.7313, -47.8576],
+  'SAO MIGUEL DO GUAMA': [-1.6156, -47.4722],
+  'CAPANEMA': [-1.1950, -47.1795],
+  'PARAGOMINAS': [-2.9972, -47.4769],
+  'TUCUMA PA': [-6.7519, -51.1593],
+  'MOJU': [-1.8839, -48.7715],
+  'ABAETETUBA': [-1.7264, -48.8797],
+  'CAMETA': [-2.2456, -49.4958],
+  'BREVES': [-1.6835, -50.4828],
+  'SOURE': [-0.7255, -48.5229],
+  'TOME ACU': [-2.4178, -48.1506],
+  'BRAGANCA': [-1.0525, -46.7666],
+  'VISEU': [-1.1950, -46.1411],
+  'SAO FELIX DO XINGU': [-6.6438, -51.9956],
+  'OURILANDIA DO NORTE': [-6.7600, -51.0825],
+  'AGUA AZUL DO NORTE': [-6.1119, -50.0033],
+  'XINGUARA': [-7.0996, -49.9461],
+  'CONCEICAO DO ARAGUAIA': [-8.2561, -49.2631],
+  'MARABA PA': [-5.3681, -49.1175],
+  // Maranhão
+  'SAO LUIS': [-2.5297, -44.3028],
+  'IMPERATRIZ': [-5.5253, -47.4924],
+  'SAO JOSE DE RIBAMAR': [-2.5597, -44.0564],
+  'TIMON': [-5.0939, -42.8322],
+  'CAXIAS': [-4.8672, -43.3569],
+  'CODÓ': [-4.4531, -43.8858],
+  'PACO DO LUMIAR': [-2.5597, -44.1064],
+  'ACAILANDIA': [-4.9453, -47.5003],
+  'BALSAS': [-7.5328, -46.0361],
+  'BACABAL': [-4.2280, -44.7889],
+  'SANTA INES': [-3.6656, -45.3803],
+  'BURITICUPU': [-4.3094, -46.4417],
+  'BARRA DO CORDA': [-5.5033, -45.2436],
+  'PRESIDENTE DUTRA': [-5.2917, -44.4906],
+  'COROATA': [-4.1358, -44.1244],
+  'VITORINO FREIRE': [-4.4275, -45.2047],
+  'PINHEIRO': [-2.5219, -45.0836],
+  'CACHOEIRA GRANDE': [-3.0019, -44.4486],
+  'PEDREIRAS': [-4.5667, -44.5806],
+  // Tocantins
+  'PALMAS': [-10.1753, -48.2982],
+  'ARAGUAINA': [-7.1919, -48.2072],
+  'GURUPI': [-11.7303, -49.0687],
+  'PORTO NACIONAL': [-10.7069, -48.4161],
+  'PARAISO DO TOCANTINS': [-10.1742, -48.8869],
+  'FORMOSO DO ARAGUAIA': [-11.8041, -49.5292],
+  'COLINAS DO TOCANTINS': [-8.0561, -48.4761],
+  'ARAGARCAS': [-15.8950, -52.2411],
+  // Amapá
+  'MACAPA': [0.0356, -51.0705],
+  'SANTANA': [-0.0611, -51.1741],
+  // Piauí (extend)
+  'TERESINA': [-5.0892, -42.8019],
+  'PARNAIBA': [-2.9058, -41.7769],
+  'PICOS': [-7.0775, -41.4675],
+  'FLORIANO': [-6.7669, -43.0244],
+  'CAMPO MAIOR': [-4.8302, -42.1711],
+  // Ceará (extend)
+  'IGUATU': [-6.3594, -39.2986],
+  'QUIXADA': [-4.9706, -39.0150],
+  'RUSSAS': [-4.9389, -37.9761],
+  'ITAPAJE': [-3.6908, -39.5836],
+  'CRATEUS': [-5.1761, -40.6764],
+  'ACARAU': [-2.8856, -40.1197],
+  'CAMOCIM': [-2.9022, -40.8428],
+  'TIANGUA': [-3.7294, -40.9942],
+  'CANINDE': [-4.3556, -39.3144],
+  'CAPISTRANO': [-4.4664, -38.9094],
+  'ARATUBA': [-4.4144, -39.0625],
+  'MARANGUAPE': [-3.8892, -38.6814],
+  'BATURITE': [-4.3286, -38.8833],
+  'PALMACIA': [-4.1353, -38.8481],
+  'PACATUBA': [-3.9822, -38.6117],
+  'CANINDE CE': [-4.3556, -39.3144],
+  'MARACANAU': [-3.7783, -38.6269],
 };
+
 
 /** Haversine: distância em km entre dois pontos lat/lng */
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -419,6 +513,65 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     }
   }
 
+  // 4b. Merge de rotas pequenas com baixa ocupação na mesma região
+  // Se duas rotas têm ≤ 3 paradas e ocupação < 40% e cabem juntas → mesclar
+  function getRouteState(route: SuggestedRoute): string {
+    const states = new Set<string>();
+    for (const stop of route.stops) {
+      for (const o of stop.orders) {
+        if (o.uf) states.add(o.uf.trim().toUpperCase());
+      }
+    }
+    return Array.from(states).sort().join(',');
+  }
+
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < routes.length; i++) {
+      if (routes[i].stops.length > 3) continue;
+      if (routes[i].occupancyPct > 50) continue;
+      for (let j = i + 1; j < routes.length; j++) {
+        if (routes[j].stops.length > 3) continue;
+        if (routes[j].occupancyPct > 50) continue;
+        // Check same state region
+        const stateI = getRouteState(routes[i]);
+        const stateJ = getRouteState(routes[j]);
+        const sameRegion = stateI === stateJ || stateI.split(',').some(s => stateJ.split(',').includes(s));
+        if (!sameRegion) continue;
+        // Check combined volume fits
+        const combinedVol = routes[i].totalVolumeM3 + routes[j].totalVolumeM3;
+        const combinedWt = routes[i].totalWeightKg + routes[j].totalWeightKg;
+        if (combinedVol > maxVolumeM3 || combinedWt > maxWeightKg) continue;
+        // Merge j into i
+        const allOrders: OrderRow[] = [];
+        for (const stop of routes[i].stops) allOrders.push(...stop.orders);
+        for (const stop of routes[j].stops) allOrders.push(...stop.orders);
+        const combinedGroup = {
+          uf: stateI || stateJ,
+          cities: [...routes[i].stops.map(s => s.city), ...routes[j].stops.map(s => s.city)],
+          coords: routes[i].stops[0] ? [routes[i].stops[0].lat, routes[i].stops[0].lng] as [number, number] : [originLat, originLng] as [number, number],
+        };
+        routes[i] = buildRoute(routes[i].index, allOrders, combinedGroup, config);
+        routes.splice(j, 1);
+        merged = true;
+        break;
+      }
+      if (merged) break;
+    }
+  }
+
+  // Renumerate after merges
+  routes.forEach((r, idx) => {
+    r.index = idx + 1;
+    const n = r.stops.length;
+    r.name = n === 1
+      ? `Rota ${r.index} — ${r.stops[0]?.city}`
+      : `Rota ${r.index} — ${r.stops[0]?.city} + ${n - 1} cidades`;
+    // Fix loading sequence
+    r.stops.forEach((s, i) => { s.loadingSequence = n - i; });
+  });
+
   // 5. Calcular estatísticas globais
   const totalVol = routes.reduce((s, r) => s + r.totalVolumeM3, 0);
   const avgOcc = routes.length
@@ -436,6 +589,7 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     },
   };
 }
+
 
 function buildRoute(
   index: number,

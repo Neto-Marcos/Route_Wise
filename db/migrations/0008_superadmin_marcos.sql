@@ -1,4 +1,4 @@
-﻿-- Migration 0008: Superadmin Marcos e Empresa EU
+-- Migration 0008: Superadmin Marcos e Empresa EU
 
 INSERT INTO companies (code, name, active)
 VALUES ('EU', 'Administração Geral', true)
