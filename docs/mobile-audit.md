@@ -37,6 +37,10 @@ Essa atualização de produção cobre **a tela inicial**. As demais correções
 
 Antes da aplicação, o HTML e os bundles reais de produção foram testados com o patch em navegador isolado: 390 px (cartão 358 px) e 1920 px (cartão 560 px), sem transbordamento ou erros de hidratação. Três testes automatizados cobrem preservação de assets/backups, idempotência e recusa de artefato inesperado.
 
+Publicado com SUCCESS em `147083d8-8e64-4296-a088-cc67d3458287`. Validação direta, sem interceptação, em `criarrota.up.railway.app` e `criarrota.com.br`, nas duas larguras: quatro perfis, CSS disponível, sem transbordamento e sem exceção JavaScript. O domínio `www.criarrota.com.br` falhou na validação TLS e permanece como pendência separada.
+
+Para aplicar novas configurações de inicialização, foi necessário criar um deploy com `serviceInstanceDeployV2`: o redeploy de um snapshot antigo reutilizava o manifesto anterior, sem o novo comando. Não usar essas tentativas intermediárias como evidência da correção.
+
 ## Repetir
 
 Inicie a aplicação local em `http://127.0.0.1:3135` e execute `node scripts/audit-responsive.cjs`. Requer Playwright e navegador Microsoft Edge disponíveis no ambiente de testes; `PLAYWRIGHT_MODULE_PATH` pode apontar para um módulo já instalado. Não adiciona dependências ao aplicativo.
