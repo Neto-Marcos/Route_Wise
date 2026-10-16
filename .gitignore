@@ -4,6 +4,7 @@ Thumbs.db
 .next/
 .next-build/
 .next-verify/
+.next-responsive/
 .next-corrupt-backup/
 .next-corrupt-backup-*/
 node_modules/

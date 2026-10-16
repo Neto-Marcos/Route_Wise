@@ -526,7 +526,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
         </button>
         {configOpen && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 155px), 1fr))", gap: 12, marginBottom: 12 }}>
               <label><span style={S.label}>Veículo</span><select style={S.select} value={preset} onChange={e => applyPreset(e.target.value)}>{Object.entries(VEHICLE_PRESETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
             </div>
             {/* States */}
@@ -561,7 +561,7 @@ function ConfigStep({ rows, filename, onBack, onGenerate }: {
                 </label>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <button style={{ ...S.btnPrimary, opacity: loading || !filtered.length ? .65 : 1 }} onClick={generate} disabled={loading || !filtered.length}>
                 {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={15} />}
                 {loading ? "Gerando rotas..." : "Aplicar configuração"}
@@ -835,10 +835,10 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
                       ) : null}
                     </div>
                   </td>
-                  <td style={{ padding: "10px 10px", verticalAlign: "top", color: "rgba(255,255,255,.5)", fontSize: 11 }}>{region}</td>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", color: "var(--muted)", fontSize: 11 }}>{region}</td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
                     <div style={{ fontSize: 11 }}>
-                      <div style={{ color: "rgba(255,255,255,.35)", fontSize: 10 }}>{engineConfig.originName} →</div>
+                      <div style={{ color: "var(--muted)", fontSize: 10 }}>{engineConfig.originName} →</div>
                       {route.stops.map((stop, i) => (
                         <div key={i} style={{ fontWeight: 700 }}>
                           {stop.city.replace(/, [A-Z]{2}$/, "").toUpperCase()}{i < route.stops.length - 1 ? " →" : ""}
@@ -851,25 +851,25 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
                   <td style={{ padding: "10px 10px", verticalAlign: "top", textAlign: "right", fontWeight: 600 }}>{fmt(route.totalVolumeM3)}</td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top" }}><OccupancyBar pct={route.occupancyPct} /></td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", fontWeight: 700, whiteSpace: "nowrap" }}>
-                    {value > 0 ? fmtBRL(value) : <span style={{ color: "rgba(255,255,255,.2)" }}>—</span>}
+                    {value > 0 ? fmtBRL(value) : <span style={{ color: "var(--muted)" }}>—</span>}
                   </td>
-                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11, color: "rgba(255,255,255,.3)" }}>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11, color: "var(--muted)" }}>
                     <div>—</div><div style={{ fontSize: 10 }}>Carteira</div><div style={{ fontSize: 10 }}>Estimativa local</div>
                   </td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
                     <div style={{ fontWeight: 700 }}>{distKm > 0 ? `${distKm.toLocaleString("pt-BR")} km` : "—"}</div>
-                    <div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>Estimativa local</div>
+                    <div style={{ color: "var(--muted)", fontSize: 10 }}>Estimativa local</div>
                   </td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", fontWeight: 700 }}>{tempoStr}</td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
-                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost3)}</div><div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>{costPctMin}% do valor</div></> : "—"}
+                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost3)}</div><div style={{ color: "var(--muted)", fontSize: 10 }}>{costPctMin}% do valor</div></> : "—"}
                   </td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 11 }}>
-                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost5)}</div><div style={{ color: "rgba(255,255,255,.3)", fontSize: 10 }}>{costPctMax}% do valor</div></> : "—"}
+                    {value > 0 ? <><div style={{ fontWeight: 700 }}>{fmtBRL(cost5)}</div><div style={{ color: "var(--muted)", fontSize: 10 }}>{costPctMax}% do valor</div></> : "—"}
                   </td>
-                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 10, color: "rgba(255,255,255,.55)", lineHeight: 1.7 }}>
+                  <td style={{ padding: "10px 10px", verticalAlign: "top", fontSize: 10, color: "var(--muted)", lineHeight: 1.7 }}>
                     {orderIds.slice(0, 10).map(id => <div key={id}>{id}</div>)}
-                    {orderIds.length > 10 && <div style={{ color: "rgba(255,255,255,.3)" }}>+{orderIds.length - 10} mais</div>}
+                    {orderIds.length > 10 && <div style={{ color: "var(--muted)" }}>+{orderIds.length - 10} mais</div>}
                   </td>
                   <td style={{ padding: "10px 10px", verticalAlign: "top" }}>
                     <div title={viability.reasons.join(" | ")} style={{ display: "inline-block", padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: viability.bg, color: viability.color, border: `1px solid ${viability.border}`, cursor: "help", whiteSpace: "nowrap" }}>
@@ -923,7 +923,7 @@ function ResultsTable({ result, filename, engineConfig, vehiclePreset, serviceMi
             ))}
           </div>
           <p style={{ margin: "0 0 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".1em" }}>Atribuição desta rota</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
             <label>
               <span style={{ ...S.label, color: "var(--muted)" }}><Truck size={11} style={{ display: "inline", marginRight: 4 }} />Motorista</span>
               <select value={assignments[detailRoute.index]?.driverId ?? ""} onChange={e => setAssignments(prev => ({ ...prev, [detailRoute.index]: { ...prev[detailRoute.index], driverId: e.target.value } }))} style={{ ...S.select, background: "var(--card-subtle)", color: "var(--ink)", border: "1px solid var(--line)" }}>
@@ -1050,9 +1050,9 @@ export default function RoteirizadorPage({ onBack, onOpenInPlanner }: {
   const stepIdx = steps.findIndex(s => s.key === step);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--paper)", color: "var(--ink)" }}>
+    <div className="routing-wizard" style={{ minHeight: "100dvh", background: "var(--paper)", color: "var(--ink)" }}>
       <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", padding: "0 24px" }}>
-        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", gap: 14, height: 58 }}>
+        <div className="routing-wizard-header" style={{ maxWidth: 1400, margin: "0 auto", display: "flex", alignItems: "center", gap: 14 }}>
           {onBack && <button onClick={onBack} style={S.btnSecondary}><ArrowLeft size={14} /> Voltar</button>}
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <FileSpreadsheet size={18} color="var(--green)" />
@@ -1064,7 +1064,7 @@ export default function RoteirizadorPage({ onBack, onOpenInPlanner }: {
         </div>
       </header>
       <div style={{ borderBottom: "1px solid var(--line)", background: "var(--card-subtle)", padding: "0 24px" }}>
-        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex" }}>
+        <div className="routing-wizard-steps" style={{ maxWidth: 1400, margin: "0 auto", display: "flex" }}>
           {steps.map((s, i) => (
             <div key={s.key} style={{ padding: "9px 14px", fontSize: 12, fontWeight: 700, color: i <= stepIdx ? "var(--green)" : "var(--muted)", borderBottom: i === stepIdx ? "2px solid var(--green)" : "2px solid transparent", transition: "all .2s" }}>
               {s.label}
@@ -1072,7 +1072,7 @@ export default function RoteirizadorPage({ onBack, onOpenInPlanner }: {
           ))}
         </div>
       </div>
-      <main style={{ maxWidth: 1400, margin: "0 auto", padding: "24px" }}>
+      <main className="routing-wizard-content" style={{ maxWidth: 1400, margin: "0 auto" }}>
         {step === "upload" && <UploadStep onParsed={(r, f) => { setRows(r); setFilename(f); setStep("config"); }} />}
         {step === "config" && (
           <ConfigStep rows={rows} filename={filename} onBack={() => setStep("upload")}

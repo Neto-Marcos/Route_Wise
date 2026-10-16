@@ -2339,7 +2339,7 @@ function Overview({
   return (
     <>
       <div style={{ display: "flex", gap: "10px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "inline-flex", background: "var(--card)", padding: "4px", borderRadius: "10px", border: "1px solid var(--line)" }}>
+        <div className="overview-tabs" style={{ display: "inline-flex", background: "var(--card)", padding: "4px", borderRadius: "10px", border: "1px solid var(--line)" }}>
           <button
             type="button"
             className={`button compact ${overviewTab === "operations" ? "primary" : "secondary"}`}
@@ -2386,7 +2386,7 @@ function Overview({
           </section>
 
           {/* Quick Launch Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 14, marginBottom: 14 }}>
             <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)", marginBottom: 0 }}>
               <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
@@ -4672,6 +4672,7 @@ function DriverApp({
             className="avatar-button"
             onClick={() => setShowDriverProfile(true)}
             title="Meu perfil e configurações"
+            aria-label="Meu perfil e configurações"
             style={{ cursor: "pointer" }}
           >
             {driver.name.slice(0, 2).toUpperCase()}
@@ -5765,10 +5766,10 @@ function Modal({
 }) {
   return (
     <div className="modal-backdrop">
-      <section className={`modal ${wide ? "wide" : ""}`}>
+      <section className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <h2>{title}</h2>
-          <button onClick={onClose}>
+          <button type="button" onClick={onClose} aria-label={`Fechar ${title}`}>
             <X />
           </button>
         </header>
