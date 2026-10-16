@@ -13,3 +13,16 @@ tmp/
 .tools/
 .env
 .env.local
+.env.*
+!.env.example
+.vercel/
+.vscode/
+.idea/
+.agents/
+.claude/
+CLAUDE.md
+AGENTS.md
+frontend_audit_notes.md
+TEST_INFRA.md
+TEST_READY.md
+
