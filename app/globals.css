@@ -161,6 +161,7 @@ a {
   max-width: 560px;
   margin-inline: auto;
 }
+.home > .access-panel { max-width: none; }
 .access-head h2 {
   margin: 0;
   font-size: 30px;

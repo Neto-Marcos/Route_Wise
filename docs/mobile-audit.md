@@ -25,6 +25,18 @@ Base: `origin/main` em `22f68c6`. Correções na branch `codex/mobile-layout`, e
 
 Os testes de interface usam dados sintéticos e APIs interceptadas no navegador local. Não validam permissões reais do servidor, recebimento de push, localização de um aparelho físico, envio real de fotos/pagamentos ou disponibilidade dos serviços externos de mapas/SSW. Não houve deploy nesta revisão.
 
+## Correção da tela publicada
+
+A conferência posterior de produção encontrou o deploy `dd8c5617-284e-4ed4-98cb-ddfddf4e3002`, de 10/10, referindo código `1a5701b` ausente do GitHub e dos checkouts disponíveis. O usuário confirmou que não tem essa fonte. A folha publicada possui uma regra adicional `.access-panel { max-width:560px }`, ausente no checkout anterior; junto com `padding:8vw`, ela reduz os cartões do desktop a aproximadamente 250 px.
+
+Para preservar esse release, a correção da entrada usa `scripts/apply-home-layout-hotfix.cjs` sobre o mesmo build publicado, sem substituir o backend pelo código incompleto do GitHub. O script gera um CSS com URL nova, preserva os arquivos originais e salva backups de HTML/RSC em `.next/ui-hotfix-backups/home-layout-20261015`. É idempotente e aborta quando não reconhece o HTML esperado.
+
+O comando de inicialização do serviço Railway executa a versão embutida desse script antes das migrações existentes e de `server.js`. Isso reaplica a correção em reinicializações e mantém os arquivos do build original. O script legível e seus testes estão versionados nesta branch. Não alterar variáveis de autenticação, banco ou identificadores de armazenamento para aplicar esse ajuste.
+
+Essa atualização de produção cobre **a tela inicial**. As demais correções de interface do commit `458fe46` continuam na branch para integração quando o código-fonte do release publicado for recuperado/reconciliado. Não afirmar que o deploy desse ajuste contém a auditoria mobile inteira.
+
+Antes da aplicação, o HTML e os bundles reais de produção foram testados com o patch em navegador isolado: 390 px (cartão 358 px) e 1920 px (cartão 560 px), sem transbordamento ou erros de hidratação. Três testes automatizados cobrem preservação de assets/backups, idempotência e recusa de artefato inesperado.
+
 ## Repetir
 
 Inicie a aplicação local em `http://127.0.0.1:3135` e execute `node scripts/audit-responsive.cjs`. Requer Playwright e navegador Microsoft Edge disponíveis no ambiente de testes; `PLAYWRIGHT_MODULE_PATH` pode apontar para um módulo já instalado. Não adiciona dependências ao aplicativo.
