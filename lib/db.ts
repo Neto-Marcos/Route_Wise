@@ -1,6 +1,5 @@
 import { Pool, type QueryResultRow } from "pg";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 type Client = {
@@ -19,38 +18,6 @@ async function backend(): Promise<Client> {
         console.error("Unexpected error on idle PostgreSQL client", err);
       });
       shared.routewisePool = pool;
-      pool.query("ALTER TABLE upload_objects ADD COLUMN IF NOT EXISTS file_data bytea").catch((e) => {
-        console.warn("upload_objects auto-migration notice:", e?.message);
-      });
-      pool.query("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS boxes integer DEFAULT 0, ADD COLUMN IF NOT EXISTS volume_m3 numeric(10,2) DEFAULT 0").catch((e) => {
-        console.warn("route_stops auto-migration notice:", e?.message);
-      });
-      // Seed superadmin Marcos e Empresa EU
-      pool.query(`
-        INSERT INTO companies (code, name, active)
-        VALUES ('EU', 'Administração Geral', true)
-        ON CONFLICT (code) DO UPDATE SET name = 'Administração Geral', active = true;
-        
-        DO $$
-        DECLARE
-          v_comp_id uuid;
-          v_pass text := '$2b$10$u8AsCoGaugqMRjZ1UP31Qeq3dRQ82zr.Ka05E4xcm8HRL3AgNGvri';
-        BEGIN
-          SELECT id INTO v_comp_id FROM companies WHERE code = 'EU' LIMIT 1;
-          IF v_comp_id IS NOT NULL THEN
-            IF EXISTS (SELECT 1 FROM dispatchers WHERE company_id = v_comp_id AND (lower(email) = 'marcos' OR lower(email) = 'marcos@eu.com')) THEN
-              UPDATE dispatchers
-              SET role = 'superadmin', name = 'Marcos', email = 'marcos', password_hash = v_pass, active = true
-              WHERE company_id = v_comp_id AND (lower(email) = 'marcos' OR lower(email) = 'marcos@eu.com');
-            ELSE
-              INSERT INTO dispatchers (company_id, name, email, password_hash, role, active)
-              VALUES (v_comp_id, 'Marcos', 'marcos', v_pass, 'superadmin', true);
-            END IF;
-          END IF;
-        END $$;
-      `).catch((e) => {
-        console.warn("superadmin seed notice:", e?.message);
-      });
     }
     const pgClient = await pool.connect();
     return {
@@ -63,22 +30,42 @@ async function backend(): Promise<Client> {
       const dbDir = resolve(process.cwd(), ".local-db", "routewise");
       await mkdir(resolve(process.cwd(), ".local-db"), { recursive: true });
       const { PGlite } = await import("@electric-sql/pglite");
-      let pg: InstanceType<typeof PGlite>;
-      try {
-        const pidFile = resolve(dbDir, "postmaster.pid");
-        if (existsSync(pidFile)) {
-          await rm(pidFile, { force: true }).catch(() => {});
-        }
-        pg = new PGlite(dbDir);
-        await pg.query("SELECT 1");
-      } catch (err) {
-        console.warn("Local PGlite database reset after corruption:", err);
-        await rm(dbDir, { recursive: true, force: true }).catch(() => {});
-        pg = new PGlite(dbDir);
+      const pg = new PGlite(dbDir);
+      await pg.query("SELECT 1");
+      const check = await pg.query<{ ledger: string | null; users: string | null }>(
+        "SELECT to_regclass('public.schema_migrations')::text AS ledger, to_regclass('public.dispatchers')::text AS users"
+      );
+      if (!check.rows[0]?.ledger && check.rows[0]?.users) {
+        await pg.close();
+        throw new Error("Banco local legado sem histórico: não reaplicar migrations ou seeds automaticamente.");
       }
+      await pg.exec("CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
       const migrationsDir = resolve(process.cwd(), "db", "migrations");
-      for (const file of (await readdir(migrationsDir)).filter(f => f.endsWith(".sql")).sort()) await pg.exec(await readFile(resolve(migrationsDir, file), "utf8"));
-      return { query: async <T extends QueryResultRow>(text: string, values: unknown[] = []) => { const result = await pg.query<T>(text, values as never); return { rows: result.rows } }, release: () => {} };
+      for (const file of (await readdir(migrationsDir)).filter(f => f.endsWith(".sql")).sort()) {
+        const applied = await pg.query("SELECT 1 FROM schema_migrations WHERE filename=$1", [file]);
+        if (!applied.rows.length) {
+          if (file === "0008_superadmin_marcos.sql") {
+            await pg.close();
+            throw new Error("Migration legada com credencial fixa exige revisão administrativa explícita; inicialização interrompida.");
+          }
+          await pg.exec("BEGIN");
+          try {
+            await pg.exec(await readFile(resolve(migrationsDir, file), "utf8"));
+            await pg.query("INSERT INTO schema_migrations(filename) VALUES($1)", [file]);
+            await pg.exec("COMMIT");
+          } catch (err) {
+            await pg.exec("ROLLBACK");
+            throw err;
+          }
+        }
+      }
+      return {
+        query: async <T extends QueryResultRow>(text: string, values: unknown[] = []) => {
+          const result = await pg.query<T>(text, values as never);
+          return { rows: result.rows };
+        },
+        release: () => {},
+      };
     } catch (e) {
       shared.routewiseLocal = undefined;
       throw e;
@@ -91,12 +78,13 @@ export async function query<T extends QueryResultRow>(text: string, values: unkn
   if (process.env.DATABASE_URL) {
     let pool = shared.routewisePool;
     if (!pool) {
-      await backend();
+      (await backend()).release();
       pool = shared.routewisePool;
     }
     return (pool ? pool.query(text, values) : (await backend()).query(text, values)) as unknown as { rows: T[] };
   }
   return (await backend()).query<T>(text, values);
 }
-export async function audit(actorType: string, actorId: string | null, action: string, entityType: string, entityId: string | null, details: unknown = null) { await query("INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5,$6)", [actorType, actorId, action, entityType, entityId, details]) }
-
+export async function audit(actorType: string, actorId: string | null, action: string, entityType: string, entityId: string | null, details: unknown = null) {
+  await query("INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,$4,$5,$6)", [actorType, actorId, action, entityType, entityId, details]);
+}

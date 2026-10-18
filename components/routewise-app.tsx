@@ -1,4 +1,6 @@
 "use client";
+import { AccountMenu } from "./account-menu";
+import { PlannerDivider } from "./planner-divider";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -57,7 +59,15 @@ import { DriverLiveMap } from "./driver-live-map";
 import { RouteDetailModal, type DetailedRoute } from "./route-detail-modal";
 import { RouteReportModal } from "./route-report-modal";
 import { printElement } from "@/lib/print-document";
-import RoteirizadorPage from "./roteirizador-page";
+import {
+  RoteirizadorPage,
+  StopDragHandle,
+  moveDeliveryStop,
+  buildSuggestedPlannerStops,
+  plannerStopContentKey,
+  type ExtendedEngineConfig,
+  type RoutingProof,
+} from "./roteirizador-page";
 import type { SuggestedRoute, EngineConfig } from "@/lib/route-engine";
 import { SSWTrackingView } from "./ssw-tracking-view";
 import { DashboardAnalytics } from "./dashboard-analytics";
@@ -65,6 +75,7 @@ import { CityHeatmapModal } from "./city-heatmap-modal";
 import { OperationsHub } from "./operations-hub";
 import { PaymentRequestModal } from "./payment-request-modal";
 import { CommercialDashboard } from "./commercial-dashboard";
+import { ExpeditionDashboard, CurrentOperationSection } from "./expedition-dashboard";
 
 type DispatcherUser = {
   id: string;
@@ -102,6 +113,7 @@ type Stop = {
   status?: "pending" | "delivered";
   boxes?: number;
   volume_m3?: number;
+  loading_sequence?: number;
   /** Números dos pedidos importados da planilha para esta entrega. */
   order_ids?: string[];
 };
@@ -157,6 +169,7 @@ type RouteData = {
   delivered: number;
   estimated_km?: number;
   actual_km?: number;
+  circular?: boolean;
   last_location?: { lat: number; lng: number; recorded_at: string };
   stops?: Stop[];
 };
@@ -169,8 +182,17 @@ const api = async (url: string, options?: RequestInit) => {
       ...(role ? { "X-RouteWise-Role": role } : {}),
       ...options?.headers,
     },
+  }).catch((error: unknown) => {
+    if (error instanceof TypeError) {
+      throw new Error(typeof navigator !== "undefined" && !navigator.onLine
+        ? "Você está sem conexão. Conecte-se à internet e tente entrar novamente."
+        : "Não foi possível conectar ao sistema. Aguarde alguns instantes e tente novamente.");
+    }
+    throw error;
   });
-  const out = await res.json();
+  const out = await res.json().catch(() => {
+    throw new Error("O sistema enviou uma resposta inválida. Tente novamente em instantes.");
+  });
   if (!res.ok) throw new Error(out.error || "Não foi possível concluir");
   return out;
 };
@@ -289,6 +311,12 @@ export default function RouteWiseApp() {
         });
     }
 
+    try {
+      if (!localStorage.getItem("rw_theme_restored_20261018")) {
+        localStorage.setItem("rw_theme", "dark");
+        localStorage.setItem("rw_theme_restored_20261018", "1");
+      }
+    } catch {}
     // Check saved theme
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("rw_theme") as "light" | "dark" | null;
@@ -463,6 +491,8 @@ export function ConnectionBadge({ online }: { online: boolean }) {
       setSyncing(false);
     }
   };
+
+  if (online && queueCount === 0 && !syncing) return null;
 
   return (
     <div
@@ -1795,11 +1825,11 @@ function Dispatcher({
 }: {
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">("overview");
+  const [tab, setTab] = useState<"overview" | "fleet" | "commercial" | "planner" | "routes" | "people" | "vehicles" | "dispatchers" | "roteirizador" | "ssw" | "operations">("overview");
 
   useEffect(() => {
     const saved = sessionStorage.getItem("rw_dispatcher_tab");
-    if (saved && ["overview", "planner", "routes", "people", "vehicles", "dispatchers", "roteirizador", "ssw", "operations"].includes(saved)) {
+    if (saved && ["overview", "fleet", "commercial", "planner", "routes", "people", "vehicles", "dispatchers", "roteirizador", "ssw", "operations"].includes(saved)) {
       setTab(saved as any);
     }
   }, []);
@@ -1825,6 +1855,12 @@ function Dispatcher({
     stops: Stop[];
     name?: string;
     date?: string;
+    circular?: boolean;
+    routingTransfer?: {
+      suggested: SuggestedRoute;
+      config: ExtendedEngineConfig;
+      routingProof: RoutingProof;
+    };
   } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>({
@@ -1840,7 +1876,17 @@ function Dispatcher({
     setSidebarCollapsed(localStorage.getItem("rw_sidebar_collapsed") === "true");
   }, []);
 
-  const handleOpenRouteInPlanner = (suggested: SuggestedRoute, engineConfig?: EngineConfig | null) => {
+  const handleOpenRouteInPlanner = (
+    suggested: SuggestedRoute,
+    engineConfig?: ExtendedEngineConfig | null,
+    routingProof?: RoutingProof | null,
+  ) => {
+    const hasMinException = !!engineConfig?.minimumExceptions?.orderIds.length;
+    if (hasMinException && (!routingProof || !engineConfig)) {
+      setMessage("Autorização ausente. Gere novamente no roteirizador.");
+      return;
+    }
+
     const originStop: Stop = {
       id: crypto.randomUUID(),
       name: engineConfig?.originName ? `Origem (${engineConfig.originName})` : "Origem (CD Base)",
@@ -1864,9 +1910,17 @@ function Dispatcher({
 
     setImportedPlannerData({
       id: crypto.randomUUID(),
-      stops: [originStop, ...deliveryStops],
+      stops: hasMinException && engineConfig
+        ? buildSuggestedPlannerStops(suggested, engineConfig).map((stop) => ({
+            ...stop,
+            id: crypto.randomUUID(),
+          }))
+        : [originStop, ...deliveryStops],
       name: suggested.name || "Rota Importada",
       date: engineConfig?.routeDate || new Date().toISOString().slice(0, 10),
+      routingTransfer: hasMinException && engineConfig && routingProof
+        ? { suggested, config: engineConfig, routingProof }
+        : undefined,
     });
     setTab("planner");
   };
@@ -1883,6 +1937,7 @@ function Dispatcher({
         })),
         name: detailed.name,
         date: detailed.route_date,
+        circular: (detailed as any).circular,
       });
       setTab("planner");
     } catch (e) {
@@ -1900,6 +1955,11 @@ function Dispatcher({
         api("/api/session/me").catch(() => null),
       ])
         .then(([r, d, v, disp, sess]) => {
+          setMessage((prev) =>
+            /Unexpected token|not valid JSON|servidor retornou uma resposta inválida/.test(prev)
+              ? ""
+              : prev,
+          );
           setRoutes(r);
           setDrivers(d);
           setVehicles(v);
@@ -1994,20 +2054,18 @@ function Dispatcher({
     }
   };
 
-  // Filtragem estrita dos itens do menu lateral por perfil:
-  // - Superadmin / Admin: Todas as abas
-  // - Criador de rotas: roteirizador, planner, routes, vehicles, people
-  // - Escritório: ssw
   const allNavItems: Array<[typeof tab, string, React.ReactNode]> = [
-    ["overview", "Visão geral", <RouteIcon key="o" />],
+    ["overview", "Dashboard", <RouteIcon key="o" />],
+    ["fleet", "Mapa de rastreio", <LocateFixed key="fleet" />],
+    ["commercial", "Métricas comerciais", <FileText key="commercial" />],
     ["roteirizador", "Roteirizador", <FileText key="rot" />],
     ["planner", "Planejar rota", <Navigation key="n" />],
     ["routes", "Rotas", <Navigation key="r" />],
     ["people", "Motoristas", <Users key="p" />],
     ["vehicles", "Veículos", <Truck key="v" />],
     ["dispatchers", "Equipe / Acessos", <ShieldCheck key="g" />],
-    ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
     ["operations", "Central operacional", <Zap key="ops" />],
+    ["ssw", "Rastreio SSW", <ExternalLink key="ssw" />],
   ];
 
   const allowedNavItems = allNavItems.filter(([id]) => {
@@ -2021,15 +2079,16 @@ function Dispatcher({
     return true;
   });
   const navGroups = [
-    { label: "Operação", items: ["overview", "operations"] },
+    { label: "Operação", items: ["overview", "fleet", "commercial", "operations", "ssw"] },
     { label: "Rotas", items: ["roteirizador", "planner", "routes"] },
     { label: "Cadastros", items: ["people", "vehicles"] },
-    { label: "Administração", items: ["dispatchers", "ssw"] },
+    { label: "Administração", items: ["dispatchers"] },
   ].map((group) => ({ ...group, entries: allowedNavItems.filter(([id]) => group.items.includes(id)) })).filter((group) => group.entries.length > 0);
 
   return (
-    <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
+    <div className={`workspace managed-workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tab === "overview" ? "dashboard-workspace" : ""} ${tab === "planner" ? "planning-workspace" : ""}`}>
       <aside className="sidebar">
+        <Logo />
         <button className="sidebar-collapse" type="button" aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"} aria-expanded={!sidebarCollapsed} onClick={() => {
           const next = !sidebarCollapsed;
           setSidebarCollapsed(next);
@@ -2040,47 +2099,186 @@ function Dispatcher({
           <span>Recolher menu</span>
         </button>
         <nav aria-label="Navegação principal">
-          {navGroups.map((group) => <div className={`sidebar-nav-group ${openNavGroups[group.label] ? "open" : ""}`} key={group.label}>
-            <button type="button" className="sidebar-nav-group-title" onClick={() => setOpenNavGroups((current) => ({ ...current, [group.label]: !current[group.label] }))} aria-expanded={openNavGroups[group.label]}>
-              <span>{group.label}</span><ChevronDown size={15} />
-            </button>
-            <div className="sidebar-nav-items">
-              {group.entries.map(([id, label, icon]) => <button key={id} title={label} aria-label={label} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{icon}<span>{label}</span></button>)}
-            </div>
-          </div>)}
+          {navGroups.map((group) => {
+            const isActiveGroup = group.items.includes(tab);
+            const isOpen = openNavGroups[group.label] || sidebarCollapsed;
+            return (
+              <div
+                className={`sidebar-nav-group ${isOpen ? "open" : ""} ${isActiveGroup ? "active-group" : ""}`}
+                data-active-group={isActiveGroup ? "true" : undefined}
+                key={group.label}
+              >
+                <button
+                  type="button"
+                  className={`sidebar-nav-group-title ${isActiveGroup ? "active-title" : ""}`}
+                  onClick={() => setOpenNavGroups((current) => ({ ...current, [group.label]: !current[group.label] }))}
+                  aria-expanded={isOpen}
+                >
+                  <span>{group.label}</span><ChevronDown size={15} />
+                </button>
+                <div className="sidebar-nav-items">
+                  {group.entries.map(([id, label, icon]) => (
+                    <div
+                      key={id}
+                      className={`sidebar-nav-item-wrap ${sidebarCollapsed ? "tooltip-trigger" : ""}`}
+                      data-position="right"
+                      data-tooltip={label}
+                      style={{ position: "relative", width: "100%" }}
+                    >
+                      <button
+                        type="button"
+                        title={label}
+                        aria-label={label}
+                        className={tab === id ? "active" : ""}
+                        onClick={() => setTab(id)}
+                        style={{ width: "100%" }}
+                      >
+                        {icon}<span>{label}</span>
+                      </button>
+                      {sidebarCollapsed && (
+                        <span className="tooltip-bubble" role="tooltip" data-position="right">
+                          {label}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </nav>
-        <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
-          <button
-            type="button"
-            className="sidebar-btn-action"
+        <div className="sidebar-footer-actions" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div
+            className={`sidebar-user-profile ${sidebarCollapsed ? "tooltip-trigger" : ""}`}
+            data-position="right"
+            data-tooltip={`${sessionInfo?.userName || "Usuário"} (${sessionInfo?.companyName || ""})`}
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "8px",
-              justifyContent: "flex-start",
-              padding: "10px 14px",
+              gap: "10px",
+              padding: sidebarCollapsed ? "6px 0" : "8px 10px",
               borderRadius: "10px",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              background: "rgba(255, 255, 255, 0.06)",
-              color: "#e2e8f0",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: 600,
+              background: "var(--card-subtle)",
+              border: "1px solid var(--line)",
+              justifyContent: sidebarCollapsed ? "center" : "flex-start",
+              width: "100%",
             }}
-            onClick={() => setShowChangePassword(true)}
-            title="Alterar minha senha (desconecta após trocar)"
           >
-            <KeyRound size={16} /> <span>Alterar senha</span>
-          </button>
-          <button className="exit" onClick={onExit} title="Desconectar do sistema">
-            <LogOut size={16} /> <span>Sair / Desconectar</span>
-          </button>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: "var(--blue)",
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                fontWeight: 700,
+                fontSize: "13px",
+                flexShrink: 0,
+              }}
+            >
+              {(sessionInfo?.userName || "U").charAt(0).toUpperCase()}
+            </div>
+            {!sidebarCollapsed && (
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", lineHeight: 1.25 }}>
+                <span style={{ fontWeight: 700, fontSize: "12.5px", color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {sessionInfo?.userName || "Operador"}
+                </span>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "capitalize" }}>
+                  {userRole === "superadmin" ? "Superadmin" : userRole === "admin" ? "Administrador" : userRole === "route_creator" ? "Criador de rotas" : "Escritório"}
+                </span>
+                {sessionInfo?.companyName && (
+                  <span style={{ fontSize: "10.5px", color: "var(--text-subtle)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {sessionInfo.companyName}
+                  </span>
+                )}
+              </div>
+            )}
+            {sidebarCollapsed && (
+              <span className="tooltip-bubble" role="tooltip" data-position="right">
+                {sessionInfo?.userName || "Operador"} · {userRole} {sessionInfo?.companyName ? `(${sessionInfo.companyName})` : ""}
+              </span>
+            )}
+          </div>
+          <div
+            className={sidebarCollapsed ? "tooltip-trigger" : ""}
+            data-position="right"
+            data-tooltip="Alterar senha"
+            style={{ width: "100%", position: "relative" }}
+          >
+            <button
+              type="button"
+              className="sidebar-btn-action"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                justifyContent: sidebarCollapsed ? "center" : "flex-start",
+                padding: sidebarCollapsed ? "10px 0" : "9px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--line)",
+                background: "var(--card-subtle)",
+                color: "var(--text-main)",
+                cursor: "pointer",
+                fontSize: "12.5px",
+                fontWeight: 600,
+                width: "100%",
+                transition: "background 0.15s, border-color 0.15s",
+              }}
+              onClick={() => setShowChangePassword(true)}
+              title="Alterar minha senha (desconecta após trocar)"
+            >
+              <KeyRound size={16} /> <span>Alterar senha</span>
+            </button>
+            {sidebarCollapsed && (
+              <span className="tooltip-bubble" role="tooltip" data-position="right">
+                Alterar senha
+              </span>
+            )}
+          </div>
+          <div
+            className={sidebarCollapsed ? "tooltip-trigger" : ""}
+            data-position="right"
+            data-tooltip="Sair / Desconectar"
+            style={{ width: "100%", position: "relative" }}
+          >
+            <button
+              type="button"
+              className="exit"
+              onClick={() => setConfirmExit(true)}
+              title="Desconectar do sistema"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                justifyContent: sidebarCollapsed ? "center" : "flex-start",
+                padding: sidebarCollapsed ? "10px 0" : "9px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--red-border)",
+                background: "var(--red-bg)",
+                color: "var(--red)",
+                cursor: "pointer",
+                fontSize: "12.5px",
+                fontWeight: 600,
+                width: "100%",
+                transition: "background 0.15s, border-color 0.15s",
+              }}
+            >
+              <LogOut size={16} /> <span>Sair</span>
+            </button>
+            {sidebarCollapsed && (
+              <span className="tooltip-bubble" role="tooltip" data-position="right">
+                Sair / Desconectar
+              </span>
+            )}
+          </div>
         </div>
       </aside>
       <main className="dashboard">
-        <header>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+        <header className="workspace-header">
+          <div className="workspace-header-title">
+            <div className="workspace-header-context">
               <span className="eyebrow" style={{ color: userRole === "superadmin" ? "#7c3aed" : undefined }}>
                 {userRole === "superadmin"
                   ? "ADMINISTRADOR SUPREMO"
@@ -2091,84 +2289,85 @@ function Dispatcher({
                   : "CENTRAL DE ESCRITÓRIO"}
               </span>
               {sessionInfo?.companyName && (
-                <span className="header-company-badge" style={{ fontSize: "12px", background: "rgba(0,0,0,0.06)", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                <span className="header-company-badge" title={`${sessionInfo.companyName} (${sessionInfo.companyCode})`}>
                   {sessionInfo.companyName} ({sessionInfo.companyCode})
                 </span>
               )}
             </div>
             <h1>
               {tab === "overview"
-                ? "Visão geral"
-                : tab === "planner"
-                  ? "Planejador de rotas"
-                : tab === "routes"
-                  ? "Planejamento e Histórico de Rotas"
-                  : tab === "people"
-                    ? "Equipe de Motoristas"
-                    : tab === "vehicles"
-                      ? "Frota de Veículos"
-                      : tab === "roteirizador"
-                        ? "Roteirizador Automático"
-                        : tab === "ssw"
-                          ? "Rastreamento pelo DANFE (SSW e Correios)"
-                          : tab === "operations"
-                            ? "Central operacional"
-                          : "Equipe e Níveis de Acesso"}
+                ? "Dashboard"
+                : tab === "commercial"
+                  ? "Métricas Comerciais e BI"
+                  : tab === "fleet"
+                    ? "Mapa de rastreio"
+                    : tab === "planner"
+                      ? "Planejador de rotas"
+                      : tab === "routes"
+                        ? "Planejamento e Histórico de Rotas"
+                        : tab === "people"
+                          ? "Equipe de Motoristas"
+                          : tab === "vehicles"
+                            ? "Frota de Veículos"
+                            : tab === "roteirizador"
+                              ? "Roteirizador Automático"
+                              : tab === "ssw"
+                                ? "Rastreamento pelo DANFE (SSW e Correios)"
+                                : tab === "operations"
+                                  ? "Central operacional"
+                                  : "Equipe e Níveis de Acesso"}
             </h1>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            {/* Troca rápida de empresa para o Administrador Supremo */}
-            {userRole === "superadmin" && (
-              <div className="company-switcher" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <Building2 size={16} color="var(--muted)" />
-                <select
-                  disabled={switchingCompany}
-                  value={sessionInfo?.companyId || ""}
-                  onChange={(e) => handleSwitchCompany(e.target.value)}
-                  style={{
-                    height: "36px",
-                    padding: "0 10px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--line)",
-                    background: "var(--card)",
-                    color: "var(--ink)",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                  title="Trocar de empresa no painel de Administrador Supremo"
-                >
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id} style={{ background: "var(--card)", color: "var(--ink)" }}>
-                      Empresa: {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="button secondary compact"
-                  onClick={() => setShowManageCompanies(true)}
-                  title="Gerenciar, editar ou excluir empresas"
-                  style={{ height: "36px", padding: "0 10px", fontSize: "13px", display: "flex", alignItems: "center", gap: "5px" }}
-                >
-                  <Settings size={14} /> <span>Empresas</span>
-                </button>
-              </div>
-            )}
-            <span className="live">
-              <i /> Atualização automática
-            </span>
+          <div className="workspace-header-actions">
             <ConnectionBadge online={typeof navigator !== "undefined" ? navigator.onLine : true} />
-            <ThemeToggle />
-            <button
-              type="button"
-              className="button secondary compact"
-              onClick={() => setConfirmExit(true)}
-              title="Desconectar do sistema"
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#dc2626", border: "1px solid rgba(220, 38, 38, 0.2)", background: "rgba(220, 38, 38, 0.05)" }}
+            <AccountMenu
+              name={sessionInfo?.userName}
+              company={sessionInfo?.companyName}
+              onMaps={userRole !== "office" ? () => setTab("planner") : undefined}
+              themeControl={<ThemeToggle />}
+              onPassword={() => setShowChangePassword(true)}
+              onExit={() => setConfirmExit(true)}
+              onNotifications={userRole === "superadmin" || userRole === "admin" || userRole === "office" ? () => setTab("operations") : undefined}
             >
-              <LogOut size={14} /> <span>Sair</span>
-            </button>
+              {/* Troca rápida de empresa para o Administrador Supremo */}
+              {userRole === "superadmin" && (
+                <div className="company-switcher" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Building2 size={16} color="var(--muted)" />
+                  <select
+                    disabled={switchingCompany}
+                    value={sessionInfo?.companyId || ""}
+                    onChange={(e) => handleSwitchCompany(e.target.value)}
+                    style={{
+                      height: "36px",
+                      padding: "0 10px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--line)",
+                      background: "var(--card)",
+                      color: "var(--ink)",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                    title="Trocar de empresa no painel de Administrador Supremo"
+                  >
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id} style={{ background: "var(--card)", color: "var(--ink)" }}>
+                        Empresa: {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    onClick={() => setShowManageCompanies(true)}
+                    title="Gerenciar, editar ou excluir empresas"
+                    style={{ height: "36px", padding: "0 10px", fontSize: "13px", display: "flex", alignItems: "center", gap: "5px" }}
+                  >
+                    <Settings size={14} /> <span>Empresas</span>
+                  </button>
+                </div>
+              )}
+            </AccountMenu>
             <ConfirmDialog
               open={confirmExit}
               title="Desconectar do sistema"
@@ -2195,10 +2394,13 @@ function Dispatcher({
             initialStops={importedPlannerData?.stops}
             initialRouteName={importedPlannerData?.name}
             initialRouteDate={importedPlannerData?.date}
+            initialCircular={importedPlannerData?.circular}
+            routingTransfer={importedPlannerData?.routingTransfer}
           />
         )}
         {tab === "overview" && (
           <Overview
+            key={sessionInfo?.companyId ?? "session-pending"}
             routes={routes}
             active={active}
             completed={completed}
@@ -2245,6 +2447,19 @@ function Dispatcher({
         )}
         {tab === "ssw" && (
           <SSWTrackingView onBack={() => setTab(userRole === "admin" ? "overview" : "ssw")} />
+        )}
+        {tab === "fleet" && (
+          <CurrentOperationSection
+            routes={routes}
+            onSelectRoute={setSelectedRouteId}
+            onOpenTab={(t) => setTab(t as any)}
+          />
+        )}
+        {tab === "commercial" && (
+          <>
+            <CommercialDashboard />
+            <DashboardAnalytics userRole={userRole} onOpenHeatmap={(points) => { setHeatPoints(points); setShowHeatmap(true); }} />
+          </>
         )}
         {tab === "operations" && <OperationsHub userRole={userRole} drivers={drivers} />}
       </main>
@@ -2329,7 +2544,7 @@ function Overview({
   drivers: Driver[];
   onOpenHeatmap: (points: Array<[number, number, number]>) => void;
 }) {
-  const [overviewTab, setOverviewTab] = useState<"operations" | "commercial">("operations");
+  const [overviewTab, setOverviewTab] = useState<"expedition" | "operations" | "commercial">("expedition");
   const delivered = routes.filter((route) => !["draft", "cancelled"].includes(route.status)).reduce((n, r) => n + Number(r.delivered || 0), 0);
   const todayLocal = new Date().toLocaleDateString("en-CA");
   const liveRoutes = routes.filter((route) => route.status === "assigned" || route.status === "active");
@@ -2339,7 +2554,15 @@ function Overview({
   return (
     <>
       <div style={{ display: "flex", gap: "10px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "inline-flex", background: "var(--card)", padding: "4px", borderRadius: "10px", border: "1px solid var(--line)" }}>
+        <div className="overview-tabs" style={{ display: "inline-flex", background: "var(--card)", padding: "4px", borderRadius: "10px", border: "1px solid var(--line)" }}>
+          <button
+            type="button"
+            className={`button compact ${overviewTab === "expedition" ? "primary" : "secondary"}`}
+            style={{ borderRadius: "8px", fontWeight: 600, fontSize: "13px" }}
+            onClick={() => setOverviewTab("expedition")}
+          >
+            📦 Expedição & Carteira
+          </button>
           <button
             type="button"
             className={`button compact ${overviewTab === "operations" ? "primary" : "secondary"}`}
@@ -2359,7 +2582,9 @@ function Overview({
         </div>
       </div>
 
-      {overviewTab === "commercial" ? (
+      {overviewTab === "expedition" ? (
+        <ExpeditionDashboard onImport={() => onOpenTab?.("roteirizador")} />
+      ) : overviewTab === "commercial" ? (
         <>
           <CommercialDashboard />
           <DashboardAnalytics userRole={userRole} onOpenHeatmap={onOpenHeatmap} />
@@ -2386,7 +2611,7 @@ function Overview({
           </section>
 
           {/* Quick Launch Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 14, marginBottom: 14 }}>
             <section className="panel" style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.05))", border: "1px solid rgba(16,185,129,0.3)", marginBottom: 0 }}>
               <div className="panel-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
@@ -2416,11 +2641,10 @@ function Overview({
             </section>
           </div>
 
-          {/* Task 1: Mapa ao vivo para o Organizador */}
           <section className="panel live-fleet-panel">
             <div className="panel-title">
               <div>
-                <h2>Mapa ao vivo da frota</h2>
+                <h2>Mapa da frota — últimas posições</h2>
                 <p>Última posição transmitida por GPS dos motoristas em rota</p>
               </div>
             </div>
@@ -2430,7 +2654,7 @@ function Overview({
           <section className="panel">
             <div className="panel-title">
               <div>
-                <h2>Operação ao vivo</h2>
+                <h2>Rotas em operação</h2>
                 <p>Clique em uma rota para abrir detalhes, paradas e fotos</p>
               </div>
             </div>
@@ -3252,12 +3476,24 @@ function DirectAssignModal({
   stops,
   routeInfo,
   defaultName,
+  defaultDate,
+  routingTransfer,
+  confirmedChange,
+  circular,
   onClose,
   onDone,
 }: {
   stops: Stop[];
   routeInfo: { km: number; seconds: number } | null;
   defaultName?: string;
+  defaultDate?: string;
+  routingTransfer?: {
+    suggested: SuggestedRoute;
+    config: ExtendedEngineConfig;
+    routingProof: RoutingProof;
+  };
+  confirmedChange?: boolean;
+  circular?: boolean;
   onClose: () => void;
   onDone: (assignedRoute: any) => void;
 }) {
@@ -3266,7 +3502,7 @@ function DirectAssignModal({
   const [selectedDriverId, setSelectedDriverId] = useState("");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [name, setName] = useState(defaultName || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`);
-  const [date, setDate] = useState(new Date().toLocaleDateString("en-CA"));
+  const [date, setDate] = useState(defaultDate || new Date().toLocaleDateString("en-CA"));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -3292,7 +3528,7 @@ function DirectAssignModal({
     setError("");
 
     try {
-      const res = await api("/api/routes", {
+      const res = await api(routingTransfer ? "/api/routerizador/planner" : "/api/routes", {
         method: "POST",
         body: JSON.stringify({
           name: name.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`,
@@ -3303,9 +3539,17 @@ function DirectAssignModal({
           estimatedKm: routeInfo?.km,
           driverId: selectedDriverId,
           vehicleId: selectedVehicleId,
+          ...(routingTransfer
+            ? {
+                suggested: routingTransfer.suggested,
+                routingProof: routingTransfer.routingProof,
+                confirmedChange,
+                circular: !!circular,
+              }
+            : {}),
         }),
       });
-      onDone(res);
+      onDone(routingTransfer ? { ...res, name } : res);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -3386,6 +3630,8 @@ function RoutePlannerView({
   initialRouteName,
   initialRouteDate,
   initialRouteId,
+  initialCircular,
+  routingTransfer,
 }: {
   onClose?: () => void;
   onDone?: () => void;
@@ -3395,6 +3641,12 @@ function RoutePlannerView({
   initialRouteName?: string;
   initialRouteDate?: string;
   initialRouteId?: string;
+  initialCircular?: boolean;
+  routingTransfer?: {
+    suggested: SuggestedRoute;
+    config: ExtendedEngineConfig;
+    routingProof: RoutingProof;
+  };
 }) {
   const [stops, setStops] = useState<Stop[]>(initialStops || []);
   const [mobileShowMap, setMobileShowMap] = useState(false);
@@ -3406,9 +3658,12 @@ function RoutePlannerView({
   const [optimizing, setOptimizing] = useState(false);
   const [geometry, setGeometry] = useState<[number, number][]>([]);
   const [routeInfo, setRouteInfo] = useState<{ km: number; seconds: number } | null>(null);
-  const [circular, setCircular] = useState(false);
-  const [showStations, setShowStations] = useState(true);
-  const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">("distance");
+  const [circular, setCircular] = useState(initialCircular || false);
+  const [showStations, setShowStations] = useState(false);
+  const [stationsError, setStationsError] = useState<string | null>(null);
+  const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">(
+    initialRouteId || routingTransfer ? "manual" : "distance",
+  );
   const [routeName, setRouteName] = useState(initialRouteName || "");
   const [routeDate, setRouteDate] = useState(initialRouteDate || new Date().toLocaleDateString("en-CA"));
   const [assignModalOpen, setAssignModalOpen] = useState(false);
@@ -3418,6 +3673,37 @@ function RoutePlannerView({
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const optimizeRef = useRef<() => void>(() => {});
   const lastOptimizedCoordsRef = useRef<string>("");
+  const optimizeRequestSeqRef = useRef(0);
+  const expectedStopIdsRef = useRef<Array<string | undefined>>(initialStops?.map((s) => s.id) || []);
+  const [confirmedTransferChange, setConfirmedTransferChange] = useState(false);
+
+  const transferPermutation = routingTransfer
+    ? (() => {
+        if (!Array.isArray(stops) || stops.length !== routingTransfer.suggested.stops.length + 1 || stops.some((s) => !s)) {
+          return null;
+        }
+        const canonical = buildSuggestedPlannerStops(routingTransfer.suggested, routingTransfer.config);
+        if (plannerStopContentKey(stops[0]) !== plannerStopContentKey(canonical[0])) return null;
+        const used = new Set<number>();
+        const perm: number[] = [];
+        for (const stop of stops.slice(1)) {
+          const foundIdx = canonical.findIndex(
+            (candidate, idx) => idx > 0 && !used.has(idx) && plannerStopContentKey(candidate) === plannerStopContentKey(stop),
+          );
+          if (foundIdx < 0) return null;
+          used.add(foundIdx);
+          perm.push(foundIdx - 1);
+        }
+        return perm;
+      })()
+    : null;
+  const transferReordered = !!transferPermutation?.some((idx, pos) => idx !== pos);
+  const transferInvalidated = !!routingTransfer && (!transferPermutation || circular || routeDate !== routingTransfer.config.routeDate);
+  const stopsJson = JSON.stringify(stops);
+
+  useEffect(() => {
+    setConfirmedTransferChange(false);
+  }, [stopsJson, circular, routeDate]);
 
   useEffect(() => {
     if (initialStops && initialStops.length > 0) {
@@ -3438,17 +3724,18 @@ function RoutePlannerView({
   }, []);
 
   const changeStops = (next: Stop[]) => {
+    optimizeRequestSeqRef.current++;
     setStops(next);
     setGeometry([]);
     setRouteInfo(null);
   };
 
   const moveStop = (fromIdx: number, toIdx: number) => {
-    if (fromIdx < 1 || toIdx < 1 || fromIdx >= stops.length || toIdx >= stops.length) return;
-    const next = [...stops];
-    [next[fromIdx], next[toIdx]] = [next[toIdx], next[fromIdx]];
-    setOptimizeBy("manual");
-    changeStops(next);
+    const next = moveDeliveryStop(stops, fromIdx, toIdx);
+    if (next !== stops) {
+      setOptimizeBy("manual");
+      changeStops(next);
+    }
   };
 
   const search = useCallback(async (term: string, signal?: AbortSignal) => {
@@ -3505,6 +3792,7 @@ function RoutePlannerView({
   const optimize = async (forceManual = false) => {
     if (stops.length < 2) return setError("Adicione uma origem e ao menos uma entrega.");
     const isManual = forceManual || optimizeBy === "manual";
+    const reqSeq = ++optimizeRequestSeqRef.current;
     setOptimizing(true);
     setError("");
     try {
@@ -3550,6 +3838,7 @@ function RoutePlannerView({
         const distance = Number(data.routes[0].distance);
         const duration = Number(data.routes[0].duration);
 
+        if (reqSeq !== optimizeRequestSeqRef.current) return;
         lastOptimizedCoordsRef.current = stops.map(s => `${s.lat},${s.lng}`).join(";") + `:${circular}:${optimizeBy}`;
         setGeometry(line);
         setRouteInfo({ km: distance / 1000, seconds: duration });
@@ -3584,12 +3873,20 @@ function RoutePlannerView({
         const distance = Number(data.trips[0].distance);
         const duration = Number(data.trips[0].duration);
 
+        if (reqSeq !== optimizeRequestSeqRef.current) return;
         lastOptimizedCoordsRef.current = validOrdered.map(s => `${s.lat},${s.lng}`).join(";") + `:${circular}:${optimizeBy}`;
         setStops(validOrdered);
         setGeometry(line);
         setRouteInfo({ km: distance / 1000, seconds: duration });
       }
     } catch (e) {
+      if (reqSeq !== optimizeRequestSeqRef.current) return;
+      if (isManual) {
+        setGeometry([]);
+        setRouteInfo(null);
+        setError("Não foi possível calcular o trajeto pelas ruas. Confira a conexão e selecione novamente o critério de rota para tentar de novo.");
+        return;
+      }
       console.warn("OSRM routing fallback:", e);
       const line: [number, number][] = stops.map((s) => [s.lat, s.lng]);
       if (circular && stops.length > 1) {
@@ -3606,7 +3903,9 @@ function RoutePlannerView({
       setGeometry(line);
       setRouteInfo({ km: fallbackKm, seconds: Math.round((fallbackKm / 45) * 3600) });
     } finally {
-      setOptimizing(false);
+      if (reqSeq === optimizeRequestSeqRef.current) {
+        setOptimizing(false);
+      }
     }
   };
 
@@ -3622,13 +3921,29 @@ function RoutePlannerView({
 
   const saveDraft = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (routingTransfer) {
+      return setError("Rota com autorização: use Salvar e Atribuir para preservar pedidos e auditoria. Rascunho manual ainda indisponível para exceções.");
+    }
     if (stops.length < 2) return setError("Adicione uma origem e ao menos uma entrega.");
     if (savingDraft) return;
+    if (optimizing || !routeInfo) return setError("Aguarde o cálculo do trajeto antes de salvar.");
     setSavingDraft(true);
     setError("");
     const name = routeName.trim() || `Rota ${new Intl.DateTimeFormat("pt-BR").format(new Date())}`;
     try {
-      await api(initialRouteId ? `/api/routes/${initialRouteId}` : "/api/routes", {
+      const isPureReorder = !!initialRouteId && (() => {
+        const initial = initialStops || [];
+        const idSet = new Set(initial.map((s) => s.id));
+        return (
+          initial.length === stops.length &&
+          !idSet.has(undefined) &&
+          idSet.size === initial.length &&
+          new Set(stops.map((s) => s.id)).size === stops.length &&
+          stops.every((s) => idSet.has(s.id)) &&
+          initial[0]?.id === stops[0]?.id
+        );
+      })();
+      await api(initialRouteId ? `/api/routes/${initialRouteId}${isPureReorder ? "/reorder" : ""}` : "/api/routes", {
         method: initialRouteId ? "PUT" : "POST",
         body: JSON.stringify({
           name,
@@ -3637,8 +3952,10 @@ function RoutePlannerView({
           circular,
           stops,
           estimatedKm: routeInfo?.km,
+          expectedStopIds: expectedStopIdsRef.current,
         }),
       });
+      expectedStopIdsRef.current = stops.map((s) => s.id);
       setSuccessMessage(`Rota "${name}" ${initialRouteId ? "atualizada" : "salva"} com sucesso no painel!`);
       if (onDone) onDone();
       setTimeout(() => setSuccessMessage(""), 5000);
@@ -3687,15 +4004,6 @@ function RoutePlannerView({
       ...stops.map((s, i) => `${i === 0 ? "Origem (CD):" : `Parada ${i}:`} ${s.name} - ${s.address}`),
     ].filter(Boolean).join("\n");
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(lines)}`, "_blank");
-  };
-
-  const toggleTheme = () => {
-    const current = document.documentElement.getAttribute("data-theme") || "light";
-    const next = current === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    if (next === "dark") document.documentElement.classList.add("dark");
-    else document.documentElement.classList.remove("dark");
-    localStorage.setItem("rw_theme", next);
   };
 
   return (
@@ -3757,6 +4065,28 @@ function RoutePlannerView({
           </div>
         )}
 
+        {routingTransfer && (
+          <div className="alert-warning-box" role="status">
+            <p>
+              Autorização do roteirizador preservada. Use Salvar e Atribuir; o rascunho manual não preserva esta autorização.
+            </p>
+            {transferInvalidated ? (
+              <p>Pedidos, destinos, origem ou data mudaram. Volte ao roteirizador para nova validação e autorização.</p>
+            ) : transferReordered ? (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={confirmedTransferChange}
+                  onChange={(e) => setConfirmedTransferChange(e.target.checked)}
+                />{" "}
+                Confirmo novamente a exceção ao mínimo para esta ordem de entregas.
+              </label>
+            ) : (
+              <p>Pedidos e destinos permanecem os mesmos da seleção autorizada.</p>
+            )}
+          </div>
+        )}
+
         <div className="planner-search-container" ref={searchContainerRef}>
           <div className="search planner-search">
             <input
@@ -3813,9 +4143,17 @@ function RoutePlannerView({
           )}
           {stops.map((s, i) => {
             const isOrigin = i === 0;
-            const loadOrder = !isOrigin && stops.length > 1 ? stops.length - i : null;
+            const loadOrder = !isOrigin && stops.length > 1 ? (s.loading_sequence ?? (stops.length - i)) : null;
             return (
-              <div key={s.id || `${s.lat}-${s.lng}-${i}`} className="stop-item-card">
+              <div key={s.id || `${s.lat}-${s.lng}-${i}`} className="stop-item-card" data-stop-index={i}>
+                {!isOrigin && (
+                  <StopDragHandle
+                    index={i}
+                    name={s.name}
+                    disabled={savingDraft}
+                    onMove={moveStop}
+                  />
+                )}
                 <span
                   className={`stop-item-badge ${isOrigin ? "origin" : ""}`}
                   style={{ backgroundColor: getStopColor(i) }}
@@ -3914,6 +4252,7 @@ function RoutePlannerView({
               className="travel-opt-more-btn"
               onClick={() => setShowExtraConfig(!showExtraConfig)}
               title="Mais configurações da rota (nome, data)"
+              aria-label="Configurações da rota"
             >
               <Settings size={12} />
             </button>
@@ -3937,12 +4276,11 @@ function RoutePlannerView({
           )}
 
           <div className="travel-options-row">
-            <span className="travel-opt-label">Critério de rota</span>
-            <div className="option-segmented-pills">
+            <div className="option-segmented-pills" role="group" aria-label="Critério de rota">
               <button
                 type="button"
                 className={`option-pill ${optimizeBy === "distance" ? "active" : ""}`}
-                onClick={() => setOptimizeBy("distance")}
+                onClick={() => optimizeBy === "distance" ? void optimize() : setOptimizeBy("distance")}
                 title="Otimiza automaticamente a ordem para a menor quilometragem total"
               >
                 Menor Distância
@@ -3950,7 +4288,7 @@ function RoutePlannerView({
               <button
                 type="button"
                 className={`option-pill ${optimizeBy === "time" ? "active" : ""}`}
-                onClick={() => setOptimizeBy("time")}
+                onClick={() => optimizeBy === "time" ? void optimize() : setOptimizeBy("time")}
                 title="Otimiza automaticamente a ordem para o menor tempo"
               >
                 Menor Tempo
@@ -3958,7 +4296,7 @@ function RoutePlannerView({
               <button
                 type="button"
                 className={`option-pill ${optimizeBy === "manual" ? "active" : ""}`}
-                onClick={() => setOptimizeBy("manual")}
+                onClick={() => optimizeBy === "manual" ? void optimize(true) : setOptimizeBy("manual")}
                 title="Mantém estritamente a ordem que você definir nas paradas"
               >
                 Ordem Manual
@@ -3985,13 +4323,14 @@ function RoutePlannerView({
 
           <div
             className="travel-options-toggle-row"
-            style={{ marginTop: 8 }}
             onClick={() => setShowStations(!showStations)}
             title="Ativa ou desativa a exibição dos postos de combustível e preços ao longo da rota"
           >
             <div className="travel-toggle-text">
               <b>Exibir postos no mapa</b>
-              <small>{showStations ? "Postos de combustível visíveis" : "Postos ocultados para limpar o mapa"}</small>
+              <small role={stationsError && showStations ? "status" : undefined}>
+                {showStations ? (stationsError || "Postos de combustível visíveis") : "Postos ocultados para limpar o mapa"}
+              </small>
             </div>
             <div className={`toggle-switch ${showStations ? "checked" : ""}`}>
               <div className="toggle-knob" />
@@ -4044,17 +4383,6 @@ function RoutePlannerView({
         <div className="planner-footer">
           {optimizing && <div className="route-calculating" role="status">Calculando trajeto pelas ruas…</div>}
 
-          <button
-            type="button"
-            className="btn-recalculate-primary"
-            disabled={stops.length < 2 || optimizing}
-            onClick={() => optimize()}
-            title={optimizeBy === "manual" ? "Atualizar traçado mantendo ordem manual das paradas" : "Recalcular melhor traçado e sequência (TSP)"}
-          >
-            <Zap size={14} className={optimizing ? "spin" : ""} />
-            <span>{optimizing ? "Calculando rota…" : (optimizeBy === "manual" ? "Atualizar Trajeto Manual" : "Recalcular Rota")}</span>
-          </button>
-
           <div className="actions-grid-2x2">
             <button
               type="button"
@@ -4102,7 +4430,7 @@ function RoutePlannerView({
             <button
               type="button"
               className="btn-save-compact btn-save-draft"
-              disabled={stops.length < 2 || optimizing || !routeInfo || savingDraft}
+              disabled={stops.length < 2 || optimizing || !routeInfo || savingDraft || !!routingTransfer}
               onClick={() => saveDraft()}
               title="Salvar rota como rascunho na Central"
             >
@@ -4111,7 +4439,7 @@ function RoutePlannerView({
             <button
               type="button"
               className="btn-save-compact btn-assign-direct"
-              disabled={stops.length < 2 || optimizing || !routeInfo}
+              disabled={stops.length < 2 || optimizing || !routeInfo || transferInvalidated || (transferReordered && !confirmedTransferChange)}
               onClick={() => setAssignModalOpen(true)}
               title="Salvar e atribuir rota a um motorista"
             >
@@ -4135,6 +4463,7 @@ function RoutePlannerView({
         </div>
       </div>
 
+      <PlannerDivider />
       <section className="planner-map" aria-label="Mapa da rota">
         {mobileShowMap && (
           <div className="planner-map-mobile-bar">
@@ -4150,7 +4479,13 @@ function RoutePlannerView({
             </span>
           </div>
         )}
-        <RouteMap stops={stops} geometry={geometry} visible={mobileShowMap} showStations={showStations} />
+        <RouteMap
+          stops={stops}
+          geometry={geometry}
+          visible={mobileShowMap}
+          showStations={showStations}
+          onStationsError={setStationsError}
+        />
       </section>
 
       <section id="planner-print-document" className="planner-print-sheet" aria-label="Romaneio da rota planejada">
@@ -4272,6 +4607,10 @@ function RoutePlannerView({
           stops={stops}
           routeInfo={routeInfo}
           defaultName={routeName}
+          defaultDate={routeDate}
+          routingTransfer={routingTransfer}
+          confirmedChange={confirmedTransferChange}
+          circular={circular}
           onClose={() => setAssignModalOpen(false)}
           onDone={(res) => {
             setAssignModalOpen(false);
@@ -4300,7 +4639,19 @@ function formatRouteTime(seconds: number) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
 }
 
-function RouteMap({ stops, geometry, visible, showStations = true }: { stops: Stop[]; geometry: [number, number][]; visible?: boolean; showStations?: boolean }) {
+function RouteMap({
+  stops,
+  geometry,
+  visible,
+  showStations = true,
+  onStationsError,
+}: {
+  stops: Stop[];
+  geometry: [number, number][];
+  visible?: boolean;
+  showStations?: boolean;
+  onStationsError?: (error: string | null) => void;
+}) {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
@@ -4516,21 +4867,35 @@ function RouteMap({ stops, geometry, visible, showStations = true }: { stops: St
       });
     };
 
+    let activeEffect = true;
     if (!showStations) {
       stationsLayer.clearLayers();
+      onStationsError?.(null);
     } else if (stationsDataRef.current) {
       renderStations(stationsDataRef.current);
     } else {
+      onStationsError?.(null);
       loadStations()
         .then((data) => {
-          if (Array.isArray(data)) {
+          if (activeEffect && Array.isArray(data)) {
             stationsDataRef.current = data;
             if (showStations) renderStations(data);
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (activeEffect) {
+            onStationsError?.(
+              err instanceof Error
+                ? err.message
+                : "Postos indisponíveis. Desative e ative para tentar novamente.",
+            );
+          }
+        });
     }
-  }, [stops, geometry, mapReady, showStations]);
+    return () => {
+      activeEffect = false;
+    };
+  }, [stops, geometry, mapReady, showStations, onStationsError]);
 
   return <div ref={mapElement} className="leaflet-route-map" />;
 }
@@ -4672,6 +5037,7 @@ function DriverApp({
             className="avatar-button"
             onClick={() => setShowDriverProfile(true)}
             title="Meu perfil e configurações"
+            aria-label="Meu perfil e configurações"
             style={{ cursor: "pointer" }}
           >
             {driver.name.slice(0, 2).toUpperCase()}
@@ -5765,10 +6131,19 @@ function Modal({
 }) {
   return (
     <div className="modal-backdrop">
-      <section className={`modal ${wide ? "wide" : ""}`}>
+      <section
+        className={`modal ${wide ? "wide" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <header>
           <h2>{title}</h2>
-          <button onClick={onClose}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={`Fechar ${title}`}
+          >
             <X />
           </button>
         </header>

@@ -176,7 +176,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
               }
               style={{
                 flex: 1,
-                minWidth: 280,
+                minWidth: "min(100%, 280px)",
                 padding: "14px 16px",
                 borderRadius: 12,
                 border: "1px solid var(--line)",
@@ -194,7 +194,7 @@ export function SSWTrackingView({ onBack }: { onBack?: () => void }) {
                 onChange={(e) => setCnpjPassword(e.target.value)}
                 placeholder="Senha (opcional)"
                 style={{
-                  minWidth: 180,
+                  minWidth: "min(100%, 180px)",
                   padding: "14px 16px",
                   borderRadius: 12,
                   border: "1px solid var(--line)",

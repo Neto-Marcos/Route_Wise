@@ -243,7 +243,7 @@ export function CommercialDashboard() {
           {/* ABA 1: RESUMO FINANCEIRO */}
           {tab === "resumo" && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))", gap: 10 }}>
                 {card("Faturamento no Mês", money(data.invoiced.value), `${data.invoicedNotes?.length ?? data.invoiced.orders} notas fiscais emitidas`, "#059669")}
                 {card("Carteira Total Mês", money(data.total.value), `${data.total.orders} pedidos no período`)}
                 {card("A Faturar (Pendente)", money(data.pending.value), `${data.pending.orders} pedidos com saldo pendente`, "#d97706")}
@@ -260,7 +260,7 @@ export function CommercialDashboard() {
           {tab === "notas" && (
             <div>
               {/* Cards de Métricas de Faturamento */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 10, marginBottom: 14 }}>
                 {card("Total Faturado (NF)", money(data.invoicedNotesSummary?.totalValue ?? data.invoiced.value), "Soma das notas fiscais do mês", "#059669")}
                 {card("Quantidade de NFs", String(data.invoicedNotes?.length ?? 0), "Notas emitidas no período", "#2563eb")}
                 {card("Peso Total Faturado", `${(data.invoicedNotesSummary?.totalWeightKg ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kg`, "Carga despachada / faturada")}
@@ -274,8 +274,8 @@ export function CommercialDashboard() {
 
               {/* Filtros e Barra de Ações */}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 260 }}>
-                  <div style={{ position: "relative", flex: 1 }}>
+                <div className="commercial-note-filters" style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+                  <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
                     <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "var(--muted)" }} />
                     <input
                       type="text"
@@ -397,7 +397,7 @@ export function CommercialDashboard() {
 
           {/* ABA 3: FRETE CIF vs FOB */}
           {tab === "frete" && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: 10 }}>
               {card("CIF", money(data.freight.CIF.value), `${data.freight.CIF.orders} pedidos · entrega pela casa`, "#2563eb")}
               {card("FOB", money(data.freight.FOB.value), `${data.freight.FOB.orders} pedidos · retirada pelo cliente`, "#7c3aed")}
               {data.freight.OUTRO.orders > 0 &&
@@ -408,7 +408,7 @@ export function CommercialDashboard() {
           {/* ABA 4: ESTOQUE FILIAL 281 */}
           {tab === "estoque" && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 10 }}>
                 {card("Linhas com saldo", `${data.stock.inStockLines}/${data.stock.totalLines}`, `${data.stock.coveragePct}% disponíveis`, "#059669")}
                 {card("Quantidade solicitada", data.total.requestedQty.toLocaleString("pt-BR"), "itens da carteira")}
                 {card("Atendida pelo saldo 281", data.total.availableQty.toLocaleString("pt-BR"), "quantidade disponível", "#0f9f78")}

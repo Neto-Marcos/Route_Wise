@@ -1,60 +1,124 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { generateRoutes, type EngineConfig } from '@/lib/route-engine';
-import type { OrderRow } from '@/lib/spreadsheet-parser';
-import { resolveOrderCoordinates } from '@/lib/city-geocoding';
+import { NextRequest, NextResponse } from "next/server";
+import { generateRoutes, type EngineConfig } from "@/lib/route-engine";
+import { geocodeOrders } from "@/lib/city-geocoder";
+import { getSession } from "@/lib/auth";
+import { audit, query } from "@/lib/db";
+import { randomUUID } from "node:crypto";
+import {
+  hashRoute,
+  loadActiveRoutingWorkbook,
+  requireRoutingDispatcher,
+  RoutingError,
+  signRoutingProof,
+  validateMinimumExceptions,
+  verifyAndSelectRoutingOrders,
+} from "@/lib/routing-security";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
-/**
- * POST /api/routerizador/generate
- * Body JSON: { rows: OrderRow[], config: EngineConfig }
- * Retorna: EngineResult (routes + stats + unassigned)
- */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { rows: OrderRow[]; config: Partial<EngineConfig> };
-
-    if (!Array.isArray(body.rows) || body.rows.length === 0) {
-      return NextResponse.json({ error: 'Nenhum pedido fornecido.' }, { status: 400 });
+    const session = await requireRoutingDispatcher(
+      { query },
+      await getSession("dispatcher")
+    );
+    const body = await req.json();
+    if (
+      !Array.isArray(body.rows) ||
+      body.rows.length === 0 ||
+      body.rows.some((r: any) => !r || typeof r.orderId !== "string")
+    ) {
+      return NextResponse.json({ error: "Nenhum pedido fornecido." }, { status: 400 });
     }
-
-    // Se a importação informa o frete, somente CIF pode criar rotas da frota.
-    // Arquivos genéricos sem essa coluna continuam compatíveis com o motor.
-    const hasFreightClassification = body.rows.some((row) => row.freightType !== undefined);
-    const eligibleRows = hasFreightClassification
-      ? body.rows.filter((row) => row.freightType === 'CIF')
-      : body.rows;
-    if (eligibleRows.length === 0) {
-      return NextResponse.json({ error: 'Não há pedidos CIF elegíveis para a frota própria.' }, { status: 422 });
+    if (body.config?.enforceMinOrderValue === false) {
+      throw new RoutingError(
+        "Use a seleção e confirmação de exceções; o mínimo global permanece ativo.",
+        428
+      );
     }
-
+    const wb = await loadActiveRoutingWorkbook({ query }, session.companyId);
+    const orders = await verifyAndSelectRoutingOrders(
+      { query },
+      session.companyId,
+      wb,
+      body.rows.map((r: any) => r.orderId)
+    );
+    const exceptions = validateMinimumExceptions(orders, body.minimumException);
+    if (orders.length === 0) {
+      return NextResponse.json(
+        { error: "Não há pedidos CIF elegíveis para a frota própria." },
+        { status: 422 }
+      );
+    }
     const config: EngineConfig = {
-      maxVolumeM3:     body.config?.maxVolumeM3     ?? 30,
-      maxWeightKg:     body.config?.maxWeightKg     ?? 10000,
+      maxVolumeM3: body.config?.maxVolumeM3 ?? 30,
+      maxWeightKg: body.config?.maxWeightKg ?? 10000,
       clusterRadiusKm: body.config?.clusterRadiusKm ?? 80,
-      routeDate:       body.config?.routeDate       ?? new Date().toISOString().slice(0, 10),
-      originName:      body.config?.originName      ?? 'Filial',
-      originLat:       body.config?.originLat       ?? -7.2306,  // Campina Grande default
-      originLng:       body.config?.originLng       ?? -35.8811,
-      minVolumeM3:     body.config?.minVolumeM3     ?? 10,
-      corridorAngle:   body.config?.corridorAngle   ?? 60,
+      routeDate: body.config?.routeDate ?? new Date().toISOString().slice(0, 10),
+      originName: body.config?.originName ?? "Filial",
+      originLat: body.config?.originLat ?? -7.2306,
+      originLng: body.config?.originLng ?? -35.8811,
+      minVolumeM3: body.config?.minVolumeM3 ?? 10,
+      corridorAngle: body.config?.corridorAngle ?? 60,
       prioritizeAging: body.config?.prioritizeAging ?? true,
-      returnToOrigin:  body.config?.returnToOrigin  ?? false,
-      roadFactor:      body.config?.roadFactor      ?? 1.22,
-      averageSpeed:    body.config?.averageSpeed    ?? 55,
-      serviceMinutes:  body.config?.serviceMinutes  ?? 40,
-      maxHours:        body.config?.maxHours        ?? 72,
-      enforceMinOrderValue: body.config?.enforceMinOrderValue ?? true,
+      returnToOrigin: body.config?.returnToOrigin ?? false,
+      roadFactor: body.config?.roadFactor ?? 1.22,
+      averageSpeed: body.config?.averageSpeed ?? 55,
+      serviceMinutes: body.config?.serviceMinutes ?? 40,
+      maxHours: body.config?.maxHours ?? 72,
+      enforceMinOrderValue: true,
+      minimumExceptions: { confirmed: true, orderIds: exceptions },
     };
-
-    // A cidade/UF da planilha é a fonte de verdade. Antes de montar a rota,
-    // confirma coordenadas no cache cartográfico e consulta o mapa apenas para
-    // cidades ainda desconhecidas.
-    await resolveOrderCoordinates(eligibleRows);
-    const result = generateRoutes(eligibleRows, config);
+    if (![config.maxVolumeM3, config.maxWeightKg].every((v) => Number.isFinite(v) && v > 0)) {
+      throw new RoutingError("Capacidade inválida.");
+    }
+    if (
+      !Number.isFinite(config.originLat) ||
+      !Number.isFinite(config.originLng) ||
+      Math.abs(config.originLat) > 90 ||
+      Math.abs(config.originLng) > 180 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(config.routeDate)
+    ) {
+      throw new RoutingError("Origem ou data inválida.");
+    }
+    await geocodeOrders(orders);
+    const result = generateRoutes(orders, config);
+    const authorizationId = exceptions.length ? randomUUID() : null;
+    if (authorizationId) {
+      await audit(
+        "dispatcher",
+        session.dispatcherId,
+        "authorize_minimum_exception",
+        "routing_selection",
+        authorizationId,
+        {
+          companyId: session.companyId,
+          sourceHash: wb.hash,
+          importId: wb.importId,
+          orderIds: exceptions,
+          authorizedAt: new Date().toISOString(),
+          selection: orders
+            .filter((o) => exceptions.includes(o.orderId))
+            .map((o) => ({ orderId: o.orderId, uf: o.uf, value: o.totalValue })),
+        }
+      );
+    }
+    result.routingProof = await signRoutingProof({
+      companyId: session.companyId,
+      actor: session.dispatcherId,
+      sourceHash: wb.hash,
+      importId: wb.importId,
+      config,
+      exceptions,
+      routeHashes: result.routes.map(hashRoute),
+      authorizationId,
+    });
     return NextResponse.json(result);
   } catch (err) {
-    console.error('[routerizador/generate]', err);
-    return NextResponse.json({ error: 'Erro ao gerar rotas.' }, { status: 500 });
+    if (err instanceof RoutingError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    console.error("[routerizador/generate]", err);
+    return NextResponse.json({ error: "Erro ao gerar rotas." }, { status: 500 });
   }
 }

@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  hasRouteMinimumException,
+  loadActiveRoutingWorkbook,
+  requireRoutingDispatcher,
+  RoutingError,
+  verifyAndSelectRoutingOrders,
+} from "@/lib/routing-security";
+import { checkOrderMinEligibility } from "@/lib/route-engine";
 import { compare, hash } from "bcryptjs";
 import { randomUUID } from "crypto";
 import { existsSync } from "node:fs";
@@ -140,7 +148,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p[0] === "stations") {
       try {
         const response = await fetch(
-          "https://sistema.efleet.digital:8443/fleet/ws/api.php",
+          "https://mapa-efleet.justit.cloud/ws/api.php",
           {
             headers: { Operacao: "ViewStations", Accept: "application/json" },
             signal: AbortSignal.timeout(8000),
@@ -148,10 +156,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           },
         );
         if (!response.ok) throw new Error("Rede de postos indisponível");
-        return json(await response.json());
+        const data = await response.json();
+        if (!Array.isArray(data) || !data.length) throw new Error("Resposta inválida da rede de postos");
+        return json(data);
       } catch (err) {
-        console.warn("Stations fetch failed, returning empty list fallback:", err);
-        return json([]);
+        console.warn("Stations fetch failed:", err);
+        return json({ error: "A rede eFleet está indisponível. Desative e ative os postos para tentar novamente." }, 502);
       }
     }
     if (p[0] === "road-places") {
@@ -776,6 +786,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return json(rows[0], 201);
     }
     if (p[0] === "routes" && p.length === 1 && isDispatcher) {
+      const orderIds = Array.isArray(data.stops) ? data.stops.flatMap((s: any) => s.order_ids || []) : [];
+      if (orderIds.length) {
+        try {
+          await requireRoutingDispatcher({ query }, session);
+          const wb = await loadActiveRoutingWorkbook({ query }, session!.companyId!);
+          if ((await verifyAndSelectRoutingOrders({ query }, session!.companyId!, wb, orderIds)).some((o) => !checkOrderMinEligibility(o).eligible)) {
+            return json({ error: "Pedido abaixo do mínimo exige transferência autorizada pelo roteirizador." }, 428);
+          }
+        } catch (err) {
+          if (err instanceof RoutingError) return json({ error: err.message }, err.status);
+          throw err;
+        }
+      }
       const client = await db.connect();
       try {
         await client.query("BEGIN");
@@ -817,6 +840,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       p[2] === "assign" &&
       isDispatcher
     ) {
+      if (await hasRouteMinimumException({ query }, p[1], session!.companyId!)) {
+        return json({ error: "Rota com exceção auditada: nova autorização necessária para reatribuir." }, 409);
+      }
       const { rows } = await query(
         "UPDATE routes SET driver_id=$2,vehicle_id=$3,status='assigned' WHERE id=$1 AND company_id=$4 AND status IN ('draft','assigned') AND EXISTS(SELECT 1 FROM drivers WHERE id=$2 AND company_id=$4 AND active=true) AND EXISTS(SELECT 1 FROM vehicles WHERE id=$3 AND company_id=$4 AND active=true) RETURNING public_id",
         [p[1], data.driverId, data.vehicleId, session!.companyId],
@@ -1192,6 +1218,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
         if (!current.rows[0]) {
           await client.query("ROLLBACK");
           return json({ error: "Rota não encontrada" }, 404);
+        }
+        if (await hasRouteMinimumException(client, p[1], session.companyId!)) {
+          await client.query("ROLLBACK");
+          return json({ error: "Rota com exceção auditada: volte ao roteirizador para nova autorização antes de alterar." }, 409);
         }
         if (!["draft", "assigned"].includes(String(current.rows[0].status))) {
           await client.query("ROLLBACK");

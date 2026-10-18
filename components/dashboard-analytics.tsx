@@ -179,7 +179,7 @@ export function DashboardAnalytics({
       </div>
 
       {/* Faixa de KPIs Logísticos Executivos */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))", gap: 10, marginTop: 14 }}>
         <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--card-subtle)", border: "1px solid var(--line)" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Nível de Serviço (OTIF)</span>
           <div style={{ fontSize: 20, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{data.otifPct == null ? "--" : `${data.otifPct}%`}</div>
@@ -203,7 +203,7 @@ export function DashboardAnalytics({
       </div>
 
       {/* Grid Principal: Meta vs Realizado */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 14, marginTop: 14 }}>
         
         {/* Card 1: Meta de KM com Barra de Progresso e Edição pelo ADM */}
         <div

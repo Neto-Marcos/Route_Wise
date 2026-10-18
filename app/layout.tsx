@@ -1,6 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
+import "./ui-refinement.css";
+import "./mobile-ui.css";
+import "./account-menu.css";
+import "./planner-resize.css";
+import "./wide-ui.css";
 
 export const metadata: Metadata = {
   title: "Criar Rota — Gestão de Rotas",
@@ -36,8 +42,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
   themeColor: "#14243A",
 };
@@ -48,7 +52,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <Script src="/local-network-errors.js" strategy="beforeInteractive" />
+      </head>
       <body>{children}</body>
     </html>
   );

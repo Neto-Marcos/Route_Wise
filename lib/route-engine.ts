@@ -105,6 +105,10 @@ export interface EngineConfig {
   maxHours?: number;
   /** Quando true, valida e bloqueia pedidos abaixo do valor mínimo do estado */
   enforceMinOrderValue?: boolean;
+  minimumExceptions?: {
+    confirmed: boolean;
+    orderIds: string[];
+  };
 }
 
 export interface SuggestedStop {
@@ -153,6 +157,7 @@ export interface EngineResult {
     totalVolumeM3: number;
     avgOccupancyPct: number;
   };
+  routingProof?: string;
 }
 
 // ─── Dicionário geográfico ─────────────────────────────────────────────────
@@ -398,7 +403,8 @@ export function generateRoutes(orders: OrderRow[], config: EngineConfig): Engine
     if (o.volumeM3 > maxVolumeM3 || o.weightKg > maxWeightKg) { unassigned.push(o); continue; }
     if (config.enforceMinOrderValue) {
       const eligibility = checkOrderMinEligibility(o);
-      if (!eligibility.eligible) {
+      const isException = config.minimumExceptions?.confirmed === true && config.minimumExceptions.orderIds.includes(o.orderId);
+      if (!eligibility.eligible && !isException) {
         o.extra = { ...o.extra, unassignedReason: eligibility.reason ?? "Abaixo do pedido mínimo" };
         unassigned.push(o);
         continue;

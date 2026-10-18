@@ -1,0 +1,29 @@
+.planner-fullscreen { position: relative; height: var(--planner-available-height, 70dvh) !important; min-height: 0 !important; max-height: none !important; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.planning-workspace > .dashboard { height: 100dvh !important; box-sizing: border-box; }
+.planning-workspace .planner-fullscreen { flex: 0 0 var(--planner-available-height, 70dvh) !important; }
+.planner-fullscreen > .planner-panel { min-height: 0; height: 100% !important; overflow-y: auto !important; overscroll-behavior: contain; }
+.planner-fullscreen > .planner-map { min-height: 0 !important; height: 100% !important; max-height: 100% !important; overflow: hidden; isolation: isolate; }
+.planner-fullscreen .leaflet-route-map { width: 100%; height: 100% !important; min-height: 0; }
+.planner-divider { display: none; }
+@media screen and (min-width: 701px) {
+  .planner-fullscreen .planner-mobile-toggle, .planner-fullscreen .planner-map-mobile-bar { display: none !important; }
+  .planning-workspace .planner-fullscreen, .planner-fullscreen {
+    display: grid !important; grid-template-columns: minmax(0, var(--planner-panel-width, 47%)) 12px minmax(0, 1fr) !important;
+    gap: 0 !important; width: 100%;
+  }
+  .planner-fullscreen > .planner-panel,
+  .planner-fullscreen.mobile-show-map > .planner-panel { grid-column: 1; min-width: 0; display: flex !important; }
+  .planner-fullscreen > .planner-map,
+  .planner-fullscreen:not(.mobile-show-map) > .planner-map { grid-column: 3; min-width: 0; display: block !important; position: relative !important; inset: auto !important; }
+  .planner-divider { grid-column: 2; display: flex; align-items: center; justify-content: center; position: relative; z-index: 2; cursor: col-resize; touch-action: none; user-select: none; background: var(--card); border-inline: 1px solid var(--line); }
+  .planner-divider::after { content: ''; width: 3px; height: 48px; border-radius: 3px; background: var(--muted); }
+  .planner-divider:hover, .planner-divider.dragging { background: var(--card-hover); }
+  .planner-divider:hover::after, .planner-divider.dragging::after { background: var(--green); }
+  .planner-divider:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+}
+@media screen and (max-width: 700px) {
+  .planner-fullscreen > .planner-panel, .planner-fullscreen > .planner-map { width: 100%; }
+  .planner-fullscreen.mobile-show-map > .planner-panel { display: none !important; }
+  .planner-fullscreen.mobile-show-map > .planner-map { display: block !important; }
+  .planner-fullscreen:not(.mobile-show-map) > .planner-map { display: none !important; }
+}

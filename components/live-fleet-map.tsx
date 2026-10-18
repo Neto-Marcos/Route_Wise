@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type RouteMapItem = {
   id: string;
   name: string;
   status: string;
+  driver_id?: string | null;
   driver_name?: string;
   vehicle_name?: string;
   plate?: string;
@@ -12,6 +13,46 @@ export type RouteMapItem = {
   delivered: number;
   last_location?: { lat: number; lng: number; recorded_at: string };
 };
+
+export type ActiveRoutePoint = RouteMapItem;
+
+export function formatLastPositionTime(
+  recordedAt?: string | null,
+  now = Date.now(),
+) {
+  if (!recordedAt || !Number.isFinite(Date.parse(recordedAt))) {
+    return "Horário não disponível";
+  }
+  const ts = Date.parse(recordedAt);
+  const formatted = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(ts));
+  const diff = now - ts;
+  const relative =
+    diff < 0
+      ? "horário informado pela origem"
+      : diff < 60_000
+        ? "há menos de 1 min"
+        : diff < 3_600_000
+          ? `há ${Math.floor(diff / 60_000)} min`
+          : `há ${Math.floor(diff / 3_600_000)} h`;
+  return `${formatted} · ${relative}`;
+}
+
+function escapeHtml(str: string) {
+  const map: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
+  return str.replace(/[&<>"']/g, (ch) => map[ch]);
+}
 
 export function LiveFleetMap({
   routes,
@@ -24,11 +65,14 @@ export function LiveFleetMap({
   const mapInstance = useRef<import("leaflet").Map | null>(null);
   const markersLayer = useRef<import("leaflet").LayerGroup | null>(null);
   const initialFitDone = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const activeRoutesWithLoc = useMemo(
     () =>
       routes.filter(
-        (r) => r.last_location && (r.status === "active" || r.status === "assigned"),
+        (r) =>
+          r.last_location &&
+          (r.status === "active" || r.status === "assigned"),
       ),
     [routes],
   );
@@ -36,6 +80,7 @@ export function LiveFleetMap({
   // Initialize map once
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
 
     import("leaflet").then((L) => {
       if (cancelled || !mapElement.current) return;
@@ -59,6 +104,12 @@ export function LiveFleetMap({
 
       const layer = L.layerGroup().addTo(map);
       markersLayer.current = layer;
+      setMapReady(true);
+
+      resizeObserver = new ResizeObserver(() =>
+        map.invalidateSize({ pan: false }),
+      );
+      resizeObserver.observe(mapElement.current);
     });
 
     if (typeof window !== "undefined" && onSelectRoute) {
@@ -67,6 +118,7 @@ export function LiveFleetMap({
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       if (mapInstance.current) {
         mapInstance.current.remove();
         mapInstance.current = null;
@@ -90,89 +142,77 @@ export function LiveFleetMap({
 
   // Update markers smoothly without re-creating map on 10s poll
   useEffect(() => {
-    if (!mapInstance.current || !markersLayer.current) {
-      // Map may still be loading Leaflet module, check again on next tick
-      const timer = setTimeout(() => {
-        if (!mapInstance.current || !markersLayer.current) return;
-        renderMarkers();
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-    renderMarkers();
+    if (!mapReady || !mapInstance.current || !markersLayer.current) return;
 
-    function renderMarkers() {
-      import("leaflet").then((L) => {
-        if (!mapInstance.current || !markersLayer.current) return;
-        const layer = markersLayer.current;
-        layer.clearLayers();
+    import("leaflet").then((L) => {
+      if (!mapInstance.current || !markersLayer.current) return;
+      const layer = markersLayer.current;
+      layer.clearLayers();
 
-        const latLngs: import("leaflet").LatLng[] = [];
+      const latLngs: import("leaflet").LatLng[] = [];
 
-        activeRoutesWithLoc.forEach((r) => {
-          if (!r.last_location) return;
-          const { lat, lng, recorded_at } = r.last_location;
-          const isActive = r.status === "active";
-          const point = L.latLng(lat, lng);
-          latLngs.push(point);
+      activeRoutesWithLoc.forEach((r) => {
+        if (!r.last_location) return;
+        const { lat, lng, recorded_at } = r.last_location;
+        const isActive = r.status === "active";
+        const point = L.latLng(lat, lng);
+        latLngs.push(point);
 
-          const icon = L.divIcon({
-            className: "fleet-marker-wrap",
-            html: `<div class="fleet-marker ${isActive ? "active" : ""}">
+        const icon = L.divIcon({
+          className: "fleet-marker-wrap",
+          html: `<div class="fleet-marker ${isActive ? "active" : ""}">
               <span class="fleet-icon">🚛</span>
               ${isActive ? '<span class="fleet-pulse"></span>' : ""}
             </div>`,
-            iconSize: [36, 36],
-            iconAnchor: [18, 18],
-          });
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+        });
 
-          const timeStr = recorded_at
-            ? new Date(recorded_at).toLocaleTimeString("pt-BR", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "--:--";
+        const timeStr = formatLastPositionTime(recorded_at);
 
-          const popupHtml = `
+        const popupHtml = `
             <div class="fleet-popup">
               <div class="popup-title">
-                <strong>${r.name}</strong>
+                <strong>${escapeHtml(r.name)}</strong>
                 <span class="popup-status ${r.status}">${isActive ? "Em rota" : "Atribuída"}</span>
               </div>
               <p class="popup-meta">
-                <span>👤 ${r.driver_name || "Motorista"}</span>
-                <span>🚛 ${r.plate || r.vehicle_name || "Veículo"}</span>
+                <span>👤 ${escapeHtml(r.driver_name || "Motorista não informado")}</span>
+                <span>🚛 ${escapeHtml([r.vehicle_name, r.plate].filter(Boolean).join(" · ") || "Veículo não informado")}</span>
               </p>
               <div class="popup-progress">
                 <span>Progresso: <b>${r.delivered}/${r.deliveries}</b></span>
-                <small>Último sinal: ${timeStr}</small>
+                <small>Última posição: ${escapeHtml(timeStr)}</small>
               </div>
               ${
                 onSelectRoute
-                  ? `<button class="popup-button" onclick="window.__selectRoute('${r.id}')">Ver detalhes da rota</button>`
+                  ? `<button type="button" class="popup-button" onclick="window.__selectRoute(${escapeHtml(JSON.stringify(r.id))})">Ver rota</button>`
                   : ""
               }
             </div>
           `;
 
-          const marker = L.marker([lat, lng], { icon }).bindPopup(popupHtml);
-          layer.addLayer(marker);
-        });
-
-        // Fit bounds only once initially if positions are available
-        if (!initialFitDone.current && latLngs.length > 0) {
-          initialFitDone.current = true;
-          if (latLngs.length === 1) {
-            mapInstance.current.setView(latLngs[0], 14);
-          } else {
-            mapInstance.current.fitBounds(L.latLngBounds(latLngs), {
-              padding: [40, 40],
-              maxZoom: 15,
-            });
-          }
-        }
+        const marker = L.marker([lat, lng], {
+          icon,
+          title: `${r.driver_name || "Motorista não informado"} · ${r.name}`,
+          alt: `Última posição da rota ${r.name}`,
+        }).bindPopup(popupHtml);
+        layer.addLayer(marker);
       });
-    }
-  }, [activeRoutesWithLoc, onSelectRoute]);
+
+      if (!initialFitDone.current && latLngs.length > 0) {
+        initialFitDone.current = true;
+        if (latLngs.length === 1) {
+          mapInstance.current.setView(latLngs[0], 14);
+        } else {
+          mapInstance.current.fitBounds(L.latLngBounds(latLngs), {
+            padding: [40, 40],
+            maxZoom: 15,
+          });
+        }
+      }
+    });
+  }, [mapReady, activeRoutesWithLoc, onSelectRoute]);
 
   const recenter = () => {
     if (!mapInstance.current || activeRoutesWithLoc.length === 0) return;
@@ -196,12 +236,12 @@ export function LiveFleetMap({
       <div className="fleet-map-toolbar">
         <div className="fleet-map-info">
           <span className="live-badge">
-            <i /> Ao vivo
+            <i /> Posições registradas
           </span>
           <small>
             {activeRoutesWithLoc.length > 0
-              ? `${activeRoutesWithLoc.length} motorista(s) transmitindo GPS`
-              : "Nenhum sinal GPS ativo no momento"}
+              ? `${activeRoutesWithLoc.length} rota(s) com última posição recebida`
+              : "Nenhuma posição recebida para as rotas atuais"}
           </small>
         </div>
         {activeRoutesWithLoc.length > 0 && (
@@ -222,7 +262,14 @@ export function LiveFleetMap({
 
 function CrosshairIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
       <circle cx="12" cy="12" r="7" />
       <line x1="12" y1="2" x2="12" y2="5" />
       <line x1="12" y1="19" x2="12" y2="22" />

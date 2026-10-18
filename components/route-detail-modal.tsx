@@ -152,6 +152,148 @@ function SavedRouteMap({
   return <div ref={containerRef} style={{ height: 300, borderRadius: 12, overflow: "hidden", border: "1px solid var(--line)", marginTop: 10 }} />;
 }
 
+function RouteDetailSkeleton({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-label="Carregando detalhes da rota"
+      onClick={onClose}
+    >
+      <div
+        className="modal wide detail-modal-shell route-detail-skeleton"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(100%, 780px)" }}
+      >
+        <header
+          className="detail-modal-header"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            padding: "18px 22px",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "60%" }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div className="ui-skeleton ui-skeleton-badge" style={{ width: 80, height: 22 }} />
+              <div className="ui-skeleton ui-skeleton-badge" style={{ width: 100, height: 22 }} />
+            </div>
+            <div className="ui-skeleton ui-skeleton-title" style={{ width: "75%", height: 24 }} />
+            <div className="ui-skeleton ui-skeleton-text" style={{ width: "90%", height: 14 }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div className="ui-skeleton ui-skeleton-button" style={{ width: 110, height: 34 }} />
+            <button
+              type="button"
+              onClick={onClose}
+              title="Fechar"
+              style={{
+                display: "grid",
+                placeItems: "center",
+                width: 34,
+                height: 34,
+                borderRadius: 9,
+                border: 0,
+                background: "var(--card-subtle)",
+                cursor: "pointer",
+                color: "var(--muted)",
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </header>
+        <div className="detail-modal-body" style={{ padding: "18px 22px" }}>
+          <div
+            className="detail-metrics-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 12,
+              marginBottom: 18,
+            }}
+          >
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="detail-metric-card"
+                style={{
+                  padding: 14,
+                  borderRadius: 12,
+                  background: "var(--card-subtle)",
+                  border: "1px solid var(--line)",
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                }}
+              >
+                <div className="ui-skeleton ui-skeleton-circle" style={{ width: 36, height: 36 }} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                  <div className="ui-skeleton ui-skeleton-text" style={{ width: "40%", height: 11 }} />
+                  <div className="ui-skeleton ui-skeleton-title" style={{ width: "70%", height: 16 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div className="ui-skeleton ui-skeleton-text" style={{ width: 140, height: 16, marginBottom: 10 }} />
+            <div className="ui-skeleton ui-skeleton-box map-skeleton-frame" style={{ height: 220, borderRadius: 12 }} />
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div className="ui-skeleton ui-skeleton-text" style={{ width: 160, height: 16, marginBottom: 10 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: 14,
+                    borderRadius: 12,
+                    background: "var(--card-subtle)",
+                    border: "1px solid var(--line)",
+                  }}
+                >
+                  <div className="ui-skeleton ui-skeleton-badge" style={{ width: 60, height: 18, marginBottom: 8 }} />
+                  <div className="ui-skeleton ui-skeleton-title" style={{ width: "50%", height: 18, marginBottom: 6 }} />
+                  <div className="ui-skeleton ui-skeleton-text" style={{ width: "70%", height: 12 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="ui-skeleton ui-skeleton-text" style={{ width: 180, height: 16, marginBottom: 10 }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    background: "var(--card-subtle)",
+                    border: "1px solid var(--line)",
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <div className="ui-skeleton ui-skeleton-circle" style={{ width: 24, height: 24 }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                    <div className="ui-skeleton ui-skeleton-title" style={{ width: "45%", height: 15 }} />
+                    <div className="ui-skeleton ui-skeleton-text" style={{ width: "75%", height: 12 }} />
+                  </div>
+                  <div className="ui-skeleton ui-skeleton-badge" style={{ width: 64, height: 20 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RouteDetailModal({
   routeId,
   onClose,
@@ -200,17 +342,16 @@ export function RouteDetailModal({
     finally { setEditingStop(null); }
   };
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   if (loading) {
-    return (
-      <div className="modal-backdrop">
-        <div className="modal wide">
-          <div className="modal-loading">
-            <div className="spinner" />
-            <p>Carregando informações da rota…</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <RouteDetailSkeleton onClose={onClose} />;
   }
 
   if (error || !route) {

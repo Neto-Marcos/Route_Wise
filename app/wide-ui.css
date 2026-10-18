@@ -1,0 +1,79 @@
+/* Wide-screen scale in CSS pixels; no zoom/transform that would distort maps. */
+@media screen and (min-width: 1600px) {
+  :root {
+    --wide-body: clamp(16px, calc(.5vw + 8px), 22px);
+    --wide-secondary: clamp(14px, calc(.3vw + 9px), 18px);
+    --wide-title: clamp(30px, calc(1.1vw + 12px), 44px);
+    --wide-section: clamp(22px, calc(.7vw + 9px), 30px);
+    --wide-space: clamp(24px, 1.2vw, 40px);
+    --wide-sidebar: clamp(280px, 12vw, 360px);
+  }
+  body { font-size: var(--wide-body); line-height: 1.5; }
+  .workspace.managed-workspace { grid-template-columns: var(--wide-sidebar) minmax(0, 1fr) !important; }
+  .workspace.managed-workspace.sidebar-collapsed { grid-template-columns: 80px minmax(0, 1fr) !important; }
+  .managed-workspace > .dashboard { padding: var(--wide-space) !important; }
+  .dashboard h1 { font-size: var(--wide-title) !important; line-height: 1.2 !important; }
+  .dashboard h2 { font-size: var(--wide-section) !important; line-height: 1.35 !important; }
+  .dashboard h3 { font-size: var(--wide-body) !important; line-height: 1.4; }
+  .dashboard :is(p, label, td) { font-size: var(--wide-body) !important; line-height: 1.5 !important; }
+  .dashboard :is(small, th), .dashboard .eyebrow,
+  .dashboard span,
+  .dashboard [style*="font-size: 11px"], .dashboard [style*="font-size: 12px"], .dashboard [style*="font-size: 13px"] { font-size: var(--wide-secondary) !important; line-height: 1.5; }
+  .dashboard :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+    min-height: 48px; padding: 12px 16px; font-size: var(--wide-body) !important; line-height: 1.4;
+  }
+  .dashboard .button, .dashboard .btn-link, .planner-header button,
+  .planner-panel button, .account-menu > summary {
+    min-height: 48px !important; height: auto; padding: 12px 18px !important;
+    font-size: var(--wide-body) !important; line-height: 1.4 !important;
+  }
+  .dashboard .button svg, .planner-panel button svg { width: 20px; height: 20px; flex-shrink: 0; }
+  .dashboard .panel, .dashboard .card, .dashboard .metric { padding: var(--wide-space); border-radius: 16px; }
+  .metric > strong, .metric > b { font-size: clamp(28px, 1.5vw, 48px) !important; }
+  .sidebar .logo { font-size: clamp(24px, 1vw, 32px); }
+  .managed-workspace .sidebar nav button:not(.sidebar-nav-group-title) { min-height: 52px; padding: 12px !important; gap: 12px; }
+  .managed-workspace .sidebar nav button:not(.sidebar-nav-group-title) span { font-size: var(--wide-body) !important; line-height: 1.4; }
+  .managed-workspace .sidebar nav button svg { width: 22px; height: 22px; }
+  .managed-workspace .sidebar .sidebar-nav-group-title { min-height: 44px; font-size: var(--wide-secondary) !important; }
+  .managed-workspace .sidebar .sidebar-nav-group-title span { font-size: inherit !important; }
+  .sidebar-collapse { min-height: 48px; font-size: var(--wide-secondary) !important; }
+  .planner-panel { padding: 20px !important; }
+  .planner-panel :is(span, strong, b) { font-size: var(--wide-body); }
+  .planner-panel .planner-footer { gap: 12px; }
+  .leaflet-fleet-map { height: clamp(480px, 68dvh, 1500px) !important; }
+  .fleet-map-toolbar { padding: 16px 20px; }
+  .fleet-map-info { gap: 16px; }
+  .live-badge { padding: 6px 12px; font-size: var(--wide-secondary); }
+  .leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; font-size: 28px !important; }
+  .account-menu-panel { width: min(420px, calc(100vw - 48px)); padding: 24px; }
+  .dashboard .account-menu-panel h2 { font-size: var(--wide-body) !important; }
+  .dashboard .account-menu-panel :is(button, select), .account-theme-row, .account-identity strong { font-size: var(--wide-body) !important; min-height: 48px; }
+  .account-identity span, .account-permissions p { font-size: var(--wide-secondary) !important; }
+  .account-theme-row { gap: 16px; }
+  /* Planner controls stay compact even when the surrounding text scales up. */
+  .dashboard .planner-panel button,
+  .dashboard .planner-panel .button {
+    min-height: 40px !important; height: auto !important; padding: 8px 12px !important;
+    font-size: clamp(14px, .7vw, 16px) !important; line-height: 18px !important;
+  }
+  .dashboard .planner-panel button svg { width: 16px; height: 16px; }
+  .dashboard .planner-panel .planner-footer { gap: 8px; }
+  .dashboard .planner-panel .option-pill {
+    min-height: 36px !important; padding: 6px 8px !important;
+    font-size: clamp(13px, .7vw, 15px) !important; line-height: 18px !important;
+    white-space: normal !important; text-overflow: clip !important; overflow: visible !important;
+  }
+  .planner-panel .option-segmented-pills { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .dashboard .planner-panel .travel-opt-title,
+  .dashboard .planner-panel .travel-opt-title span { font-size: 12px !important; line-height: 18px !important; }
+  .dashboard .planner-panel .travel-options-toggle-row,
+  .dashboard .planner-panel .travel-options-toggle-row span { font-size: 14px !important; line-height: 20px !important; }
+  .dashboard .planner-panel .stop-loading-tag { font-size: 13px !important; line-height: 18px !important; }
+  .dashboard .planner-panel .stop-inputs-cubagem { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dashboard .planner-panel .stop-inputs-cubagem label,
+  .dashboard .planner-panel .stop-inputs-cubagem span { font-size: 12px !important; line-height: 16px !important; }
+  .dashboard .planner-panel .stop-inputs-cubagem input {
+    min-height: 32px !important; height: 32px !important; width: 64px !important;
+    padding: 4px 6px !important; font-size: 14px !important; line-height: 20px !important;
+  }
+}

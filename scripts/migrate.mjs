@@ -31,6 +31,10 @@ try {
       continue;
     }
 
+    if (file === "0008_superadmin_marcos.sql") {
+      throw new Error("Legacy credential seed requires explicit administrative review; refusing to apply it automatically.");
+    }
+
     const sql = (await readFile(new URL(file, dir), "utf8")).replace(/^\uFEFF/, "");
     await client.query("BEGIN");
     try {
