@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ClientMonitor } from "@/components/client-monitor";
 import Script from "next/script";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
@@ -57,7 +58,7 @@ export default function RootLayout({
       <head>
         <Script src="/local-network-errors.js" strategy="beforeInteractive" />
       </head>
-      <body>{children}</body>
+      <body><ClientMonitor />{children}</body>
     </html>
   );
 }

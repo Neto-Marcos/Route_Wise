@@ -1,6 +1,7 @@
 // Real compiled UI, synthetic read-only API fixtures. Never use against production.
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
+const version = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, '../package.json'))).version;
 const base = process.env.RELEASE_TEST_URL || 'http://127.0.0.1:3136';
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw new Error('Local server required');
 const route = { id: 'test-route', name: 'Rota de teste 1.0.0', route_date: '2026-10-19', status: 'draft', deliveries: 1, delivered: 0, stops: [
@@ -15,6 +16,7 @@ const route = { id: 'test-route', name: 'Rota de teste 1.0.0', route_date: '2026
       const url = new URL(request.request().url());
       if (url.origin !== base) return request.abort();
       if (!url.pathname.startsWith('/api/')) return request.continue();
+      if(url.pathname === '/api/telemetry/client-error') return request.fulfill({status:204,body:''});
       assert.equal(request.request().method(), 'GET', 'Smoke test must not write data');
       let data = [];
       if (url.pathname === '/api/session/me') data = { authenticated: true, role: 'dispatcher', userRole: 'admin', companyId: 'demo', companyName: 'Empresa teste', companyCode: '281', userName: 'Teste' };
@@ -63,7 +65,7 @@ const route = { id: 'test-route', name: 'Rota de teste 1.0.0', route_date: '2026
     }
     assert.deepEqual(await page.locator('.stop-item-name').allTextContents(), stopsBefore);
     await page.locator('.account-menu > summary').click();
-    assert(await page.getByText('Criar Rota · versão 1.0.0').isVisible());
+    assert(await page.getByText('Criar Rota · versão '+version).isVisible());
     await page.keyboard.press('Escape');
     await page.evaluate(() => {
       const original = window.open.bind(window);

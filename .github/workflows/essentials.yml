@@ -1,0 +1,44 @@
+name: Production essentials
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/production-essentials]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: criarrota_essentials_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-local-ci-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:all
+      - run: pnpm build
+      - run: node scripts/test-essential-load.mjs
+        env:
+          ESSENTIAL_TEST_DATABASE_URL: postgresql://postgres:synthetic-local-ci-only@127.0.0.1:5432/criarrota_essentials_test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: essential-load-results
+          path: .tools/essential-load.json
+          retention-days: 14

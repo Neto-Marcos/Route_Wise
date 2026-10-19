@@ -68,6 +68,11 @@ a {
 .app {
   min-height: 100dvh;
 }
+.planner-recovery { padding: 12px; margin: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card-subtle); color: var(--ink); }
+.planner-recovery p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.planner-recovery > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.planner-recovery button { min-height: 44px; }
+.planner-recovery-notice { margin: 8px 12px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .connection {
   position: fixed;
   z-index: 2000;

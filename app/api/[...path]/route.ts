@@ -710,6 +710,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const isDispatcher = session?.role === "dispatcher";
 
     if (!session && !isDispatcher) return json({ error: "Sessão necessária" }, 401);
+    // Check ownership before handling GPS, odometer or photos. In particular,
+    // a signed driver session is not authorization for an arbitrary route ID.
+    if (session?.role === "driver" && p[0] === "routes" && p[1]) {
+      const owned = await query(
+        "SELECT r.id FROM routes r JOIN drivers d ON d.id=r.driver_id AND d.active JOIN companies c ON c.id=r.company_id AND c.active WHERE r.id::text=$1 AND r.company_id=$2 AND r.driver_id=$3",
+        [p[1], session.companyId, session.driverId],
+      );
+      if (!owned.rows[0]) return json({ error: "Rota não encontrada" }, 404);
+      if (["stops", "deliveries"].includes(p[2]) && p[3]) {
+        const stop = await query("SELECT id FROM route_stops WHERE id::text=$1 AND route_id=$2 AND NOT is_origin", [p[3], owned.rows[0].id]);
+        if (!stop.rows[0]) return json({ error: "Parada não encontrada" }, 404);
+      }
+    }
     if (p[0] === "companies" && p[1] === "switch" && isDispatcher) {
       if (session?.userRole !== "superadmin") {
         return json({ error: "Apenas o Administrador Supremo pode alternar entre empresas" }, 403);

@@ -1,6 +1,9 @@
 "use client";
 import { AccountMenu } from "./account-menu";
 import { PlannerDivider } from "./planner-divider";
+import { usePlannerRecovery } from "./use-planner-recovery";
+import type { PlannerDraft } from "@/lib/planner-draft";
+import { reportTechnicalFailure } from "@/lib/technical-events";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -191,9 +194,13 @@ const api = async (url: string, options?: RequestInit) => {
     throw error;
   });
   const out = await res.json().catch(() => {
+    reportTechnicalFailure("api_failure", url);
     throw new Error("O sistema enviou uma resposta inválida. Tente novamente em instantes.");
   });
-  if (!res.ok) throw new Error(out.error || "Não foi possível concluir");
+  if (!res.ok) {
+    if(res.status>=500) reportTechnicalFailure("api_failure", url);
+    throw new Error(out.error || "Não foi possível concluir");
+  }
   return out;
 };
 const DISPATCHER_OFFLINE_SNAPSHOT = "rw_dispatcher_offline_snapshot_v1";
@@ -1807,6 +1814,7 @@ function Dispatcher({
   const [reportingRoute, setReportingRoute] = useState<DetailedRoute | null>(null);
   const [assigningRoute, setAssigningRoute] = useState<RouteData | null>(null);
   const [importedPlannerData, setImportedPlannerData] = useState<{
+    draft?: PlannerDraft;
     id: string;
     routeId?: string;
     stops: Stop[];
@@ -2338,7 +2346,15 @@ function Dispatcher({
         {message && <p className="form-error">{message}</p>}
         {tab === "planner" && (
           <RoutePlannerView
-            key={importedPlannerData?.id || "planner-default"}
+            key={`${sessionInfo?.companyId}:${sessionInfo?.dispatcherId}:${importedPlannerData?.id || "planner-default"}`}
+            draftScope={sessionInfo?.companyId && sessionInfo.dispatcherId ? `${sessionInfo.companyId}:${sessionInfo.dispatcherId}` : undefined}
+            initialDraft={importedPlannerData?.draft}
+            onRecoverDraft={(draft) => setImportedPlannerData({
+              id: crypto.randomUUID(), draft, routeId: draft.routeId,
+              stops: draft.baselineStops, name: draft.routeName, date: draft.routeDate,
+              circular: draft.circular,
+              routingTransfer: draft.routingTransfer as { suggested: SuggestedRoute; config: ExtendedEngineConfig; routingProof: RoutingProof } | undefined,
+            })}
             onDone={() => {
               load();
               if (importedPlannerData?.routeId) {
@@ -3578,6 +3594,9 @@ function DirectAssignModal({
 }
 
 function RoutePlannerView({
+  draftScope,
+  initialDraft,
+  onRecoverDraft,
   onClose,
   onDone,
   onSwitchToDispatcher,
@@ -3589,6 +3608,9 @@ function RoutePlannerView({
   initialCircular,
   routingTransfer,
 }: {
+  draftScope?: string;
+  initialDraft?: PlannerDraft;
+  onRecoverDraft?: (draft: PlannerDraft) => void;
   onClose?: () => void;
   onDone?: () => void;
   onSwitchToDispatcher?: () => void;
@@ -3604,7 +3626,7 @@ function RoutePlannerView({
     routingProof: RoutingProof;
   };
 }) {
-  const [stops, setStops] = useState<Stop[]>(initialStops || []);
+  const [stops, setStops] = useState<Stop[]>(initialDraft?.stops || initialStops || []);
   const [mobileShowMap, setMobileShowMap] = useState(false);
   const [queryText, setQueryText] = useState("");
   const [results, setResults] = useState<Stop[]>([]);
@@ -3614,14 +3636,14 @@ function RoutePlannerView({
   const [optimizing, setOptimizing] = useState(false);
   const [geometry, setGeometry] = useState<[number, number][]>([]);
   const [routeInfo, setRouteInfo] = useState<{ km: number; seconds: number } | null>(null);
-  const [circular, setCircular] = useState(initialCircular || false);
+  const [circular, setCircular] = useState(initialDraft?.circular ?? initialCircular ?? false);
   const [showStations, setShowStations] = useState(false);
   const [stationsError, setStationsError] = useState<string | null>(null);
   const [optimizeBy, setOptimizeBy] = useState<"distance" | "time" | "manual">(
-    initialRouteId || routingTransfer ? "manual" : "distance",
+    initialDraft?.optimizeBy ?? (initialRouteId || routingTransfer ? "manual" : "distance"),
   );
-  const [routeName, setRouteName] = useState(initialRouteName || "");
-  const [routeDate, setRouteDate] = useState(initialRouteDate || new Date().toLocaleDateString("en-CA"));
+  const [routeName, setRouteName] = useState(initialDraft?.routeName ?? initialRouteName ?? "");
+  const [routeDate, setRouteDate] = useState(initialDraft?.routeDate ?? initialRouteDate ?? new Date().toLocaleDateString("en-CA"));
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -3632,6 +3654,11 @@ function RoutePlannerView({
   const optimizeRequestSeqRef = useRef(0);
   const expectedStopIdsRef = useRef<Array<string | undefined>>(initialStops?.map((s) => s.id) || []);
   const [confirmedTransferChange, setConfirmedTransferChange] = useState(false);
+  const [confirmDiscardRecovery, setConfirmDiscardRecovery] = useState(false);
+  const recovery = usePlannerRecovery(draftScope, {
+    stops, baselineStops: initialStops || [], routeId: initialRouteId,
+    routeName, routeDate, circular, optimizeBy, routingTransfer,
+  }, initialDraft);
 
   const transferPermutation = routingTransfer
     ? (() => {
@@ -3662,12 +3689,13 @@ function RoutePlannerView({
   }, [stopsJson, circular, routeDate]);
 
   useEffect(() => {
+    if (initialDraft) return;
     if (initialStops && initialStops.length > 0) {
       setStops(initialStops);
       if (initialRouteName) setRouteName(initialRouteName);
       if (initialRouteDate) setRouteDate(initialRouteDate);
     }
-  }, [initialStops, initialRouteName, initialRouteDate]);
+  }, [initialStops, initialRouteName, initialRouteDate, initialDraft]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -3912,6 +3940,7 @@ function RoutePlannerView({
         }),
       });
       expectedStopIdsRef.current = stops.map((s) => s.id);
+      recovery.clear();
       setSuccessMessage(`Rota "${name}" ${initialRouteId ? "atualizada" : "salva"} com sucesso no painel!`);
       if (onDone) onDone();
       setTimeout(() => setSuccessMessage(""), 5000);
@@ -3989,6 +4018,20 @@ function RoutePlannerView({
             )}
           </div>
         </header>
+
+        {recovery.candidate && onRecoverDraft && <section className="planner-recovery no-print" aria-label="Recuperação da rota">
+          <strong>Há uma rota em edição neste aparelho</strong>
+          <p>{recovery.candidate.routeName || "Rota sem nome"} · {recovery.candidate.stops.length} paradas. Recuperar não salva nem atribui a rota automaticamente.</p>
+          <div>
+            <button type="button" className="button primary" onClick={() => onRecoverDraft(recovery.candidate!)}>Recuperar rota</button>
+            <button type="button" className="button secondary" onClick={() => setConfirmDiscardRecovery(true)}>Descartar rascunho</button>
+          </div>
+        </section>}
+        {draftScope && recovery.notice && <p className="planner-recovery-notice no-print" role="status">{recovery.notice}</p>}
+        <ConfirmDialog open={confirmDiscardRecovery} title="Descartar rascunho local"
+          description="A cópia de recuperação será removida deste aparelho. O conteúdo que está aberto na tela será mantido."
+          confirmText="Descartar rascunho" variant="danger" onCancel={() => setConfirmDiscardRecovery(false)}
+          onConfirm={() => { recovery.discard(); setConfirmDiscardRecovery(false); }} />
 
         {successMessage && (
           <div className="alert-success-banner">
@@ -4569,6 +4612,7 @@ function RoutePlannerView({
           circular={circular}
           onClose={() => setAssignModalOpen(false)}
           onDone={(res) => {
+            recovery.clear();
             setAssignModalOpen(false);
             setSuccessMessage(`Rota "${res.name}" criada e atribuída com sucesso!`);
             if (onDone) onDone();

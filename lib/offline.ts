@@ -464,21 +464,22 @@ export async function flushQueue(): Promise<number> {
           } else if (res.status === 429 || res.status >= 500) {
             // 5xx Server Error or 429 Rate Limit: incrementa tentativas e preserva
             item.attempts = (item.attempts || 0) + 1;
-            if (item.attempts >= 10) {
-              console.warn(`[offline-queue] Operação ${item.id} atingiu o limite de 10 tentativas com status ${res.status}. Removendo da fila.`);
-              await deleteQueueRecord(item.id);
-              batchProcessed++;
-              continue;
-            }
+            item.lastError = `Servidor indisponível (${res.status}). Comprovante preservado para tentar novamente.`;
+            item.status = "failed";
+            if (typeof window !== "undefined") window.dispatchEvent?.(new CustomEvent("criarrota:technical-failure", {detail:{kind:"sync_failure",path:rawUrl.split(/[?#]/)[0]}}));
             await updateQueueRecord(item);
             console.warn(`[offline-queue] Servidor retornou ${res.status} para ${item.id} (tentativa ${item.attempts}). Fila pausada.`);
             hasError = true;
             break;
           } else {
             // Other 4xx permanent client errors (e.g. 400 Bad Request, 404 Not Found, 422)
-            console.warn(`[offline-queue] Erro cliente permanente (${res.status}) na operação ${item.id}. Removendo da fila.`);
-            await deleteQueueRecord(item.id);
-            batchProcessed++;
+            item.lastError = `Envio recusado (${res.status}). Comprovante preservado para conferência.`;
+            item.status = "failed";
+            item.attempts = (item.attempts || 0) + 1;
+            await updateQueueRecord(item);
+            if (typeof window !== "undefined") window.dispatchEvent?.(new CustomEvent("criarrota:technical-failure", {detail:{kind:"sync_failure",path:rawUrl.split(/[?#]/)[0]}}));
+            hasError = true;
+            break;
           }
         }
 
