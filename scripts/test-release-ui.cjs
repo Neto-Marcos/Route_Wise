@@ -1,5 +1,6 @@
 // Real compiled UI, synthetic read-only API fixtures. Never use against production.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const version = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, '../package.json'))).version;
 const base = process.env.RELEASE_TEST_URL || 'http://127.0.0.1:3136';

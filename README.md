@@ -1,6 +1,6 @@
-# Criar Rota 1.0.0
+# Criar Rota 1.1.0
 
-Versão consolidada: [notas da entrega e validação](docs/releases/1.0.0.md).
+Versão consolidada: [notas da entrega e validação](docs/releases/1.1.0.md).
 
 Plataforma web e PWA voltada para **operações logísticas, roteirização automatizada de entregas, torre de controle de frota, gestão financeira de fretes e analytics comercial**.
 
@@ -51,3 +51,4 @@ Plataforma web e PWA voltada para **operações logísticas, roteirização auto
    npm run dev
    ```
    Acesse `http://localhost:3000`.
+

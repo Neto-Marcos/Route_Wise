@@ -72,13 +72,14 @@ try {
     if (actualBytes !== proofBytes) throw new Error('Restored proof file size mismatch');
   } finally { await restored.end(); }
   const manifest = { version:1, object:filename, completedAt:new Date().toISOString(), sha256:digest, bytes:(await stat(encrypted)).size, tableCount:tables.length, restoreVerified:true, proofBytes };
+  await s3.send(new PutObjectCommand({Bucket:bucket,Key:filename+'.json',Body:JSON.stringify({...manifest,counts}),ContentType:'application/json'}));
   await s3.send(new PutObjectCommand({ Bucket:bucket,Key:PREFIX+'latest.json',Body:JSON.stringify(manifest),ContentType:'application/json' }));
   // Delete only our expired backups, and only after a verified replacement.
   let token;
   do {
     const list=await s3.send(new ListObjectsV2Command({Bucket:bucket,Prefix:PREFIX,ContinuationToken:token}));
     const expired=(list.Contents||[]).filter(item=>item.Key?.endsWith('.pgdump.enc') && item.LastModified && Date.now()-item.LastModified.getTime()>30*86400000);
-    if(expired.length) await s3.send(new DeleteObjectsCommand({Bucket:bucket,Delete:{Objects:expired.map(item=>({Key:item.Key}))}}));
+    if(expired.length) await s3.send(new DeleteObjectsCommand({Bucket:bucket,Delete:{Objects:expired.flatMap(item=>[{Key:item.Key},{Key:item.Key+'.json'}])}}));
     token=list.NextContinuationToken;
   } while(token);
   console.log(JSON.stringify({event:'backup_verified',...manifest}));
