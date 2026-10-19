@@ -1,4 +1,6 @@
-# 🚚 RouteWise TMS — Roteirização Inteligente & Torre de Controle Logístico
+# Criar Rota 1.0.0
+
+Versão consolidada: [notas da entrega e validação](docs/releases/1.0.0.md).
 
 Plataforma web e PWA voltada para **operações logísticas, roteirização automatizada de entregas, torre de controle de frota, gestão financeira de fretes e analytics comercial**.
 

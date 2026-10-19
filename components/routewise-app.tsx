@@ -232,48 +232,12 @@ export default function RouteWiseApp() {
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [installPrompt, setInstallPrompt] = useState<any>(null);
-  const [pwaRefreshing, setPwaRefreshing] = useState(false);
   const online = useOnline();
 
   useEffect(() => {
-    let pullStartY: number | null = null;
-    let refreshing = false;
-    let pullArmed = false;
     let registration: ServiceWorkerRegistration | undefined;
 
     const checkForUpdate = () => registration?.update().catch(() => {});
-    const refreshFromPull = async () => {
-      if (refreshing || !navigator.onLine) return;
-      refreshing = true;
-      setPwaRefreshing(true);
-      try {
-        await Promise.all([
-          registration?.update(),
-          new Promise((resolve) => window.setTimeout(resolve, 550)),
-        ]);
-      } finally {
-        // A navegação é feita depois da checagem: o service worker usa rede
-        // primeiro e traz imediatamente a versão mais recente do servidor.
-        window.location.reload();
-      }
-    };
-    const onTouchStart = (event: TouchEvent) => {
-      const atTop = window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
-      pullStartY = atTop && event.touches.length === 1 ? event.touches[0]?.clientY ?? null : null;
-      pullArmed = false;
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      if (pullStartY === null) return;
-      // Evita atualizar por um gesto curto enquanto a pessoa só navega na tela.
-      pullArmed = (event.touches[0]?.clientY ?? pullStartY) - pullStartY >= 160;
-    };
-    const onTouchEnd = (event: TouchEvent) => {
-      const endY = event.changedTouches[0]?.clientY;
-      if (pullStartY !== null && endY && pullArmed && endY - pullStartY >= 160) refreshFromPull();
-      pullStartY = null;
-      pullArmed = false;
-    };
-
     navigator.serviceWorker?.register("/sw.js", { updateViaCache: "none" }).then((nextRegistration) => {
       registration = nextRegistration;
       checkForUpdate();
@@ -282,9 +246,6 @@ export default function RouteWiseApp() {
 
     window.addEventListener("focus", checkForUpdate);
     document.addEventListener("visibilitychange", checkForUpdate);
-    window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
 
     // Check saved dispatcher role in session and verify with server
     if (typeof window !== "undefined") {
@@ -337,9 +298,6 @@ export default function RouteWiseApp() {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("focus", checkForUpdate);
       document.removeEventListener("visibilitychange", checkForUpdate);
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onTouchEnd);
     };
   }, [online]);
 
@@ -366,7 +324,6 @@ export default function RouteWiseApp() {
     <div className="app">
       <ToastContainer />
 
-      {pwaRefreshing && <div className="pwa-refreshing" role="status" aria-live="polite"><RefreshCw size={19} /> Atualizando Criar Rota...</div>}
 
       {installPrompt && (
         <aside className="pwa-install-banner no-print">
@@ -2127,7 +2084,6 @@ function Dispatcher({
                     >
                       <button
                         type="button"
-                        title={label}
                         aria-label={label}
                         className={tab === id ? "active" : ""}
                         onClick={() => setTab(id)}

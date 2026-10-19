@@ -2,6 +2,15 @@ export async function printElement(elementId: string, title: string) {
   const source = document.getElementById(elementId);
   if (!source) throw new Error("Documento de impressão não encontrado");
 
+  // Open during the click, before waiting for assets. Mobile browsers need a
+  // visible document and a retry button when automatic printing is ignored.
+  const mobile = window.matchMedia("(any-pointer: coarse), (max-width: 860px)").matches;
+  const preview = mobile ? window.open("", "_blank") : null;
+  if (mobile && !preview) {
+    throw new Error("Permita abrir novas abas neste navegador e toque em Imprimir novamente. Se estiver no aplicativo instalado, abra o Criar Rota no Chrome ou Safari.");
+  }
+  if (preview) preview.opener = null;
+
   // Limpa frames anteriores para evitar acúmulo no DOM
   document.querySelectorAll(".routewise-print-frame").forEach((el) => {
     try { el.remove(); } catch {}
@@ -16,9 +25,9 @@ export async function printElement(elementId: string, title: string) {
   // 3. Fica em segundo plano (z-index: -9999) com dimensões reais para o motor calcular o layout completo
   frame.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;z-index:-9999;border:0;opacity:0.01;pointer-events:none;";
-  document.body.appendChild(frame);
+  if (!preview) document.body.appendChild(frame);
 
-  const doc = frame.contentDocument;
+  const doc = preview?.document ?? frame.contentDocument;
   if (!doc) {
     frame.remove();
     throw new Error("Não foi possível preparar a impressão");
@@ -69,6 +78,12 @@ export async function printElement(elementId: string, title: string) {
       .no-print {
         display: none !important;
       }
+      @media screen {
+        .print-preview-toolbar { position: sticky; top: 0; z-index: 10; padding: 12px; background: #fff; border-bottom: 1px solid #cbd5e1; }
+        .print-preview-toolbar button { min-height: 44px; padding: 8px 16px; background: #006b50; color: white; border: 0; border-radius: 8px; font: 600 16px Arial, sans-serif; }
+        .print-preview-toolbar p { margin: 8px 0 0; font: 14px/1.5 Arial, sans-serif; }
+      }
+      @media print { .print-preview-toolbar { display: none !important; } }
     </style>
   `;
 
@@ -84,10 +99,12 @@ export async function printElement(elementId: string, title: string) {
   ${criticalPrintStyles}
 </head>
 <body class="isolated-print-document">
+  ${preview ? '<div class="print-preview-toolbar"><button type="button" id="print-preview-button">Imprimir / Salvar PDF</button><p>Se a impressão não abrir, toque no botão acima ou use a opção Imprimir no menu do navegador. Volte à aba anterior para continuar no Criar Rota.</p></div>' : ""}
   ${source.outerHTML}
 </body>
 </html>`);
   doc.close();
+  doc.getElementById("print-preview-button")?.addEventListener("click", () => preview?.print());
 
   // Aguarda stylesheets, fontes e imagens
   const linkPromises = Array.from(doc.querySelectorAll('link[rel="stylesheet"]')).map(
@@ -119,9 +136,17 @@ export async function printElement(elementId: string, title: string) {
   // Pequeno intervalo extra para os motores mobile terminarem o reflow
   await new Promise((resolve) => window.setTimeout(resolve, 300));
 
-  const win = frame.contentWindow;
+  const win = preview ?? frame.contentWindow;
   if (!win) {
     frame.remove();
+    return;
+  }
+  if (win.closed) return;
+
+  // Keep the visible preview available after cancel/print for retry or PDF.
+  if (preview) {
+    preview.focus();
+    try { preview.print(); } catch { /* The visible button remains available. */ }
     return;
   }
 

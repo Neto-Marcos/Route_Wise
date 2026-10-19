@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { APP_VERSION } from "@/lib/version";
 
 export function AccountMenu({ name, company, themeControl, onPassword, onExit, onNotifications, onMaps, children }: {
   name?: string; company?: string; themeControl: ReactNode;
@@ -39,6 +40,7 @@ export function AccountMenu({ name, company, themeControl, onPassword, onExit, o
       }}><summary>Permissões do navegador</summary><p>{permissions}</p><p>Para alterar, use as permissões do site na barra de endereço.</p></details>
       {children && <div className="account-company-settings">{children}</div>}
       <button type="button" className="account-signout" onClick={() => run(onExit)}>Sair da conta</button>
+      <small>Criar Rota · versão {APP_VERSION}</small>
     </div>
   </details>;
 }

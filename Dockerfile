@@ -23,4 +23,4 @@ COPY --from=builder /app/scripts ./scripts
 RUN mkdir -p /app/.local-db/uploads /tmp/uploads && chown -R nextjs:nodejs /app/.local-db /tmp/uploads
 USER nextjs
 EXPOSE 3000
-CMD ["sh", "-c", "node scripts/migrate.mjs && node server.js"]
+CMD ["sh", "-c", "node scripts/check-schema.mjs && node server.js"]

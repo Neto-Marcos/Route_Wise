@@ -7,6 +7,7 @@ import "./mobile-ui.css";
 import "./account-menu.css";
 import "./planner-resize.css";
 import "./wide-ui.css";
+import "./navigation-viewport.css";
 
 export const metadata: Metadata = {
   title: "Criar Rota — Gestão de Rotas",
