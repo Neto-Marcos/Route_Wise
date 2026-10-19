@@ -23,33 +23,35 @@ const data={id:'test-route',name:'Rota original',route_date:'2026-10-19',status:
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base);await page.getByRole('button',{name:'Rotas',exact:true}).click();await page.locator('button[title="Adicionar, remover ou reorganizar cidades"]').first().click();
   const name=()=>page.getByPlaceholder('Nome da rota (opcional)');
-  await name().fill('Minha rota recuperável');
+  const showName=async(target=page)=>{ if(!(await target.getByPlaceholder('Nome da rota (opcional)').count())) await target.getByRole('button',{name:'Configurações da rota',exact:true}).click(); };
+  await showName();
+  await showName();await name().fill('Minha rota recuperável');
   await page.getByText('Rascunho salvo neste aparelho',{exact:true}).waitFor();
   const stored=await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('rw_planner_draft_v1:')).map(k=>JSON.parse(localStorage.getItem(k))));
   assert.equal(stored.length,1);assert.equal(stored[0].routeId,'test-route');assert.equal(stored[0].stops[1].order_ids[0],'12345');
   await page.reload();await page.getByRole('button',{name:'Recuperar rota',exact:true}).click();
-  assert.equal(await name().inputValue(),'Minha rota recuperável');assert.equal(await page.locator('.stop-item-name').count(),2);
+  await showName();assert.equal(await name().inputValue(),'Minha rota recuperável');assert.equal(await page.locator('.stop-item-name').count(),2);
   // Persist the final keystroke even when another tab is selected immediately.
-  await name().fill('Última edição');await page.getByRole('button',{name:'Rotas',exact:true}).click();
+  await showName();await name().fill('Última edição');await page.getByRole('button',{name:'Rotas',exact:true}).click();
   await page.getByRole('button',{name:'Planejar rota',exact:true}).click();await page.getByRole('button',{name:'Recuperar rota',exact:true}).click();
-  assert.equal(await name().inputValue(),'Última edição');
+  await showName();assert.equal(await name().inputValue(),'Última edição');
   await page.reload();await page.getByRole('button',{name:'Recuperar rota',exact:true}).click();
   await page.waitForTimeout(500);
   // Simulate a newer same-account tab. Current work must not overwrite it.
   const other=await context.newPage();await other.goto(base);await other.getByRole('button',{name:'Planejar rota',exact:true}).click();
   await other.getByRole('button',{name:'Recuperar rota',exact:true}).click();
-  await other.getByPlaceholder('Nome da rota (opcional)').fill('Versão da outra aba');
+  await showName(other);await other.getByPlaceholder('Nome da rota (opcional)').fill('Versão da outra aba');
   await other.getByText('Rascunho salvo neste aparelho',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Recuperar rota',exact:true}).waitFor();
-  await name().fill('Não deve sobrescrever');await page.waitForTimeout(500);
+  await showName();await name().fill('Não deve sobrescrever');await page.waitForTimeout(500);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('rw_planner_draft_v1:')))).routeName),'Versão da outra aba');
   await other.close();
   await page.getByRole('button',{name:'Recuperar rota',exact:true}).click();
-  assert.equal(await name().inputValue(),'Versão da outra aba');
+  await showName();assert.equal(await name().inputValue(),'Versão da outra aba');
   await page.locator('.btn-save-draft').click();await page.getByRole('button',{name:'Rotas',exact:true}).waitFor();await page.waitForTimeout(500);
   assert.equal(saved,1);assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('rw_planner_draft_v1:')).length),0);
   // Company/user scopes cannot see another account's recovery copy.
-  await page.getByRole('button',{name:'Rotas',exact:true}).click();await page.locator('button[title="Adicionar, remover ou reorganizar cidades"]').first().click();await name().fill('Privado da empresa A');await page.waitForTimeout(500);
+  await page.getByRole('button',{name:'Rotas',exact:true}).click();await page.locator('button[title="Adicionar, remover ou reorganizar cidades"]').first().click();await showName();await showName();await name().fill('Privado da empresa A');await page.waitForTimeout(500);
   company='company-b';await page.reload();await page.locator('.planner-panel').waitFor();assert.equal(await page.getByRole('button',{name:'Recuperar rota',exact:true}).count(),0);
   company='company-a';user='user-b';await page.reload();await page.locator('.planner-panel').waitFor();assert.equal(await page.getByRole('button',{name:'Recuperar rota',exact:true}).count(),0);
   assert.deepEqual(errors,[]);

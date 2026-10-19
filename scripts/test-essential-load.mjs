@@ -8,7 +8,7 @@ import {SignJWT} from 'jose';
 import bcrypt from 'bcryptjs';
 const url=new URL(process.env.ESSENTIAL_TEST_DATABASE_URL||'http://invalid');
 if(!['127.0.0.1','localhost'].includes(url.hostname)||!/^\/criarrota_[a-z0-9_]+_test$/.test(url.pathname))throw new Error('Dedicated localhost criarrota_*_test database required; production is forbidden');
-const secret=randomBytes(32).toString('hex'),base='http://127.0.0.1:3140';
+const secret=randomBytes(32).toString('hex'),monitorToken=randomBytes(32).toString('hex'),base='http://127.0.0.1:3140';
 const db=new pg.Client({connectionString:url.toString()});
 let server,output='';
 const durations=[];
@@ -37,7 +37,7 @@ try{
       people.push({company:c,driver,route,stop,cookie:'rw_driver_session='+token});
     }
   }
-  server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p','3140','-H','127.0.0.1'],{env:{...process.env,DATABASE_URL:url.toString(),SESSION_SECRET:secret,APP_ENV:'essential-load-test',VAPID_PUBLIC_KEY:'',VAPID_PRIVATE_KEY:''},stdio:['ignore','pipe','pipe']});
+  server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p','3140','-H','127.0.0.1'],{env:{...process.env,DATABASE_URL:url.toString(),SESSION_SECRET:secret,MONITOR_TOKEN:monitorToken,APP_ENV:'essential-load-test',VAPID_PUBLIC_KEY:'',VAPID_PRIVATE_KEY:''},stdio:['ignore','pipe','pipe']});
   server.stdout.on('data',data=>output=(output+data).slice(-8000));server.stderr.on('data',data=>output=(output+data).slice(-8000));
   const deadline=Date.now()+60000;let ready=false;
   while(Date.now()<deadline){try{if((await fetch(base+'/api/version')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,300));}
@@ -60,6 +60,14 @@ try{
   assert.equal(Number((await db.query('SELECT count(*) FROM location_points')).rows[0].count),50,'Unauthorized GPS write or duplicate');
   assert.equal(Number((await db.query('SELECT count(*) FROM upload_objects')).rows[0].count),50,'Rejected cross-company request created an orphan upload');
   const unauthorized=await db.query('SELECT count(*) FROM location_points l JOIN routes r ON r.id=l.route_id WHERE l.driver_id<>r.driver_id');assert.equal(Number(unauthorized.rows[0].count),0);
+  assert.equal((await fetch(base+'/api/health')).status,200);
+  assert.equal((await fetch(base+'/api/health/monitor')).status,401);
+  assert.equal((await fetch(base+'/api/health/monitor',{headers:{Authorization:'Bearer '+monitorToken}})).status,200);
+  const rejected=await fetch(base+'/api/telemetry/client-error',{method:'POST',headers:{Origin:'not-an-origin',Cookie:people[0].cookie,'X-RouteWise-Role':'driver','Content-Type':'application/json'},body:'{}'});assert.equal(rejected.status,403);
+  for(let i=0;i<5;i++)assert.equal((await request('/api/telemetry/client-error',people[0].cookie,{kind:'api_failure',path:'/api/routes/'+randomUUID()+'?token=PRIVATE',message:'MUST_NOT_BE_STORED'})).status,204);
+  assert.equal((await request('/api/telemetry/client-error',people[0].cookie,{kind:'api_failure',path:'/api/test'})).status,429);
+  assert.equal((await fetch(base+'/api/health/monitor',{headers:{Authorization:'Bearer '+monitorToken}})).status,503);
+  const events=await db.query("SELECT details FROM audit_log WHERE entity_type='technical_event'");assert.equal(events.rows.length,5);assert(!JSON.stringify(events.rows).includes('PRIVATE'));assert(!JSON.stringify(events.rows).includes('MUST_NOT_BE_STORED'));
   durations.sort((a,b)=>a-b);
   const result={status:'PASS',drivers:50,companies:2,concurrentUsers:50,requests:durations.length,durationMs:Math.round(performance.now()-started),p95Ms:Math.round(durations[Math.floor(durations.length*.95)]),proofs:50,duplicateProofs:0,unauthorizedWrites:0,environment:'isolated localhost PostgreSQL; not a production capacity certification'};
   await mkdir('.tools',{recursive:true});await writeFile('.tools/essential-load.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));

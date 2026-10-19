@@ -1,6 +1,6 @@
 {
   "name": "routewise",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,9 @@
     "test": "node --test tests/offline-photo-queue.test.mjs",
     "test:all": "node scripts/test-all.mjs",
     "test:ui": "node scripts/test-navigation-rotation.cjs && node scripts/test-mobile-print.cjs",
-    "test:release-ui": "node scripts/test-release-ui.cjs"
+    "test:release-ui": "node scripts/test-release-ui.cjs",
+    "test:recovery-ui": "node scripts/test-planner-recovery.cjs",
+    "test:load": "node scripts/test-essential-load.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",

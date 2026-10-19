@@ -5770,6 +5770,7 @@ function ProofModal({
             }
           }
         } catch (directErr) {
+          reportTechnicalFailure("upload_failure", "/api/uploads/direct");
           console.warn("Direct upload falhou, armazenando na fila offline:", directErr);
           await queueOfflinePayload();
           return;

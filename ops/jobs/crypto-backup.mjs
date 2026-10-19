@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { open, appendFile, stat } from 'node:fs/promises';
+import { open, appendFile, stat, rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 export const MAGIC = Buffer.from('CRBACKUP1');
 export function backupKey(value) {
@@ -23,5 +23,12 @@ export async function decryptBackup(file, output, key) {
   if (!header.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('Invalid encrypted backup format');
   const decipher = createDecipheriv('aes-256-gcm', key, header.subarray(MAGIC.length));
   decipher.setAuthTag(tag);
-  await pipeline(createReadStream(file, { start: header.length, end: size - 17 }), decipher, createWriteStream(output, { mode: 0o600 }));
+  const target = await open(output, 'wx', 0o600);
+  try {
+    await pipeline(createReadStream(file, { start: header.length, end: size - 17 }), decipher, target.createWriteStream());
+  } catch (error) {
+    await target.close().catch(() => {});
+    await rm(output, {force:true});
+    throw error;
+  }
 }
