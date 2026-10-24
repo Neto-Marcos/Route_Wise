@@ -1,3 +1,8 @@
+import dns from "node:dns";
+try {
+  dns.setDefaultResultOrder?.("ipv4first");
+} catch {}
+
 import { NextRequest, NextResponse } from "next/server";
 import {
   hasRouteMinimumException,
@@ -17,6 +22,7 @@ import { audit, db, query } from "@/lib/db";
 import { getSession, makeSession, sessionCookie, clearSessionCookie, type UserRole } from "@/lib/auth";
 import { uploadUrl, viewUrl } from "@/lib/storage";
 import { normalizeDriverPhoto } from "@/lib/driver-photo";
+import { BRAZILIAN_HUBS } from "@/lib/geo-brazil";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,18 +109,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const targetUrl = `https://router.project-osrm.org/${subpath}${qs}`;
       try {
         const response = await fetch(targetUrl, {
-          headers: { "User-Agent": "RouteWise-Proxy/1.0", Accept: "application/json" },
+          headers: { "User-Agent": "CriarRota-Proxy/1.0 (https://criarrota.com.br; contato@criarrota.com.br)", Accept: "application/json" },
           signal: AbortSignal.timeout(12000),
         });
         const data = await response.json();
         return json(data, response.ok ? 200 : response.status);
       } catch (err) {
-        return json({ error: `OSRM fetch failed: ${(err as Error).message}` }, 502);
+        console.warn("OSRM proxy fetch failed:", err);
+        return json({
+          code: "NoRoute",
+          message: `OSRM proxy indisponível: ${(err as Error).message}`,
+          routes: [],
+        }, 200);
       }
     }
     if (p[0] === "geocode") {
       const term = String(req.nextUrl.searchParams.get("q") || "").trim();
       if (term.length < 3) return json([]);
+
+      // 1. Tentar Nominatim oficial com IPv4 e User-Agent em conformidade
       const search = new URLSearchParams({
         format: "jsonv2",
         limit: "8",
@@ -122,28 +135,97 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         addressdetails: "1",
         q: term,
       });
+
       try {
         const response = await fetch(`https://nominatim.openstreetmap.org/search?${search}`, {
           headers: {
-            "User-Agent": "CriarRota/1.0 (geocodificacao de rotas)",
+            "User-Agent": "CriarRota/1.0 (https://criarrota.com.br; contato@criarrota.com.br)",
             Accept: "application/json",
             "Accept-Language": "pt-BR,pt;q=0.9",
           },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(6000),
           next: { revalidate: 300 },
         });
-        if (!response.ok) throw new Error(`Nominatim respondeu ${response.status}`);
-        const data = await response.json();
-        return json((Array.isArray(data) ? data : []).map((item: any) => ({
-          name: item.name || String(item.display_name || "").split(",")[0],
-          address: item.display_name || item.name || term,
-          lat: Number(item.lat),
-          lng: Number(item.lon),
-        })).filter((item: any) => Number.isFinite(item.lat) && Number.isFinite(item.lng)));
+
+        if (response.ok) {
+          const data = await response.json();
+          const items = (Array.isArray(data) ? data : [])
+            .map((item: any) => ({
+              name: item.name || String(item.display_name || "").split(",")[0],
+              address: item.display_name || item.name || term,
+              lat: Number(item.lat),
+              lng: Number(item.lon),
+            }))
+            .filter((item: any) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
+
+          if (items.length > 0) {
+            return json(items);
+          }
+        }
       } catch (err) {
-        console.warn("Geocode fetch failed:", err);
-        return json({ error: "Serviço de busca de endereços indisponível. Tente novamente." }, 502);
+        console.warn("Nominatim geocode warning:", (err as Error).message);
       }
+
+      // 2. Fallback local no banco de dados city_geocodes
+      try {
+        const termNorm = term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        const dbRes = await query<{ city_normalized: string; uf: string; display_name: string | null; lat: number | string; lng: number | string }>(
+          `SELECT city_normalized, uf, display_name, lat, lng
+           FROM city_geocodes
+           WHERE city_normalized ILIKE $1 OR display_name ILIKE $1
+           LIMIT 5`,
+          [`%${termNorm}%`]
+        );
+        if (dbRes.rows.length > 0) {
+          return json(
+            dbRes.rows
+              .filter((r) => Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng)))
+              .map((r) => ({
+                name: r.display_name?.split(",")[0] || `${r.city_normalized.toUpperCase()} - ${r.uf}`,
+                address: r.display_name || `${r.city_normalized.toUpperCase()}, ${r.uf}, Brasil`,
+                lat: Number(r.lat),
+                lng: Number(r.lng),
+              }))
+          );
+        }
+      } catch (dbErr) {
+        console.warn("Local DB geocode lookup failed:", dbErr);
+      }
+
+      // 3. Fallback em memória: BRAZILIAN_HUBS
+      try {
+        const normalizedTerm = term
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "_")
+          .replace(/_+/g, "_")
+          .replace(/^_|_$/g, "");
+
+        const hubMatches = Object.entries(BRAZILIAN_HUBS).filter(([key, hub]) => {
+          const normName = hub.name
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
+          return key.includes(normalizedTerm) || normName.includes(normalizedTerm.replace(/_/g, " "));
+        });
+
+        if (hubMatches.length > 0) {
+          return json(
+            hubMatches.slice(0, 5).map(([, hub]) => ({
+              name: hub.name,
+              address: `${hub.name}, ${hub.uf}, Brasil`,
+              lat: hub.lat,
+              lng: hub.lng,
+            }))
+          );
+        }
+      } catch (hubErr) {
+        console.warn("Hub fallback lookup failed:", hubErr);
+      }
+
+      // 4. Sempre retornar status 200 com array vazio caso não encontre (evita 502 do Cloudflare)
+      return json([]);
     }
     if (p[0] === "stations") {
       try {
@@ -161,7 +243,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         return json(data);
       } catch (err) {
         console.warn("Stations fetch failed:", err);
-        return json({ error: "A rede eFleet está indisponível. Desative e ative os postos para tentar novamente." }, 502);
+        return json({ error: "A rede eFleet está indisponível no momento. Tente novamente mais tarde.", stations: [] }, 200);
       }
     }
     if (p[0] === "road-places") {
@@ -196,7 +278,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           });
           const response = await fetch(`https://nominatim.openstreetmap.org/search?${search}`, {
             headers: {
-              "User-Agent": "RouteWise/1.0 (route planning)",
+              "User-Agent": "CriarRota/1.0 (https://criarrota.com.br; contato@criarrota.com.br)",
               Accept: "application/json",
               "Accept-Language": "pt-BR,pt;q=0.9",
             },

@@ -3732,7 +3732,12 @@ function RoutePlannerView({
     setError("");
     try {
       const response = await fetch(`/api/geocode?q=${encodeURIComponent(term.trim())}`, { signal });
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Erro de comunicação com o serviço de busca. Tente novamente.");
+      }
       if (!response.ok) throw new Error(data?.error || "Não foi possível pesquisar o endereço.");
       const places = Array.isArray(data) ? data : [];
       setResults(places);
