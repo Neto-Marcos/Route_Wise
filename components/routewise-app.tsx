@@ -4167,50 +4167,13 @@ function RoutePlannerView({
                 <div className="stop-item-info">
                   <div className="stop-item-name">{s.name}</div>
                   <div className="stop-item-addr">{isOrigin ? `Origem · ${s.address}` : s.address}</div>
-                  <div className="stop-cubagem-row">
-                    {loadOrder !== null && (
+                  {loadOrder !== null && (
+                    <div className="stop-cubagem-row">
                       <span className="stop-loading-tag">
                         📦 {loadOrder}º a carregar ({loadOrder === 1 ? "porta" : "fundo"})
                       </span>
-                    )}
-                    {!isOrigin && (
-                      <div className="stop-inputs-cubagem" onClick={(e) => e.stopPropagation()}>
-                        <label title="Quantidade de caixas/volumes nesta entrega">
-                          <span>Cx:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="9999"
-                            placeholder="0"
-                            value={s.boxes ?? ""}
-                            onChange={(e) => {
-                              const val = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value) || 0);
-                              const next = [...stops];
-                              next[i] = { ...s, boxes: val };
-                              changeStops(next);
-                            }}
-                          />
-                        </label>
-                        <label title="Volume total em metros cúbicos (m³)">
-                          <span>m³:</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="999"
-                            placeholder="0.0"
-                            value={s.volume_m3 ?? ""}
-                            onChange={(e) => {
-                              const val = e.target.value === "" ? undefined : Math.max(0, parseFloat(e.target.value) || 0);
-                              const next = [...stops];
-                              next[i] = { ...s, volume_m3: val };
-                              changeStops(next);
-                            }}
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
                 <div className="stop-item-actions">
                   <button
