@@ -3374,12 +3374,16 @@ function RoutesPanel({
               ))}
             </select>
 
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              title="Filtrar por data"
-            />
+            <div className="filter-date-wrapper">
+              <Calendar size={14} className="filter-date-icon" />
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                title="Filtrar por data"
+                aria-label="Filtrar por data"
+              />
+            </div>
 
             {hasActiveFilters && (
               <button
@@ -3989,8 +3993,9 @@ function RoutePlannerView({
 
   const printRouteSheet = () => {
     if (stops.length < 2) return;
-    printElement("planner-print-document", `Romaneio - ${routeName || "Nova rota"}`)
-      .catch((error) => showToast(error.message, "error"));
+    printElement("planner-print-document", `Romaneio - ${routeName || "Nova rota"}`, {
+      routeId: initialRouteId,
+    }).catch((error) => showToast(error.message, "error"));
   };
 
   const shareWhatsApp = () => {

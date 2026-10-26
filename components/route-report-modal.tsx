@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { FileSpreadsheet, Navigation, Printer, X } from "lucide-react";
+import { FileSpreadsheet, Navigation, Printer, Share2, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
 import { printElement } from "@/lib/print-document";
 
@@ -58,8 +58,24 @@ export function RouteReportModal({
     ? `https://www.google.com/maps/dir/${mapStops.map((stop) => `${stop.lat},${stop.lng}`).join("/")}`
     : null;
 
-  const printDocument = () => printElement("printable-report", `Relatório - ${route.name}`)
-    .catch((error) => window.alert(error.message));
+  const printDocument = () =>
+    printElement("printable-report", `Relatório - ${route.name}`, {
+      routeId: route.id,
+    }).catch((error) => window.alert(error.message));
+
+  const handleShare = async () => {
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Romaneio - ${route.name}`,
+          text: `Romaneio da Rota: ${route.name} (${route.driver_name || "Motorista"}) - ${completedStops.length}/${deliveryStops.length} entregas concluídas.`,
+          url: `${window.location.origin}/imprimir-romaneio?routeId=${encodeURIComponent(route.id)}`,
+        });
+      } catch {}
+    } else {
+      printDocument();
+    }
+  };
 
   return (
     <div className="modal-backdrop report-backdrop" onClick={onClose}>
@@ -77,6 +93,9 @@ export function RouteReportModal({
             <a className="button secondary compact" href="/api/reports/export?format=xlsx" download>
               <FileSpreadsheet size={15} /> Baixar Excel (.xlsx)
             </a>
+            <button type="button" className="button secondary compact" onClick={handleShare}>
+              <Share2 size={15} /> Compartilhar
+            </button>
             <button type="button" className="button primary compact" onClick={printDocument}>
               <Printer size={15} /> Imprimir / Salvar PDF
             </button>
