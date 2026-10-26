@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { FileSpreadsheet, Navigation, Printer, Share2, X } from "lucide-react";
+import { ExternalLink, FileSpreadsheet, Navigation, Printer, Share2, X } from "lucide-react";
 import type { DetailedRoute } from "./route-detail-modal";
 import { printElement } from "@/lib/print-document";
 
@@ -58,18 +58,54 @@ export function RouteReportModal({
     ? `https://www.google.com/maps/dir/${mapStops.map((stop) => `${stop.lat},${stop.lng}`).join("/")}`
     : null;
 
+  const [isIosStandalone, setIsIosStandalone] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const isStandalone =
+        (window.navigator as unknown as { standalone?: boolean })?.standalone === true ||
+        Boolean(window.matchMedia?.("(display-mode: standalone)")?.matches);
+      const ua = (navigator.userAgent || "").toLowerCase();
+      const isIos =
+        /iphone|ipad|ipod/.test(ua) ||
+        (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+      setIsIosStandalone(Boolean(isStandalone && isIos));
+    }
+  }, []);
+
   const printDocument = () =>
     printElement("printable-report", `Relatório - ${route.name}`, {
       routeId: route.id,
     }).catch((error) => window.alert(error.message));
 
   const handleShare = async () => {
+    let shareUrl = `${window.location.origin}/imprimir-romaneio?routeId=${encodeURIComponent(route.id)}`;
+    try {
+      const source = document.getElementById("printable-report");
+      if (source) {
+        const res = await fetch("/api/print", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            html: source.outerHTML,
+            title: `Relatório - ${route.name}`,
+            routeId: route.id,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            shareUrl = `${window.location.origin}/imprimir-romaneio?token=${encodeURIComponent(data.token)}`;
+          }
+        }
+      }
+    } catch {}
+
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
           title: `Romaneio - ${route.name}`,
           text: `Romaneio da Rota: ${route.name} (${route.driver_name || "Motorista"}) - ${completedStops.length}/${deliveryStops.length} entregas concluídas.`,
-          url: `${window.location.origin}/imprimir-romaneio?routeId=${encodeURIComponent(route.id)}`,
+          url: shareUrl,
         });
       } catch {}
     } else {
@@ -93,6 +129,17 @@ export function RouteReportModal({
             <a className="button secondary compact" href="/api/reports/export?format=xlsx" download>
               <FileSpreadsheet size={15} /> Baixar Excel (.xlsx)
             </a>
+            {isIosStandalone && (
+              <a
+                className="button secondary compact"
+                href={`x-safari-${typeof window !== "undefined" ? window.location.origin : ""}/imprimir-romaneio?routeId=${encodeURIComponent(route.id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Abrir no Safari para acionar AirPrint nativo"
+              >
+                <ExternalLink size={15} /> Abrir no Safari
+              </a>
+            )}
             <button type="button" className="button secondary compact" onClick={handleShare}>
               <Share2 size={15} /> Compartilhar
             </button>

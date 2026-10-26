@@ -3,10 +3,11 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Printer, Share2, Check, RefreshCw } from "lucide-react";
+import { ArrowLeft, Printer, Share2, RefreshCw } from "lucide-react";
 
 function PrintContent() {
   const searchParams = useSearchParams();
+  const token = searchParams.get("token");
   const routeId = searchParams.get("routeId");
 
   const [htmlContent, setHtmlContent] = useState<string>("");
@@ -20,63 +21,86 @@ function PrintContent() {
       setCanShare(true);
     }
 
-    let loadedHtml = "";
-    let loadedTitle = "";
-
-    try {
-      loadedHtml = localStorage.getItem("routewise_print_html") || "";
-      loadedTitle = localStorage.getItem("routewise_print_title") || "";
-    } catch {}
-
-    if (loadedHtml) {
-      setHtmlContent(loadedHtml);
-      if (loadedTitle) {
-        setDocTitle(loadedTitle);
-        document.title = loadedTitle;
-      }
-      setLoading(false);
+    // 1. Prioridade máxima: carregar via Token de Impressão da API (funciona cross-browser, cross-PWA e Safari sem auth)
+    if (token) {
+      fetch(`/api/print?token=${encodeURIComponent(token)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.html) {
+            setHtmlContent(data.html);
+            if (data.title) {
+              setDocTitle(data.title);
+              document.title = data.title;
+            }
+            setLoading(false);
+          } else {
+            fallbackLocal();
+          }
+        })
+        .catch(() => fallbackLocal());
       return;
     }
 
-    // Se não houver HTML no localStorage, tenta buscar pelo routeId da URL
-    if (routeId) {
-      fetch(`/api/routes/${encodeURIComponent(routeId)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data?.route) {
-            const r = data.route;
-            setDocTitle(`Romaneio - ${r.name}`);
-            document.title = `Romaneio - ${r.name}`;
-            // Monta template simples se necessário
-            setHtmlContent(`
-              <div class="printable-report-paper">
-                <header class="report-doc-header">
-                  <div class="report-logo">
-                    <img class="brand-mark" src="/icon.svg" width="40" height="40" alt="" />
-                    <b>Criar Rota</b>
-                  </div>
-                  <div class="report-title-block">
-                    <h1>ROMANEIO DE ENTREGA</h1>
-                    <p>Comprovante operacional de viagem e entregas</p>
-                  </div>
-                </header>
-                <section class="report-section">
-                  <h2>${r.name}</h2>
-                  <p>Motorista: <b>${r.driver_name || "Não atribuído"}</b> | Placa: <b>${r.driver_plate || "--"}</b></p>
-                  <p>Data: <b>${r.route_date ? new Date(r.route_date).toLocaleDateString("pt-BR") : "--"}</b></p>
-                </section>
-              </div>
-            `);
-          }
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
-  }, [routeId]);
+    fallbackLocal();
 
-  // Disparo automático da impressão no navegador após renderização
+    function fallbackLocal() {
+      // 2. Fallback: carregar do localStorage da sessão atual
+      let loadedHtml = "";
+      let loadedTitle = "";
+      try {
+        loadedHtml = localStorage.getItem("routewise_print_html") || "";
+        loadedTitle = localStorage.getItem("routewise_print_title") || "";
+      } catch {}
+
+      if (loadedHtml) {
+        setHtmlContent(loadedHtml);
+        if (loadedTitle) {
+          setDocTitle(loadedTitle);
+          document.title = loadedTitle;
+        }
+        setLoading(false);
+        return;
+      }
+
+      // 3. Fallback: carregar via routeId da API
+      if (routeId) {
+        fetch(`/api/routes/${encodeURIComponent(routeId)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.route) {
+              const r = data.route;
+              setDocTitle(`Romaneio - ${r.name}`);
+              document.title = `Romaneio - ${r.name}`;
+              setHtmlContent(`
+                <div class="printable-report-paper">
+                  <header class="report-doc-header">
+                    <div class="report-logo">
+                      <img class="brand-mark" src="/icon.svg" width="40" height="40" alt="" />
+                      <b>Criar Rota</b>
+                    </div>
+                    <div class="report-title-block">
+                      <h1>ROMANEIO DE ENTREGA</h1>
+                      <p>Comprovante operacional de viagem e entregas</p>
+                    </div>
+                  </header>
+                  <section class="report-section">
+                    <h2>${r.name}</h2>
+                    <p>Motorista: <b>${r.driver_name || "Não atribuído"}</b> | Placa: <b>${r.driver_plate || "--"}</b></p>
+                    <p>Data: <b>${r.route_date ? new Date(r.route_date).toLocaleDateString("pt-BR") : "--"}</b></p>
+                  </section>
+                </div>
+              `);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [token, routeId]);
+
+  // Disparo automático do AirPrint / Spooler nativo ao abrir a página
   useEffect(() => {
     if (!htmlContent || loading || printed) return;
     const timer = setTimeout(() => {
@@ -116,7 +140,7 @@ function PrintContent() {
       <main className="standalone-print-page">
         <div style={{ textAlign: "center", padding: "60px 20px" }}>
           <RefreshCw className="spin" size={32} style={{ marginBottom: "16px", color: "var(--primary, #008060)" }} />
-          <p>Carregando romaneio para impressão…</p>
+          <p>Preparando romaneio para impressão…</p>
         </div>
       </main>
     );
@@ -145,7 +169,7 @@ function PrintContent() {
 
   return (
     <main className="standalone-print-page">
-      {/* Barra de Ações Superior (Oculta na impressão A4) */}
+      {/* Barra de Ações Superior (Oculta na folha impressa A4) */}
       <div className="standalone-print-bar no-print">
         <div className="print-bar-brand">
           <Link href="/" className="back-link">
@@ -166,7 +190,7 @@ function PrintContent() {
         </div>
       </div>
 
-      {/* Conteúdo Impresso Original */}
+      {/* Conteúdo Impresso */}
       <div
         className="standalone-print-content"
         dangerouslySetInnerHTML={{ __html: htmlContent }}

@@ -6,12 +6,11 @@
  * 2. Em standalone PWA no Android (WebAPK), o Chromium bloqueia chamadas diretas a window.print().
  *    O utilitário armazena o romaneio e despacha via Intent para o Google Chrome,
  *    onde o Spooler de Impressão do Android abre perfeitamente.
- * 3. Cria um portal isolado (#routewise-print-portal) montado diretamente no body para navegadores padrão.
- * 4. Aplica classes no body (routewise-portal-active isolated-print-document) para ocultar
- *    a interface da aplicação (barras de navegação, mapas, modais) durante o print.
- * 5. Define o document.title com o nome do romaneio para que o arquivo PDF salvo receba o nome correto.
- * 6. Dispara window.print() de forma imediata preservando o gesto do usuário no iOS/Android.
- * 7. Limpa o portal e restaura o título após a impressão (evento afterprint e fallback seguro).
+ * 3. Em standalone PWA no iOS (iPhone/iPad), o WebKit bloqueia chamadas diretas a window.print().
+ *    O utilitário armazena o romaneio com token efêmero e despacha via x-safari- para o Apple Safari,
+ *    onde o AirPrint abre perfeitamente.
+ * 4. Cria um portal isolado (#routewise-print-portal) montado diretamente no body para navegadores padrão.
+ * 5. Dispara window.print() imediatamente sem atrasos assíncronos para não expirar o gesto do usuário no iOS/Android.
  */
 
 export interface PrintOptions {
@@ -20,8 +19,6 @@ export interface PrintOptions {
 
 /**
  * Detecta se a aplicação está sendo executada no modo standalone (PWA instalado) em dispositivo Android.
- * Em WebAPKs Android standalone, o Chromium bloqueia/ignora o window.print() nativo,
- * exigindo direcionamento para o navegador Google Chrome para acionar o Print Spooler do sistema.
  */
 export function isAndroidPwaStandalone(): boolean {
   if (typeof window === "undefined") return false;
@@ -32,6 +29,21 @@ export function isAndroidPwaStandalone(): boolean {
     (window.navigator as unknown as { standalone?: boolean })?.standalone === true ||
     (typeof document !== "undefined" && Boolean(document.referrer?.includes("android-app://")));
   return Boolean(isAndroid && isStandalone);
+}
+
+/**
+ * Detecta se a aplicação está sendo executada no modo standalone (PWA instalado) em dispositivo iOS (iPhone / iPad).
+ */
+export function isIosPwaStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent ? navigator.userAgent : "").toLowerCase();
+  const isIos =
+    /iphone|ipad|ipod/.test(ua) ||
+    (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+  const isStandalone =
+    (window.navigator as unknown as { standalone?: boolean })?.standalone === true ||
+    Boolean(window.matchMedia?.("(display-mode: standalone)")?.matches);
+  return Boolean(isIos && isStandalone);
 }
 
 export async function printElement(
@@ -45,92 +57,105 @@ export async function printElement(
   // Clona o elemento de forma profunda
   const clone = source.cloneNode(true) as HTMLElement;
 
-  // Standalone PWA em Android: o Chromium WebAPK bloqueia ou ignora o window.print() nativo.
-  // Salva o documento no localStorage e abre via Google Chrome (Intent nativo),
-  // onde o Android Print Spooler é acionado imediatamente.
-  if (isAndroidPwaStandalone()) {
+  // Salva no localStorage local para fallback
+  try {
+    localStorage.setItem("routewise_print_html", clone.outerHTML);
+    localStorage.setItem("routewise_print_title", title || "Romaneio - Criar Rota");
+    if (options?.routeId) localStorage.setItem("routewise_print_route_id", options.routeId);
+    localStorage.setItem("routewise_print_ts", String(Date.now()));
+  } catch {}
+
+  // 1. Standalone PWA (iOS ou Android)
+  if (isIosPwaStandalone() || isAndroidPwaStandalone()) {
+    let token = "";
     try {
-      localStorage.setItem("routewise_print_html", clone.outerHTML);
-      localStorage.setItem("routewise_print_title", title || "Romaneio - Criar Rota");
-      if (options?.routeId) {
-        localStorage.setItem("routewise_print_route_id", options.routeId);
+      const res = await fetch(`${window.location.origin}/api/print`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          html: clone.outerHTML,
+          title: title || "Romaneio de Entrega",
+          routeId: options?.routeId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        token = data.token || "";
       }
-      localStorage.setItem("routewise_print_ts", String(Date.now()));
     } catch (e) {
-      console.warn("Falha ao salvar cache de impressão:", e);
+      console.warn("Falha ao registrar token de impressão:", e);
     }
 
-    const routeParam = options?.routeId ? `?routeId=${encodeURIComponent(options.routeId)}` : "";
-    const printUrl = `${window.location.origin}/imprimir-romaneio${routeParam}`;
-    const strippedUrl = printUrl.replace(/^https?:\/\//, "");
-    const intentUrl = `intent://${strippedUrl}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(printUrl)};end;`;
+    const tokenParam = token
+      ? `?token=${encodeURIComponent(token)}`
+      : options?.routeId
+      ? `?routeId=${encodeURIComponent(options.routeId)}`
+      : "";
+    const printUrl = `${window.location.origin}/imprimir-romaneio${tokenParam}`;
 
-    // Dispara a navegação direta para o Google Chrome
-    window.location.href = intentUrl;
-    return;
+    // No Android PWA: Intent direto para o Google Chrome
+    if (isAndroidPwaStandalone()) {
+      const strippedUrl = printUrl.replace(/^https?:\/\//, "");
+      const intentUrl = `intent://${strippedUrl}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(printUrl)};end;`;
+      window.location.href = intentUrl;
+      return;
+    }
+
+    // No iOS PWA (iPhone / iPad):
+    // Apple WebKit standalone bloqueia window.print().
+    // Redireciona via protocolo nativo x-safari- para abrir diretamente no Safari,
+    // onde o AirPrint e geração de PDF abrem com 100% de suporte nativo da Apple.
+    if (isIosPwaStandalone()) {
+      window.location.href = `x-safari-${printUrl}`;
+      return;
+    }
   }
 
-  // Limpa portais ou frames anteriores para evitar acúmulo no DOM
+  // 2. Navegador padrão (Desktop ou Safari móvel comum)
   document.querySelectorAll("#routewise-print-portal, .routewise-print-frame").forEach((el) => {
     try { el.remove(); } catch {}
   });
   document.body.classList.remove("routewise-portal-active", "isolated-print-document");
 
-  // Cria o portal de impressão isolado no body principal
   const portal = document.createElement("div");
   portal.id = "routewise-print-portal";
   portal.setAttribute("aria-hidden", "true");
-
   portal.appendChild(clone);
   document.body.appendChild(portal);
 
-  // Altera o título da página para que o PDF gerado ou diálogo de impressão mostre o nome correto
   const prevTitle = document.title;
   if (title) {
     document.title = title.replace(/[<>&]/g, "").trim();
   }
-
-  // Ativa classes de impressão no body
   document.body.classList.add("routewise-portal-active", "isolated-print-document");
 
   let cleanedUp = false;
+  let cleanupTimer: any = null;
+
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    document.body.classList.remove("routewise-portal-active", "isolated-print-document");
+    if (cleanupTimer) {
+      try { clearTimeout(cleanupTimer); } catch {}
+      cleanupTimer = null;
+    }
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.remove("routewise-portal-active", "isolated-print-document");
+    }
     try {
       portal.remove();
     } catch {}
-    document.title = prevTitle;
-    window.removeEventListener("afterprint", cleanup);
+    if (typeof document !== "undefined") {
+      document.title = prevTitle;
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("afterprint", cleanup);
+    }
   };
 
   window.addEventListener("afterprint", cleanup, { once: true });
-  // Timeout de segurança caso afterprint não seja disparado
-  window.setTimeout(cleanup, 120000);
+  cleanupTimer = window.setTimeout(cleanup, 30000);
 
-  // Aguarda imagens pendentes decodificarem (máximo 400ms para não expirar o gesto do usuário no iOS Safari)
-  const images = Array.from(portal.querySelectorAll("img"));
-  const pendingImages = images.filter((img) => !img.complete);
-  if (pendingImages.length > 0) {
-    await Promise.race([
-      Promise.all(
-        pendingImages.map(
-          (img) =>
-            new Promise<void>((resolve) => {
-              if (img.complete) return resolve();
-              img.onload = img.onerror = () => resolve();
-            })
-        )
-      ),
-      new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
-    ]);
-  }
-
-  // Invoca a impressão nativa do navegador
-  // iOS Safari / PWA: abre a folha nativa do AirPrint imediatamente
-  // Android Chrome: abre o Spooler de Impressão do Android (Salvar como PDF / Imprimir)
-  // Desktop: abre o diálogo nativo de impressão
   if (typeof window.print !== "function") {
     cleanup();
     throw new Error("Seu navegador não suporta impressão nativa. Abra o Criar Rota no Google Chrome ou Safari.");

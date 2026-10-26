@@ -80,13 +80,91 @@ describe("Mobile Filter Bar Layout & Safe Area", () => {
   });
 });
 
-describe("PWA Standalone Printing & Chrome Hand-off", () => {
-  it("exports isAndroidPwaStandalone in lib/print-document.ts", async () => {
-    const { isAndroidPwaStandalone } = await import(`../lib/print-document.ts?t=${Date.now()}`);
+describe("PWA Standalone Printing & Platform Hand-off", () => {
+  it("exports isAndroidPwaStandalone and isIosPwaStandalone in lib/print-document.ts", async () => {
+    const { isAndroidPwaStandalone, isIosPwaStandalone } = await import(`../lib/print-document.ts?t=${Date.now()}`);
     assert.strictEqual(typeof isAndroidPwaStandalone, "function");
+    assert.strictEqual(typeof isIosPwaStandalone, "function");
 
     // In Node.js environment, should evaluate to false
     assert.strictEqual(isAndroidPwaStandalone(), false);
+    assert.strictEqual(isIosPwaStandalone(), false);
+  });
+
+  it("detects iOS standalone PWA and directs to Safari with token / x-safari-", async () => {
+    const { isIosPwaStandalone, printElement } = await import(`../lib/print-document.ts?t=${Date.now() + 2}`);
+
+    const storage = new Map();
+    const mockDocument = {
+      getElementById: (id) => ({
+        id,
+        cloneNode: () => ({
+          outerHTML: '<div id="printable-report"><h1>Romaneio iOS</h1></div>',
+          querySelectorAll: () => [],
+        }),
+      }),
+      querySelectorAll: () => [],
+      body: {
+        classList: { add: () => {}, remove: () => {} },
+        appendChild: () => {},
+      },
+    };
+
+    const mockWindow = {
+      location: {
+        origin: "https://criarrota.com.br",
+        href: "https://criarrota.com.br/",
+      },
+      matchMedia: (q) => ({ matches: q.includes("standalone") }),
+      navigator: {
+        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+        standalone: true,
+      },
+      document: mockDocument,
+    };
+
+    const prevWin = globalThis.window;
+    const prevDoc = globalThis.document;
+    const prevNav = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    const prevStorage = globalThis.localStorage;
+    const prevFetch = globalThis.fetch;
+
+    globalThis.window = mockWindow;
+    globalThis.document = mockDocument;
+    Object.defineProperty(globalThis, "navigator", {
+      value: mockWindow.navigator,
+      configurable: true,
+      writable: true,
+    });
+    globalThis.localStorage = {
+      setItem: (k, v) => storage.set(k, v),
+      getItem: (k) => storage.get(k),
+    };
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ token: "prt_ios123", url: "/imprimir-romaneio?token=prt_ios123" }),
+    });
+
+    try {
+      assert.strictEqual(isIosPwaStandalone(), true, "Must detect iOS standalone PWA");
+
+      await printElement("printable-report", "Romaneio - Rota Norte", { routeId: "route-999" });
+
+      // Stored in localStorage
+      assert.ok(storage.has("routewise_print_html"), "Must store print HTML in localStorage");
+
+      // Directed to Safari via x-safari- URL scheme
+      assert.ok(mockWindow.location.href.startsWith("x-safari-"), "Must set window.location.href to x-safari-");
+      assert.ok(mockWindow.location.href.includes("token=prt_ios123"), "Must include print token in URL");
+    } finally {
+      globalThis.window = prevWin;
+      globalThis.document = prevDoc;
+      if (prevNav) {
+        Object.defineProperty(globalThis, "navigator", prevNav);
+      }
+      globalThis.localStorage = prevStorage;
+      globalThis.fetch = prevFetch;
+    }
   });
 
   it("detects Android standalone PWA and constructs Chrome intent navigation", async () => {
