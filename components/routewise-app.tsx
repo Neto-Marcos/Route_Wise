@@ -3972,24 +3972,6 @@ function RoutePlannerView({
     }
   };
 
-  const openGoogleMaps = () => {
-    if (!stops.length) return;
-    const path = stops.map((s) => `${s.lat},${s.lng}`).join("/");
-    window.open(`https://www.google.com/maps/dir/${path}`, "_blank", "noopener,noreferrer");
-  };
-
-  const copyRouteLink = async () => {
-    if (stops.length < 2) return;
-    const path = stops.map((s) => `${s.lat},${s.lng}`).join("/");
-    const gmapsUrl = `https://www.google.com/maps/dir/${path}`;
-    try {
-      await navigator.clipboard.writeText(gmapsUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
-    } catch {
-      setError("Não foi possível copiar o link.");
-    }
-  };
 
   const printRouteSheet = () => {
     if (stops.length < 2) return;
@@ -4368,26 +4350,6 @@ function RoutePlannerView({
           {optimizing && <div className="route-calculating" role="status">Calculando trajeto pelas ruas…</div>}
 
           <div className="actions-grid-2x2">
-            <button
-              type="button"
-              className="btn-action-tile btn-gmaps"
-              disabled={stops.length < 2}
-              onClick={openGoogleMaps}
-              title="Abrir rota no Google Maps"
-            >
-              <Navigation size={13} />
-              <span>Google Maps</span>
-            </button>
-            <button
-              type="button"
-              className="btn-action-tile btn-copy"
-              disabled={stops.length < 2}
-              onClick={copyRouteLink}
-              title="Copiar link da rota"
-            >
-              <Copy size={13} />
-              <span>{copied ? "Copiado!" : "Copiar link"}</span>
-            </button>
             <button
               type="button"
               className="btn-action-tile btn-whatsapp"
