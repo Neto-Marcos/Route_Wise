@@ -3722,16 +3722,27 @@ function RoutePlannerView({
     }
   };
 
+  const clientGeocodeCache = useRef(new Map<string, any[]>());
+
   const search = useCallback(async (term: string, signal?: AbortSignal) => {
-    if (term.trim().length < 3) {
+    const clean = term.trim();
+    if (clean.length < 2) {
       setResults([]);
       setSearching(false);
       return;
     }
+    const cleanKey = clean.toLowerCase();
+    const cached = clientGeocodeCache.current.get(cleanKey);
+    if (cached) {
+      setResults(cached);
+      setSearching(false);
+      return;
+    }
+
     setSearching(true);
     setError("");
     try {
-      const response = await fetch(`/api/geocode?q=${encodeURIComponent(term.trim())}`, { signal });
+      const response = await fetch(`/api/geocode?q=${encodeURIComponent(clean)}`, { signal });
       let data: any = null;
       try {
         data = await response.json();
@@ -3740,6 +3751,7 @@ function RoutePlannerView({
       }
       if (!response.ok) throw new Error(data?.error || "Não foi possível pesquisar o endereço.");
       const places = Array.isArray(data) ? data : [];
+      clientGeocodeCache.current.set(cleanKey, places);
       setResults(places);
       if (places.length === 0) setError("Nenhuma cidade ou endereço encontrado. Tente informar também o estado.");
     } catch (e) {
@@ -3751,7 +3763,7 @@ function RoutePlannerView({
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => search(queryText, controller.signal), 450);
+    const timer = window.setTimeout(() => search(queryText, controller.signal), 180);
     return () => {
       window.clearTimeout(timer);
       controller.abort();

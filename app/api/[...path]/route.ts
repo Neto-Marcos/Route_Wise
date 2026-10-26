@@ -24,6 +24,8 @@ import { uploadUrl, viewUrl } from "@/lib/storage";
 import { normalizeDriverPhoto } from "@/lib/driver-photo";
 import { BRAZILIAN_HUBS } from "@/lib/geo-brazil";
 
+const geocodeMemoryCache = new Map<string, { items: any[]; ts: number }>();
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ path: string[] }> };
@@ -125,26 +127,92 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     if (p[0] === "geocode") {
       const term = String(req.nextUrl.searchParams.get("q") || "").trim();
-      if (term.length < 3) return json([]);
+      if (term.length < 2) return json([]);
 
-      // 1. Tentar Nominatim oficial com IPv4 e User-Agent em conformidade
-      const search = new URLSearchParams({
-        format: "jsonv2",
-        limit: "8",
-        countrycodes: "br",
-        addressdetails: "1",
-        q: term,
-      });
+      const termNorm = term
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
+      // 1. Cache em memória no processo Node (0ms de latência)
+      const cached = geocodeMemoryCache.get(termNorm);
+      if (cached && Date.now() - cached.ts < 86400000 && cached.items.length > 0) {
+        return json(cached.items);
+      }
+
+      const results: Array<{ name: string; address: string; lat: number; lng: number }> = [];
+      const seen = new Set<string>();
+
+      const addResult = (name: string, address: string, lat: number, lng: number) => {
+        const key = `${Math.round(lat * 100)},${Math.round(lng * 100)}`;
+        if (!seen.has(key) && Number.isFinite(lat) && Number.isFinite(lng)) {
+          seen.add(key);
+          results.push({ name, address, lat, lng });
+        }
+      };
+
+      // 2. Consulta ultra-rápida no banco de dados local city_geocodes (1ms a 3ms)
       try {
+        const dbRes = await query<{ city_normalized: string; uf: string; display_name: string | null; lat: number | string; lng: number | string }>(
+          `SELECT city_normalized, uf, display_name, lat, lng
+           FROM city_geocodes
+           WHERE city_normalized ILIKE $1 OR display_name ILIKE $1
+           ORDER BY (city_normalized = $2) DESC, (city_normalized ILIKE $3) DESC, length(city_normalized) ASC
+           LIMIT 8`,
+          [`%${termNorm}%`, termNorm, `${termNorm}%`]
+        );
+        for (const r of dbRes.rows) {
+          const lat = Number(r.lat);
+          const lng = Number(r.lng);
+          const name = r.display_name?.split(",")[0] || `${r.city_normalized.toUpperCase()} - ${r.uf}`;
+          const address = r.display_name || `${r.city_normalized.toUpperCase()}, ${r.uf}, Brasil`;
+          addResult(name, address, lat, lng);
+        }
+      } catch (dbErr) {
+        console.warn("Local DB geocode lookup error:", dbErr);
+      }
+
+      // 3. Consulta rápida em memória: BRAZILIAN_HUBS (0.1ms)
+      try {
+        const termKey = termNorm.replace(/\s+/g, "_");
+        for (const [key, hub] of Object.entries(BRAZILIAN_HUBS)) {
+          const normHubName = hub.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (key.startsWith(termKey) || normHubName.startsWith(termNorm) || key.includes(termKey)) {
+            addResult(hub.name, `${hub.name}, ${hub.uf}, Brasil`, hub.lat, hub.lng);
+            if (results.length >= 6) break;
+          }
+        }
+      } catch (err) {
+        console.warn("Hub fast lookup error:", err);
+      }
+
+      // Se já encontrou resultados locais, retorne imediatamente em < 5ms!
+      if (results.length >= 2) {
+        geocodeMemoryCache.set(termNorm, { items: results, ts: Date.now() });
+        return json(results);
+      }
+
+      // 4. Apenas se não houver resultados locais suficientes, consulta Nominatim com timeout curto (2500ms)
+      try {
+        const search = new URLSearchParams({
+          format: "jsonv2",
+          limit: "6",
+          countrycodes: "br",
+          addressdetails: "1",
+          q: term,
+        });
+
         const response = await fetch(`https://nominatim.openstreetmap.org/search?${search}`, {
           headers: {
             "User-Agent": "CriarRota/1.0 (https://criarrota.com.br; contato@criarrota.com.br)",
             Accept: "application/json",
             "Accept-Language": "pt-BR,pt;q=0.9",
           },
-          signal: AbortSignal.timeout(6000),
-          next: { revalidate: 300 },
+          signal: AbortSignal.timeout(2500),
+          next: { revalidate: 3600 },
         });
 
         if (response.ok) {
@@ -158,74 +226,31 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             }))
             .filter((item: any) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
 
-          if (items.length > 0) {
-            return json(items);
+          for (const it of items) {
+            addResult(it.name, it.address, it.lat, it.lng);
+
+            // Grava no banco local city_geocodes para NUNCA mais precisar chamar o Nominatim para esta cidade
+            const [cityName] = it.address.split(",");
+            const cityNormPart = cityName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            query(
+              `INSERT INTO city_geocodes(city_normalized, uf, display_name, lat, lng, source)
+               VALUES($1, 'BR', $2, $3, $4, 'nominatim')
+               ON CONFLICT(city_normalized, uf) DO UPDATE
+               SET display_name=EXCLUDED.display_name, lat=EXCLUDED.lat, lng=EXCLUDED.lng, verified_at=now()`,
+              [cityNormPart, it.address, it.lat, it.lng]
+            ).catch(() => {});
           }
         }
       } catch (err) {
         console.warn("Nominatim geocode warning:", (err as Error).message);
       }
 
-      // 2. Fallback local no banco de dados city_geocodes
-      try {
-        const termNorm = term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-        const dbRes = await query<{ city_normalized: string; uf: string; display_name: string | null; lat: number | string; lng: number | string }>(
-          `SELECT city_normalized, uf, display_name, lat, lng
-           FROM city_geocodes
-           WHERE city_normalized ILIKE $1 OR display_name ILIKE $1
-           LIMIT 5`,
-          [`%${termNorm}%`]
-        );
-        if (dbRes.rows.length > 0) {
-          return json(
-            dbRes.rows
-              .filter((r) => Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng)))
-              .map((r) => ({
-                name: r.display_name?.split(",")[0] || `${r.city_normalized.toUpperCase()} - ${r.uf}`,
-                address: r.display_name || `${r.city_normalized.toUpperCase()}, ${r.uf}, Brasil`,
-                lat: Number(r.lat),
-                lng: Number(r.lng),
-              }))
-          );
-        }
-      } catch (dbErr) {
-        console.warn("Local DB geocode lookup failed:", dbErr);
+      // Salva no cache de memória
+      if (results.length > 0) {
+        geocodeMemoryCache.set(termNorm, { items: results, ts: Date.now() });
       }
 
-      // 3. Fallback em memória: BRAZILIAN_HUBS
-      try {
-        const normalizedTerm = term
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]/g, "_")
-          .replace(/_+/g, "_")
-          .replace(/^_|_$/g, "");
-
-        const hubMatches = Object.entries(BRAZILIAN_HUBS).filter(([key, hub]) => {
-          const normName = hub.name
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "");
-          return key.includes(normalizedTerm) || normName.includes(normalizedTerm.replace(/_/g, " "));
-        });
-
-        if (hubMatches.length > 0) {
-          return json(
-            hubMatches.slice(0, 5).map(([, hub]) => ({
-              name: hub.name,
-              address: `${hub.name}, ${hub.uf}, Brasil`,
-              lat: hub.lat,
-              lng: hub.lng,
-            }))
-          );
-        }
-      } catch (hubErr) {
-        console.warn("Hub fallback lookup failed:", hubErr);
-      }
-
-      // 4. Sempre retornar status 200 com array vazio caso não encontre (evita 502 do Cloudflare)
-      return json([]);
+      return json(results);
     }
     if (p[0] === "stations") {
       try {
