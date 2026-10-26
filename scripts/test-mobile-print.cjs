@@ -12,32 +12,24 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
     const code = ts.transpileModule(fs.readFileSync(require('node:path').join(__dirname, '../lib/print-document.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2020 } }).outputText.replace('export async function', 'async function');
     await page.addScriptTag({ content: code });
     await page.evaluate(() => {
-      const open = window.open.bind(window);
-      window.open = (...args) => {
-        const win = open(...args);
-        if (win) win.print = () => { win.printCalls = (win.printCalls || 0) + 1; };
-        return win;
-      };
+      window.printCalls = 0;
+      window.openCalled = false;
+      window.open = () => { window.openCalled = true; return null; };
+      window.print = () => { window.printCalls = (window.printCalls || 0) + 1; };
       document.querySelector('#print').onclick = () => { window.done = printElement('report', 'Romaneio'); };
     });
-    const pendingPopup = page.waitForEvent('popup');
     await page.click('#print');
-    const popup = await pendingPopup;
     await page.evaluate(() => window.done);
-    assert.equal(await popup.locator('#report').textContent(), 'RomaneioPedido 123 — 1,234 m³');
-    assert.equal(await popup.evaluate(() => window.printCalls), 1);
-    await popup.click('#print-preview-button');
-    assert.equal(await popup.evaluate(() => window.printCalls), 2);
-    await popup.emulateMedia({ media: 'print' });
-    assert.equal(await popup.locator('.print-preview-toolbar').isVisible(), false);
-    assert.equal(await popup.locator('#report').isVisible(), true);
-    await popup.evaluate(() => window.dispatchEvent(new Event('afterprint')));
-    assert.equal(popup.isClosed(), false);
-    await page.evaluate(() => { window.open = () => null; });
-    const error = await page.evaluate(() => printElement('report', 'Teste').catch(e => e.message));
-    assert.match(error, /Permita abrir novas abas/);
+    assert.equal(await page.evaluate(() => window.openCalled), false, 'Must not call window.open on mobile');
+    assert.equal(await page.evaluate(() => window.printCalls), 1, 'Must invoke native window.print()');
+    assert.equal(await page.evaluate(() => document.title), 'Romaneio', 'Must update title for PDF naming');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('routewise-portal-active')), true);
+    assert.equal(await page.locator('#routewise-print-portal #report').textContent(), 'RomaneioPedido 123 — 1,234 m³');
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    assert.equal(await page.evaluate(() => document.body.classList.contains('routewise-portal-active')), false);
+    assert.equal(await page.locator('#routewise-print-portal').count(), 0);
     const missing = await page.evaluate(() => printElement('missing', 'Teste').catch(e => e.message));
     assert.match(missing, /não encontrado/);
-    console.log('PASS: visible mobile document, automatic print call, retry, print CSS, retained preview, blocked popup and missing document. Native printer dialog requires a physical device.');
+    console.log('PASS: native mobile print portal, zero popups, title update, and clean afterprint recovery.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

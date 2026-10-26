@@ -2657,6 +2657,11 @@ input:focus, select:focus, textarea:focus {
   .planner-print-sheet footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #cbd5e1; color: #64748b; font-size: 9px; text-align: center; }
 }
 
+/* Screen mode: Portal is strictly hidden and never affects screen layout */
+#routewise-print-portal {
+  display: none !important;
+}
+
 @media print {
   body.isolated-print-document { margin: 0 !important; background: #fff !important; }
   body.isolated-print-document * { visibility: visible !important; }
@@ -2668,6 +2673,41 @@ input:focus, select:focus, textarea:focus {
     max-width: none !important;
     margin: 0 !important;
     box-shadow: none !important;
+  }
+
+  /* Quando o portal de impressão estiver ativo, ocultar todos os outros elementos do body */
+  body.routewise-portal-active > *:not(#routewise-print-portal) {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  body.routewise-portal-active > #routewise-print-portal {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  body.routewise-portal-active > #routewise-print-portal * {
+    visibility: visible !important;
+  }
+  body.routewise-portal-active #routewise-print-portal .printable-report-paper,
+  body.routewise-portal-active #routewise-print-portal .planner-print-sheet {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    visibility: visible !important;
+  }
+  body.routewise-portal-active #routewise-print-portal .no-print {
+    display: none !important;
   }
 }
 
