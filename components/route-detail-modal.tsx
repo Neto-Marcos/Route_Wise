@@ -558,7 +558,8 @@ export function RouteDetailModal({
               {route.stops?.map((stop, index) => {
                 const isOrigin = stop.is_origin || index === 0;
                 const isDelivered = stop.status === "delivered";
-                const event = route.delivery_events?.find((e) => e.stop_id === stop.id);
+                const stopEvents = route.delivery_events?.filter((e) => e.stop_id === stop.id) || [];
+                const event = stopEvents[0];
                 const canEdit = !isOrigin && ["draft", "assigned"].includes(route.status);
 
                 return (
@@ -610,21 +611,29 @@ export function RouteDetailModal({
                       )}
                     </div>
 
-                    {event?.photo_url && (
-                      <button
-                        type="button"
-                        className="stop-proof-thumb"
-                        onClick={() =>
-                          setActivePhoto({
-                            url: event.photo_url!,
-                            title: `Comprovante: ${stop.name}`,
-                            subtitle: `${formatTime(event.delivered_at)}${event.note ? ` · "${event.note}"` : ""}`,
-                          })
-                        }
-                      >
-                        <img src={event.photo_url} alt="Comprovante" />
-                        <span><Camera size={11} /> Foto</span>
-                      </button>
+                    {stopEvents.length > 0 && (
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                        {stopEvents.map((evt, evtIdx) =>
+                          evt.photo_url ? (
+                            <button
+                              key={evt.id || evtIdx}
+                              type="button"
+                              className="stop-proof-thumb"
+                              onClick={() =>
+                                setActivePhoto({
+                                  url: evt.photo_url!,
+                                  title: `Comprovante #${evtIdx + 1}: ${stop.name}`,
+                                  subtitle: `${formatTime(evt.delivered_at)}${evt.note ? ` - "${evt.note}"` : ""}`,
+                                })
+                              }
+                              title={`Ver comprovante #${evtIdx + 1}`}
+                            >
+                              <img src={evt.photo_url} alt={`Comprovante ${evtIdx + 1}`} />
+                              <span><Camera size={11} /> {stopEvents.length > 1 ? `#${evtIdx + 1}` : "Foto"}</span>
+                            </button>
+                          ) : null
+                        )}
+                      </div>
                     )}
                   </div>
                 );

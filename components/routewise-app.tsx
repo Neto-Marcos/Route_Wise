@@ -5466,6 +5466,20 @@ function ActiveRoute({
                                 Entregar
                               </button>
                             )}
+                            {data.status === "active" && s.status === "delivered" && (
+                              <button
+                                type="button"
+                                className="button secondary compact"
+                                style={{ padding: "6px 10px", fontSize: 12 }}
+                                onClick={() => {
+                                  setSelectedDeliveryStop(s);
+                                  setModal("delivery");
+                                }}
+                                title="Adicionar outro comprovante nesta cidade"
+                              >
+                                + Comprovante
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -5519,9 +5533,10 @@ function ActiveRoute({
             if (currentPhase === "start") {
               setData((prev) => ({ ...prev, status: "active" }));
             } else if (currentPhase === "delivery" && currentStop?.id) {
+              const alreadyDelivered = data.stops?.find((s) => s.id === currentStop.id)?.status === "delivered";
               setData((prev) => ({
                 ...prev,
-                delivered: (prev.delivered || 0) + 1,
+                delivered: alreadyDelivered ? (prev.delivered || 0) : (prev.delivered || 0) + 1,
                 stops: prev.stops?.map((s) =>
                   s.id === currentStop.id ? { ...s, status: "delivered" } : s,
                 ),
@@ -5543,6 +5558,14 @@ function ActiveRoute({
     </main>
   );
 }
+interface ProofPhotoItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+  blob: Blob;
+  base64: string;
+}
+
 function ProofModal({
   phase,
   route,
@@ -5561,10 +5584,7 @@ function ProofModal({
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [offlineSaved, setOfflineSaved] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
-  const [compressedBase64, setCompressedBase64] = useState<string>("");
+  const [photos, setPhotos] = useState<ProofPhotoItem[]>([]);
 
   const isSubmittingRef = useRef(false);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -5579,10 +5599,6 @@ function ProofModal({
   const minKm = phase === "start" ? vehicleOdo : startOdo;
 
   const handleSelectedFile = async (file: File) => {
-    if (previewUrl && previewUrl.startsWith("blob:")) {
-      try { URL.revokeObjectURL(previewUrl); } catch {}
-    }
-    setSelectedFile(file);
     setError("");
     setOfflineSaved(false);
     setStatusMessage("Otimizando imagem...");
@@ -5594,41 +5610,125 @@ function ProofModal({
         maxHeight: 1200,
         quality: 0.70,
       });
-      setCompressedBlob(res.blob);
-      setCompressedBase64(res.base64);
-      setPreviewUrl(res.dataUrl);
+      const newItem: ProofPhotoItem = {
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        previewUrl: res.dataUrl || URL.createObjectURL(res.blob || file),
+        blob: res.blob || file,
+        base64: res.base64 || "",
+      };
+      if (phase === "delivery") {
+        setPhotos((prev) => [...prev, newItem]);
+      } else {
+        setPhotos((prev) => {
+          prev.forEach((p) => {
+            if (p.previewUrl.startsWith("blob:")) {
+              try { URL.revokeObjectURL(p.previewUrl); } catch {}
+            }
+          });
+          return [newItem];
+        });
+      }
       setStatusMessage(null);
     } catch (err) {
       console.warn("Compressão de foto falhou:", err);
-      setCompressedBlob(file);
+      let b64 = "";
       try {
         const buf = await file.arrayBuffer();
-        setCompressedBase64(arrayBufferToBase64(buf));
+        b64 = arrayBufferToBase64(buf);
       } catch {}
-      setPreviewUrl(URL.createObjectURL(file));
+      const fallbackItem: ProofPhotoItem = {
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        blob: file,
+        base64: b64,
+      };
+      if (phase === "delivery") {
+        setPhotos((prev) => [...prev, fallbackItem]);
+      } else {
+        setPhotos([fallbackItem]);
+      }
       setStatusMessage(null);
     } finally {
       setCompressing(false);
     }
   };
 
+  const handleRemovePhoto = (id: string) => {
+    setPhotos((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (target?.previewUrl.startsWith("blob:")) {
+        try { URL.revokeObjectURL(target.previewUrl); } catch {}
+      }
+      return prev.filter((p) => p.id !== id);
+    });
+  };
+
+  const uploadSingleBlob = async (blob: Blob, base64: string): Promise<string> => {
+    try {
+      const signed = await api("/api/uploads/presign", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: phase,
+          contentType: "image/webp",
+          size: blob.size,
+        }),
+      });
+      const uploadRes = await fetch(signed.url, {
+        method: "PUT",
+        headers: { "Content-Type": "image/webp" },
+        body: blob,
+      });
+      if (uploadRes.ok) {
+        return signed.key;
+      }
+    } catch (putErr) {
+      console.warn("Presigned PUT falhou, tentando envio direto:", putErr);
+    }
+
+    if (base64) {
+      const b64Res = await api("/api/uploads/direct", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: phase,
+          contentType: "image/webp",
+          base64,
+        }),
+      });
+      return b64Res.key;
+    } else {
+      const formData = new FormData();
+      formData.append("file", blob, "photo.webp");
+      formData.append("kind", phase);
+      const directRes = await fetch("/api/uploads/direct", {
+        method: "POST",
+        headers: { "X-RouteWise-Role": "driver" },
+        body: formData,
+      });
+      if (directRes.ok) {
+        const dData = await directRes.json();
+        return dData.key;
+      }
+    }
+    throw new Error("Falha no upload da foto");
+  };
+
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (compressing) return;
     if (busy || offlineSaved || isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
-    const f = new FormData(e.currentTarget);
-    const blobToSend = compressedBlob || selectedFile;
-    if (!blobToSend || !blobToSend.size) {
-      isSubmittingRef.current = false;
-      setError("Por favor, tire uma foto ou selecione uma imagem.");
+    if (photos.length === 0) {
+      setError("Por favor, tire ao menos uma foto ou selecione uma imagem.");
       return;
     }
+    isSubmittingRef.current = true;
+    const f = new FormData(e.currentTarget);
     setBusy(true);
     setError("");
     setStatusMessage(null);
 
-    const operationId =
+    const defaultOperationId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -5652,50 +5752,44 @@ function ProofModal({
       console.warn("GPS fallback used:", geoErr);
     }
 
-    let photoKey = "";
-
     // Helper: Safely queue payload into IndexedDB routewise-offline
-    const queueOfflinePayload = async () => {
-      let b64 = compressedBase64;
-      if (!b64 && blobToSend) {
-        try {
-          const buf = await blobToSend.arrayBuffer();
-          b64 = arrayBufferToBase64(buf);
-        } catch {}
-      }
-      const payload: any = {
-        operationId,
-        lat,
-        lng,
-        photoBase64: b64,
-        photoContentType: "image/webp",
-      };
-      if (photoKey) {
-        payload.photoKey = photoKey;
-      }
+    const queueOfflinePayloads = async () => {
+      for (const pItem of photos) {
+        const itemOpId =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-      let targetUrl = "";
-      if (phase === "start") {
-        targetUrl = `/api/routes/${route.id}/start`;
-        payload.kilometers = Number(f.get("kilometers"));
-      } else if (phase === "finish") {
-        targetUrl = `/api/routes/${route.id}/finish`;
-        payload.kilometers = Number(f.get("kilometers"));
-        payload.confirmIncomplete = f.get("incomplete") === "on";
-      } else if (stop?.id) {
-        targetUrl = `/api/routes/${route.id}/deliveries/${stop.id}/complete`;
-        payload.occurrence = f.get("occurrence") || "entregue";
-        payload.note = String(f.get("note") || "").trim();
-      }
+        let targetUrl = "";
+        const payload: any = {
+          operationId: itemOpId,
+          lat,
+          lng,
+          photoBase64: pItem.base64,
+          photoContentType: "image/webp",
+        };
+        if (phase === "start") {
+          targetUrl = `/api/routes/${route.id}/start`;
+          payload.kilometers = Number(f.get("kilometers"));
+        } else if (phase === "finish") {
+          targetUrl = `/api/routes/${route.id}/finish`;
+          payload.kilometers = Number(f.get("kilometers"));
+          payload.confirmIncomplete = f.get("incomplete") === "on";
+        } else if (stop?.id) {
+          targetUrl = `/api/routes/${route.id}/deliveries/${stop.id}/complete`;
+          payload.occurrence = f.get("occurrence") || "entregue";
+          payload.note = String(f.get("note") || "").trim();
+        }
 
-      await enqueue({
-        id: operationId,
-        idempotencyKey: operationId,
-        url: targetUrl,
-        method: "POST",
-        headers: { "X-RouteWise-Role": "driver" },
-        body: payload,
-      });
+        await enqueue({
+          id: itemOpId,
+          idempotencyKey: itemOpId,
+          url: targetUrl,
+          method: "POST",
+          headers: { "X-RouteWise-Role": "driver" },
+          body: payload,
+        });
+      }
 
       setOfflineSaved(true);
       setStatusMessage("Salvo offline. Aguardando rede...");
@@ -5707,7 +5801,7 @@ function ProofModal({
     // If device is offline, immediately save to IndexedDB queue
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       try {
-        await queueOfflinePayload();
+        await queueOfflinePayloads();
       } catch (qErr) {
         isSubmittingRef.current = false;
         setError("Erro ao armazenar comprovante offline no aparelho.");
@@ -5718,105 +5812,53 @@ function ProofModal({
 
     // Attempt online submission with fallback to offline queue
     try {
-      photoKey = "";
-
-      // Tentativa 1: Presigned PUT
-      try {
-        const signed = await api("/api/uploads/presign", {
-          method: "POST",
-          body: JSON.stringify({
-            kind: phase,
-            contentType: "image/webp",
-            size: blobToSend.size,
-          }),
-        });
-
-        const uploadTarget = signed.url;
-        const uploadRes = await fetch(uploadTarget, {
-          method: "PUT",
-          headers: { "Content-Type": "image/webp" },
-          body: blobToSend,
-        });
-
-        if (uploadRes.ok) {
-          photoKey = signed.key;
-        } else {
-          throw new Error(`PUT falhou com status ${uploadRes.status}`);
-        }
-      } catch (putErr) {
-        console.warn("Upload PUT falhou, tentando envio direto:", putErr);
-
-        // Tentativa 2: Direct upload
-        try {
-          if (compressedBase64) {
-            const b64Res = await api("/api/uploads/direct", {
-              method: "POST",
-              body: JSON.stringify({
-                kind: phase,
-                contentType: "image/webp",
-                base64: compressedBase64,
-              }),
-            });
-            photoKey = b64Res.key;
-          } else {
-            const formData = new FormData();
-            formData.append("file", blobToSend, "photo.webp");
-            formData.append("kind", phase);
-            const directRes = await fetch("/api/uploads/direct", {
-              method: "POST",
-              headers: { "X-RouteWise-Role": "driver" },
-              body: formData,
-            });
-            if (directRes.ok) {
-              const dData = await directRes.json();
-              photoKey = dData.key;
-            } else {
-              throw new Error(`Direct POST falhou com status ${directRes.status}`);
-            }
-          }
-        } catch (directErr) {
-          reportTechnicalFailure("upload_failure", "/api/uploads/direct");
-          console.warn("Direct upload falhou, armazenando na fila offline:", directErr);
-          await queueOfflinePayload();
-          return;
-        }
-      }
-
-      if (!photoKey) {
-        await queueOfflinePayload();
-        return;
-      }
-
-      // 3. Finalizar etapa correspondente
-      const common = {
-        photoKey,
-        lat,
-        lng,
-        operationId,
-      };
-
       if (phase === "start") {
+        const pKey = await uploadSingleBlob(photos[0].blob, photos[0].base64);
         await api(`/api/routes/${route.id}/start`, {
           method: "POST",
           body: JSON.stringify({
-            ...common,
+            photoKey: pKey,
+            lat,
+            lng,
+            operationId: defaultOperationId,
             kilometers: Number(f.get("kilometers")),
           }),
         });
       } else if (phase === "finish") {
+        const pKey = await uploadSingleBlob(photos[0].blob, photos[0].base64);
         await api(`/api/routes/${route.id}/finish`, {
           method: "POST",
           body: JSON.stringify({
-            ...common,
+            photoKey: pKey,
+            lat,
+            lng,
+            operationId: defaultOperationId,
             kilometers: Number(f.get("kilometers")),
             confirmIncomplete: f.get("incomplete") === "on",
           }),
         });
       } else if (stop?.id) {
+        const uploadedItems: Array<{ operationId: string; photoKey: string; note?: string }> = [];
+        for (let i = 0; i < photos.length; i++) {
+          setStatusMessage(photos.length > 1 ? `Enviando comprovante ${i + 1} de ${photos.length}…` : "Enviando foto…");
+          const itemOpId =
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          const pKey = await uploadSingleBlob(photos[i].blob, photos[i].base64);
+          uploadedItems.push({
+            operationId: itemOpId,
+            photoKey: pKey,
+          });
+        }
         await api(`/api/routes/${route.id}/deliveries/${stop.id}/complete`, {
           method: "POST",
           body: JSON.stringify({
-            ...common,
+            operationId: uploadedItems[0]?.operationId || defaultOperationId,
+            photoKey: uploadedItems[0]?.photoKey,
+            photos: uploadedItems,
+            lat,
+            lng,
             occurrence: f.get("occurrence") || "entregue",
             note: String(f.get("note") || "").trim(),
           }),
@@ -5824,9 +5866,9 @@ function ProofModal({
       }
       onDone(phase, stop);
     } catch (e) {
-      console.warn("Envio online falhou, armazenando na fila offline:", e);
+      console.warn("Envio online falhou, tentando enfileirar offline:", e);
       try {
-        await queueOfflinePayload();
+        await queueOfflinePayloads();
       } catch (queueErr) {
         isSubmittingRef.current = false;
         setError((e as Error).message || "Erro ao registrar foto");
@@ -5928,28 +5970,101 @@ function ProofModal({
           </div>
         )}
 
-        {previewUrl ? (
-          <div className="photo-preview-box">
-            <img src={previewUrl} alt="Pré-visualização da foto" className="photo-preview-img" />
-            <div className="photo-preview-details">
-              <span className="photo-preview-badge">✓ Imagem otimizada (WebP)</span>
-              <small>{selectedFile?.name || "foto.webp"} ({(Number(compressedBlob?.size || selectedFile?.size || 0) / 1024).toFixed(0)} KB otimizada)</small>
-              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                <button
-                  type="button"
-                  className="button secondary compact"
-                  onClick={() => cameraInputRef.current?.click()}
+        {photos.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", margin: "0.25rem 0" }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(85px, 1fr))",
+              gap: "0.5rem",
+              maxHeight: "220px",
+              overflowY: "auto",
+              padding: "4px",
+            }}>
+              {photos.map((item, idx) => (
+                <div
+                  key={item.id}
+                  style={{
+                    position: "relative",
+                    borderRadius: "8px",
+                    overflow: "hidden",
+                    border: "1px solid var(--line, #e2e8f0)",
+                    aspectRatio: "1 / 1",
+                    background: "#000",
+                  }}
                 >
-                  <Camera size={14} /> Tirar outra
-                </button>
-                <button
-                  type="button"
-                  className="button secondary compact"
-                  onClick={() => galleryInputRef.current?.click()}
-                >
-                  <Upload size={14} /> Galeria
-                </button>
-              </div>
+                  <img
+                    src={item.previewUrl}
+                    alt={`Comprovante ${idx + 1}`}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                  <span
+                    style={{
+                      position: "absolute",
+                      bottom: "2px",
+                      left: "2px",
+                      background: "rgba(0,0,0,0.65)",
+                      color: "#fff",
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      padding: "1px 4px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    #{idx + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePhoto(item.id)}
+                    title="Remover foto"
+                    style={{
+                      position: "absolute",
+                      top: "2px",
+                      right: "2px",
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      background: "rgba(220, 38, 38, 0.9)",
+                      color: "#fff",
+                      border: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      lineHeight: "1",
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-dim, #64748b)" }}>
+                {photos.length} {photos.length === 1 ? "foto selecionada" : "fotos selecionadas"}
+              </span>
+              {phase === "delivery" && (
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    style={{ fontSize: "0.8rem", padding: "4px 8px" }}
+                    onClick={() => cameraInputRef.current?.click()}
+                  >
+                    <Camera size={14} /> + Foto
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    style={{ fontSize: "0.8rem", padding: "4px 8px" }}
+                    onClick={() => galleryInputRef.current?.click()}
+                  >
+                    <Upload size={14} /> + Galeria
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -5991,17 +6106,26 @@ function ProofModal({
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0];
-            if (f) handleSelectedFile(f);
+            if (f) {
+              handleSelectedFile(f);
+              e.target.value = "";
+            }
           }}
         />
         <input
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          multiple={phase === "delivery"}
           style={{ display: "none" }}
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleSelectedFile(f);
+            const files = e.target.files;
+            if (files && files.length > 0) {
+              for (let i = 0; i < files.length; i++) {
+                handleSelectedFile(files[i]);
+              }
+              e.target.value = "";
+            }
           }}
         />
 
@@ -6027,7 +6151,7 @@ function ProofModal({
         )}
 
         <button
-          disabled={busy || compressing || offlineSaved || (!selectedFile && !previewUrl)}
+          disabled={busy || compressing || offlineSaved || photos.length === 0}
           className="button primary"
           style={{ marginTop: "0.5rem" }}
         >
@@ -6036,8 +6160,10 @@ function ProofModal({
             : offlineSaved
               ? "Salvo offline. Aguardando rede..."
               : busy
-                ? "Enviando foto e registrando…"
-                : "Confirmar registro"}
+                ? (statusMessage || "Enviando comprovantes…")
+                : photos.length > 1
+                  ? `Confirmar registro (${photos.length} fotos)`
+                  : "Confirmar registro"}
         </button>
         {error && <p className="form-error" style={{ margin: "0.5rem 0 0 0" }}>{error}</p>}
       </form>

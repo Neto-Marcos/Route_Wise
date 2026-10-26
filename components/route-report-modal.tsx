@@ -201,7 +201,8 @@ export function RouteReportModal({
                 {route.stops?.map((stop, i) => {
                   const isOrigin = stop.is_origin || i === 0;
                   const isDelivered = stop.status === "delivered";
-                  const event = route.delivery_events?.find((e) => e.stop_id === stop.id);
+                  const stopEvents = route.delivery_events?.filter((e) => e.stop_id === stop.id) || [];
+                  const event = stopEvents[0];
 
                   return (
                     <tr key={stop.id || i} className={isDelivered ? "row-delivered" : ""}>
@@ -218,9 +219,17 @@ export function RouteReportModal({
                       </td>
                       <td>{formatTime(stop.delivered_at || event?.delivered_at)}</td>
                       <td>
-                        {event?.note && <span className="report-note-text">&ldquo;{event.note}&rdquo; </span>}
-                        {event?.photo_key && <span className="report-photo-badge">📷 Foto</span>}
-                        {!event?.note && !event?.photo_key && "--"}
+                        {stopEvents.map((evt) => evt.note).filter(Boolean).length > 0 && (
+                          <span className="report-note-text">
+                            &ldquo;{stopEvents.map((evt) => evt.note).filter(Boolean).join(" | ")}&rdquo;{" "}
+                          </span>
+                        )}
+                        {stopEvents.length > 0 && (
+                          <span className="report-photo-badge">
+                            📷 {stopEvents.length > 1 ? `${stopEvents.length} Fotos` : "Foto"}
+                          </span>
+                        )}
+                        {stopEvents.length === 0 && !event?.note && "--"}
                       </td>
                     </tr>
                   );
