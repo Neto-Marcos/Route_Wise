@@ -1035,58 +1035,64 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       session &&
       session.role === "driver"
     ) {
-      let photoKey = data.photoKey;
-      if (!photoKey && data.photoBase64) {
-        const ext = String(data.photoContentType || "").includes("webp") ? "webp" : "jpg";
-        const opId = data.operationId || randomUUID();
-        photoKey = `proof/${opId}.${ext}`;
-        const buf = Buffer.from(data.photoBase64, "base64");
-        const ct = data.photoContentType || (ext === "webp" ? "image/webp" : "image/jpeg");
-        await query(
-          "INSERT INTO upload_objects(object_key,kind,content_type,size_bytes,file_data) VALUES($1,$2,$3,$4,$5) ON CONFLICT(object_key) DO UPDATE SET file_data=EXCLUDED.file_data, size_bytes=EXCLUDED.size_bytes",
-          [photoKey, "proof", ct, buf.byteLength, buf],
-        );
-        try {
-          const uploadDir = resolve(process.cwd(), ".local-db", "uploads");
-          await mkdir(uploadDir, { recursive: true });
-          await writeFile(resolve(uploadDir, encodeURIComponent(photoKey)), buf);
-        } catch {}
-      }
-      if (photoKey && data.photoBase64) {
-        try {
-          const buf = Buffer.from(data.photoBase64, "base64");
+      // Support both a single photo and an array of photos
+      const rawPhotos: Array<{
+        operationId: string;
+        photoKey?: string;
+        photoBase64?: string;
+        photoContentType?: string;
+        note?: string;
+      }> = Array.isArray(data.photos) && data.photos.length > 0
+        ? data.photos
+        : [
+            {
+              operationId: data.operationId,
+              photoKey: data.photoKey,
+              photoBase64: data.photoBase64,
+              photoContentType: data.photoContentType,
+              note: data.note,
+            },
+          ];
+
+      for (const item of rawPhotos) {
+        if (!item.photoKey && item.photoBase64) {
+          const ext = String(item.photoContentType || "").includes("webp") ? "webp" : "jpg";
+          const opId = item.operationId || randomUUID();
+          item.photoKey = `proof/${opId}.${ext}`;
+          const buf = Buffer.from(item.photoBase64, "base64");
+          const ct = item.photoContentType || (ext === "webp" ? "image/webp" : "image/jpeg");
           await query(
-            "UPDATE upload_objects SET file_data=COALESCE(file_data, $1), size_bytes=COALESCE(size_bytes, $2) WHERE object_key=$3",
-            [buf, buf.byteLength, photoKey],
+            "INSERT INTO upload_objects(object_key,kind,content_type,size_bytes,file_data) VALUES($1,$2,$3,$4,$5) ON CONFLICT(object_key) DO UPDATE SET file_data=EXCLUDED.file_data, size_bytes=EXCLUDED.size_bytes",
+            [item.photoKey, "proof", ct, buf.byteLength, buf],
           );
-        } catch {}
+          try {
+            const uploadDir = resolve(process.cwd(), ".local-db", "uploads");
+            await mkdir(uploadDir, { recursive: true });
+            await writeFile(resolve(uploadDir, encodeURIComponent(item.photoKey)), buf);
+          } catch {}
+        }
+        if (item.photoKey && item.photoBase64) {
+          try {
+            const buf = Buffer.from(item.photoBase64, "base64");
+            await query(
+              "UPDATE upload_objects SET file_data=COALESCE(file_data, $1), size_bytes=COALESCE(size_bytes, $2) WHERE object_key=$3",
+              [buf, buf.byteLength, item.photoKey],
+            );
+          } catch {}
+        }
       }
 
+      const validPhotos = rawPhotos.filter((p) => Boolean(p.photoKey));
       if (
-        !data.operationId ||
-        !photoKey ||
+        validPhotos.length === 0 ||
         !Number.isFinite(Number(data.lat)) ||
         !Number.isFinite(Number(data.lng))
       )
         return json({ error: "Foto e localização são obrigatórias" }, 400);
+
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-
-        // Idempotency check: If delivery event was already recorded for this operationId OR this stop was already delivered
-        const existingEvent = await client.query(
-          "SELECT operation_id, photo_key FROM delivery_events WHERE operation_id=$1 OR (route_id=$2 AND stop_id=$3)",
-          [data.operationId, p[1], p[3]],
-        );
-        if (existingEvent.rows[0]) {
-          await client.query("COMMIT");
-          return json({
-            ok: true,
-            operationId: existingEvent.rows[0].operation_id || data.operationId,
-            photoKey: existingEvent.rows[0].photo_key || photoKey,
-            message: "Entrega já confirmada (idempotente)",
-          });
-        }
 
         const route = await client.query(
           `SELECT r.company_id,r.name AS route_name,d.name AS driver_name,s.name AS stop_name
@@ -1098,19 +1104,41 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         );
         if (!route.rows[0]) throw new Error("Rota não está ativa");
         const outcome = ["entregue", "cliente_ausente", "endereco_incorreto", "recusado"].includes(data.occurrence) ? data.occurrence : "entregue";
-        await client.query(
-          "INSERT INTO delivery_events(operation_id,route_id,stop_id,photo_key,note,lat,lng,occurrence) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(operation_id) DO NOTHING",
-          [
-            data.operationId,
-            p[1],
-            p[3],
-            photoKey,
-            data.note || null,
-            data.lat,
-            data.lng,
-            outcome,
-          ],
-        );
+
+        const processedPhotos: Array<{ operationId: string; photoKey: string }> = [];
+
+        for (const item of validPhotos) {
+          const itemOpId = item.operationId || data.operationId || randomUUID();
+          // Idempotency check: strictly by operation_id to allow multiple deliveries/photos for the same stop
+          const existingEvent = await client.query(
+            "SELECT operation_id, photo_key FROM delivery_events WHERE operation_id=$1",
+            [itemOpId],
+          );
+          if (existingEvent.rows[0]) {
+            processedPhotos.push({
+              operationId: existingEvent.rows[0].operation_id || itemOpId,
+              photoKey: existingEvent.rows[0].photo_key || item.photoKey!,
+            });
+            continue;
+          }
+
+          const photoNote = item.note || data.note || null;
+          await client.query(
+            "INSERT INTO delivery_events(operation_id,route_id,stop_id,photo_key,note,lat,lng,occurrence) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(operation_id) DO NOTHING",
+            [
+              itemOpId,
+              p[1],
+              p[3],
+              item.photoKey,
+              photoNote,
+              data.lat,
+              data.lng,
+              outcome,
+            ],
+          );
+          processedPhotos.push({ operationId: itemOpId, photoKey: item.photoKey! });
+        }
+
         await client.query(
           "UPDATE route_stops SET status='delivered', delivery_outcome=$3, delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND route_id=$2 AND NOT is_origin",
           [p[3], p[1], outcome],
@@ -1126,7 +1154,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             driverName: routeData.driver_name || "Motorista",
           }).catch((error) => console.error("[delivery] Erro no push da entrega", error));
         }
-        return json({ ok: true, operationId: data.operationId, photoKey });
+        return json({
+          ok: true,
+          operationId: processedPhotos[0]?.operationId || data.operationId,
+          photoKey: processedPhotos[0]?.photoKey || validPhotos[0]?.photoKey,
+          photos: processedPhotos,
+          count: processedPhotos.length,
+        });
       } catch (e) {
         await client.query("ROLLBACK");
         throw e;
