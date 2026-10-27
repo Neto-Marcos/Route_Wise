@@ -13,7 +13,13 @@ async function backend(): Promise<Client> {
   if (process.env.DATABASE_URL) {
     let pool = shared.routewisePool;
     if (!pool) {
-      pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
+      pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
+        statement_timeout: 25000,
+      });
       pool.on("error", (err) => {
         console.error("Unexpected error on idle PostgreSQL client", err);
       });

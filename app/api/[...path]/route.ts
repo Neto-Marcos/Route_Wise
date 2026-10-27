@@ -25,6 +25,43 @@ import { normalizeDriverPhoto } from "@/lib/driver-photo";
 import { BRAZILIAN_HUBS } from "@/lib/geo-brazil";
 
 const geocodeMemoryCache = new Map<string, { items: any[]; ts: number }>();
+const MAX_GEOCODE_CACHE_ITEMS = 500;
+function setGeocodeCache(key: string, items: any[]) {
+  if (geocodeMemoryCache.size >= MAX_GEOCODE_CACHE_ITEMS && !geocodeMemoryCache.has(key)) {
+    const oldest = geocodeMemoryCache.keys().next().value;
+    if (oldest) geocodeMemoryCache.delete(oldest);
+  }
+  geocodeMemoryCache.set(key, { items, ts: Date.now() });
+}
+
+const loginAttemptTracker = new Map<string, { fails: number; lockUntil: number }>();
+function checkLoginAllowed(accountKey: string): boolean {
+  const now = Date.now();
+  const entry = loginAttemptTracker.get(accountKey);
+  if (!entry) return true;
+  if (now >= entry.lockUntil) {
+    loginAttemptTracker.delete(accountKey);
+    return true;
+  }
+  return entry.fails < 6;
+}
+function recordLoginFailure(accountKey: string) {
+  const now = Date.now();
+  if (loginAttemptTracker.size > 2000) {
+    const oldest = loginAttemptTracker.keys().next().value;
+    if (oldest) loginAttemptTracker.delete(oldest);
+  }
+  const entry = loginAttemptTracker.get(accountKey);
+  if (!entry || now >= entry.lockUntil) {
+    loginAttemptTracker.set(accountKey, { fails: 1, lockUntil: now + 300_000 });
+  } else {
+    entry.fails += 1;
+    entry.lockUntil = now + 300_000;
+  }
+}
+function clearLoginFailures(accountKey: string) {
+  loginAttemptTracker.delete(accountKey);
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -191,7 +228,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
       // Se já encontrou resultados locais, retorne imediatamente em < 5ms!
       if (results.length >= 2) {
-        geocodeMemoryCache.set(termNorm, { items: results, ts: Date.now() });
+        setGeocodeCache(termNorm, results);
         return json(results);
       }
 
@@ -247,7 +284,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
       // Salva no cache de memória
       if (results.length > 0) {
-        geocodeMemoryCache.set(termNorm, { items: results, ts: Date.now() });
+        setGeocodeCache(termNorm, results);
       }
 
       return json(results);
@@ -641,6 +678,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const companyCode = String(data.companyCode || "").trim().toUpperCase();
       const email = String(data.email || "").trim().toLowerCase();
       const expectedRole = data.expectedRole ? String(data.expectedRole).trim() : null;
+      const lockKey = `disp:${companyCode}:${email}`;
+      if (!checkLoginAllowed(lockKey)) {
+        return json({ error: "Muitas tentativas incorretas. Aguarde 5 minutos antes de tentar novamente." }, 429);
+      }
 
       // Autenticação pelo código da empresa e e-mail/usuário
       const { rows } = await query(
@@ -648,8 +689,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         [companyCode, email],
       );
       if (!rows[0] || !(await compare(String(data.password || ""), rows[0].password_hash))) {
+        recordLoginFailure(lockKey);
         return json({ error: "Empresa, usuário/e-mail ou senha inválidos" }, 401);
       }
+      clearLoginFailures(lockKey);
       const userRole = (rows[0].role || "admin") as UserRole;
 
       // Validação amigável se tentou logar por um portal diferente do seu perfil cadastrado
@@ -671,6 +714,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (p.join("/") === "session/driver") {
       const companyCode = String(data.companyCode || "").trim().toUpperCase();
       const driverId = String(data.driverId || "").trim();
+      const lockKey = `drv:${companyCode}:${driverId}`;
+      if (!checkLoginAllowed(lockKey)) {
+        return json({ error: "Muitas tentativas de PIN incorretas. Aguarde 5 minutos antes de tentar novamente." }, 429);
+      }
       const { rows } = await query(
         companyCode
           ? "SELECT d.id,d.pin_hash,d.company_id FROM drivers d JOIN companies c ON c.id=d.company_id WHERE (d.id::text=$1 OR d.public_id::text=$1) AND c.code=$2 AND d.active=true AND c.active=true"
@@ -678,8 +725,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         companyCode ? [driverId, companyCode] : [driverId],
       );
       if (!rows[0]) return json({ error: "Motorista inválido" }, 400);
-      if (!(await compare(String(data.password || ""), rows[0].pin_hash)))
+      if (!(await compare(String(data.password || ""), rows[0].pin_hash))) {
+        recordLoginFailure(lockKey);
         return json({ error: "Senha incorreta" }, 401);
+      }
+      clearLoginFailures(lockKey);
       const res = json({ ok: true, userRole: "driver" });
       res.cookies.set(
         sessionCookie(

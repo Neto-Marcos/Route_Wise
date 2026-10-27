@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
         "Origin": "https://ssw.inf.br",
       },
       body: formData.toString(),
+      signal: AbortSignal.timeout(10000),
     });
 
     const html = await sswResponse.text();
